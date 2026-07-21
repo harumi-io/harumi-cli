@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-DEFAULT_API_URL = "http://localhost:8000/api"
+DEFAULT_API_URL = "https://api.harumi.io/api"
 
 HARUMI_HOME = Path(os.environ.get("HARUMI_HOME", Path.home() / ".harumi"))
 CREDENTIALS_PATH = HARUMI_HOME / "credentials.json"

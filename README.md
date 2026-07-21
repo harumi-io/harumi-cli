@@ -44,8 +44,10 @@ Precedence: CLI flags > environment variables > `~/.harumi/config.json` > defaul
 
 | Env var | Purpose | Default |
 |---|---|---|
-| `HARUMI_API_URL` | Base URL of `harumi-api` | `http://localhost:8000/api` |
+| `HARUMI_API_URL` | Base URL of `harumi-api` | `https://api.harumi.io/api` |
 | `HARUMI_ORG` | Organization ID sent as `X-Organization` | (from login) |
+
+For local development against a `harumi-api` you're running yourself, override with `--api-url http://localhost:8000/api` (or `export HARUMI_API_URL=http://localhost:8000/api`).
 
 Credentials (JWT + refresh token) are stored in `~/.harumi/credentials.json` (mode `0600`) after `harumi login`.
 

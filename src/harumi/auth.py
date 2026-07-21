@@ -1,9 +1,16 @@
 """Supabase OTP login flow against harumi-api's /users endpoints.
 
 Mirrors the flow harumi-api itself exposes (src/api/users/router.py):
+  POST /users/sign_up      {email}          -> creates the account, then sends a code
   POST /users/otp          {email}          -> sends a one-time code by email
+                                                (existing accounts only)
   POST /users/otp/verify   {email, token}   -> LoggedUser (access + refresh token)
   POST /users/refresh      {refresh_token}  -> LoggedUser (new tokens)
+
+`/users/otp` calls Supabase's sign_in_with_otp with `should_create_user:
+False`, so it 422s with "Signups not allowed for otp" for an email with no
+existing Supabase account — use `request_otp(..., sign_up=True)` (`/users/sign_up`)
+to create the account first.
 """
 
 from __future__ import annotations
@@ -22,10 +29,20 @@ from harumi.models import LoggedUser
 _EXPIRY_SKEW_SECONDS = 60
 
 
-def request_otp(config: Config, email: str, transport: Optional[httpx.BaseTransport] = None) -> None:
-    """Ask harumi-api to email a one-time login code to `email`."""
+def request_otp(
+    config: Config,
+    email: str,
+    sign_up: bool = False,
+    transport: Optional[httpx.BaseTransport] = None,
+) -> None:
+    """Ask harumi-api to email a one-time login code to `email`.
+
+    If `sign_up` is True, hits `/users/sign_up` instead, which creates the
+    Supabase account first (needed the first time a new email logs in).
+    """
+    path = "/users/sign_up" if sign_up else "/users/otp"
     with httpx.Client(transport=transport, timeout=30.0) as client:
-        response = client.post(f"{config.api_url}/users/otp", json={"email": email})
+        response = client.post(f"{config.api_url}{path}", json={"email": email})
     _raise_for_status(response)
 
 

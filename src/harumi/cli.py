@@ -19,7 +19,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from harumi import auth
+from harumi import __version__, auth
 from harumi.client import Client
 from harumi.config import Config
 from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
@@ -32,6 +32,25 @@ app = typer.Typer(
 )
 console = Console()
 err_console = Console(stderr=True)
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"harumi {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: Optional[bool] = typer.Option(
+        None,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the harumi CLI version and exit.",
+    ),
+) -> None:
+    pass
 
 
 def _get_client(api_url: Optional[str] = None, org: Optional[str] = None) -> Client:
@@ -64,13 +83,29 @@ def _handle_errors(fn):
 @_handle_errors
 def login(
     email: Optional[str] = typer.Option(None, help="Account email. Prompted if omitted."),
+    signup: bool = typer.Option(
+        False, "--signup", help="Create a new account for this email before sending the code."
+    ),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override harumi-api base URL."),
 ) -> None:
-    """Log in via one-time email code and store the session locally."""
+    """Log in via one-time email code and store the session locally.
+
+    First time logging in with a given email? Pass --signup to create the
+    account first — otherwise harumi-api rejects the OTP request with
+    'Signups not allowed for otp'.
+    """
     config = Config.load(api_url=api_url)
     email = email or typer.prompt("Email")
 
-    auth.request_otp(config, email)
+    try:
+        auth.request_otp(config, email, sign_up=signup)
+    except ApiError as exc:
+        if not signup and exc.status_code == 422:
+            _fail(
+                f"{exc} — this looks like a new account. Retry with "
+                f"[bold]harumi login --signup[/bold]."
+            )
+        raise
     console.print(f"A login code was sent to [bold]{email}[/bold].")
     code = typer.prompt("Enter the code")
 
@@ -182,8 +217,11 @@ def run(
     mode: str = typer.Option(
         "job", "--mode", "-m", help="'interactive' streams live output; 'job' queues an async run."
     ),
-    kernel: Optional[str] = typer.Option(
-        None, "--kernel", "-k", help="Kernel spec, e.g. or_python_small, gurobi_python_medium."
+    kernel: str = typer.Option(
+        "or_python_small",
+        "--kernel",
+        "-k",
+        help="Kernel spec, e.g. or_python_small, gurobi_python_medium.",
     ),
     project: Optional[str] = typer.Option(None, "--project", help="Project id (job mode; auto-detected if omitted)."),
     watch: bool = typer.Option(False, "--watch", "-w", help="(job mode) Block until the run finishes."),
