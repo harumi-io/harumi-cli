@@ -1,6 +1,6 @@
 ---
 name: harumi-cli
-description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, and to manage project datasources (database connections). Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi init`, `harumi run`, `harumi notebooks`, `harumi specs`, `harumi outputs`, `harumi datasources`, asks about Harumi kernel specs, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, or needs to fetch/download results from a Harumi run.
+description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to manage project datasources (database connections), and to manage project cron schedules. Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi init`, `harumi run`, `harumi notebooks`, `harumi specs`, `harumi outputs`, `harumi datasources`, `harumi schedules`, asks about Harumi kernel specs, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, or needs to fetch/download results from a Harumi run.
 ---
 
 # Harumi CLI
@@ -97,9 +97,25 @@ harumi datasources query <name> --sql "SELECT * FROM orders LIMIT 10"
 
 All `datasources` subcommands accept `--project` to override the `.harumi` binding.
 
-## Not yet supported: scheduled runs
+## Schedule runs
 
-Harumi supports cron-based scheduled runs, but they are still keyed by **notebook id** in harumi-api (`/notebooks/{notebook_id}/schedules`), which conflicts with this CLI's project + git-ref model. This CLI intentionally does not manage schedules yet — wait until the backend re-keys schedules to `project_id`/`branch` (part of the git-first pivot) before adding CLI support.
+`harumi schedules` manages project-scoped cron schedules. **This is an assumed contract** — under the git-first pivot, a project has exactly one notebook/repo, so the coworker's migration is expected to re-key schedules from `notebook_id` to `project_id` (`/projects/{project_id}/schedules`). Until that backend work lands, every `schedules` call fails with a clear "not yet available" error — the CLI is ready to go the moment the endpoint ships.
+
+```bash
+harumi schedules list                                       # table of schedules for the bound project
+harumi schedules get <SCHEDULE_ID>                           # detail view
+harumi schedules add --cron "0 9 * * *" [--start-at ISO] [--kernel ...] [--scenario-id ...] [--email-to ...]
+harumi schedules update <SCHEDULE_ID> --cron "0 */6 * * *"
+harumi schedules remove <SCHEDULE_ID>
+```
+
+Key semantics (carried over from the current notebook-scoped implementation):
+
+- **Cron is a raw 5-field expression, interpreted in UTC.** The CLI does not validate it client-side — the server validates with `croniter` and returns a clear 400 on a bad expression. Don't try to build a calendar/human-friendly UI; just pass the cron string.
+- **No pause/enable flag exists.** The only way to stop a schedule from firing is `harumi schedules remove`.
+- **No separate "run now" for a schedule.** Immediate execution is already covered by `harumi run` (git-ref based); schedules only control recurring runs.
+
+All `schedules` subcommands accept `--project` to override the `.harumi` binding.
 
 ## Config
 

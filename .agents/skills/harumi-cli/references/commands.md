@@ -12,6 +12,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [run](#run)
 - [outputs](#outputs)
 - [datasources](#datasources)
+- [schedules](#schedules)
 - [Config & credential files](#config--credential-files)
 - [Troubleshooting](#troubleshooting)
 - [Python library (`Client`) alternative](#python-library-client-alternative)
@@ -158,6 +159,38 @@ harumi datasources query NAME --sql "SELECT ..." [--limit N] [--csv PATH] [--pro
 - Response shape: `{ columns: string[], data: any[][], rowCount, wasLimited, maxRows, dataframe_name }`. The CLI renders `columns`/`data` as a Rich table, or writes them as CSV with `--csv <path>`.
 - Datasource not found → 404. Query execution error (bad SQL, connection issue) → 400.
 
+## `schedules`
+
+**Assumed contract** — not part of the real, live endpoints today. The real backend still keys schedules by `notebook_id` (`/notebooks/{id}/schedules`); this CLI targets the planned project-scoped re-key (`/projects/{project_id}/schedules`), consistent with the git-first pivot's one-project-one-notebook model. Every `schedules` call wraps a failed request in a "not yet available" `HarumiError` until the backend ships — update the path strings in `client.py` when it does.
+
+```
+harumi schedules list [--project ID] [--api-url URL] [--org ORG]
+harumi schedules get SCHEDULE_ID [--project ID]
+harumi schedules add --cron CRON [--start-at ISO] [--kernel K] [--scenario-id ID] [--scenario-name N]
+                     [--output-format F] [--email-to E] [--project ID]
+harumi schedules update SCHEDULE_ID [--cron CRON] [--start-at ISO] [--kernel K] [--scenario-id ID]
+                        [--scenario-name N] [--output-format F] [--email-to E] [--project ID]
+harumi schedules remove SCHEDULE_ID [--yes] [--project ID]
+```
+
+`--project` on every subcommand overrides the `.harumi` binding.
+
+**`--cron`** is a raw 5-field cron expression (e.g. `"0 9 * * *"`), **interpreted in UTC**. The CLI does not validate it — the server validates with `croniter` and returns **400 Invalid cron expression** on a bad value. There is no calendar/builder UX; pass the cron string directly.
+
+**`--start-at`** is an ISO-8601 datetime; defaults to "now" (UTC) if omitted on `add`.
+
+**`--email-to`** accepts `only-me` | `team` | `everyone` | a comma-separated list of email addresses (resolved server-side).
+
+**`add`** calls `POST /projects/{project_id}/schedules` with `{cron, start_at, scenario_id?, scenario_name?, output_format?, email_to?, kernel_spec?}` -> `Schedule`.
+
+**`update`** calls `PUT /projects/{project_id}/schedules/{schedule_id}` with only the fields you pass (partial update); errors locally with "No fields to update" if no flags are given.
+
+**`remove`** calls `DELETE /projects/{project_id}/schedules/{schedule_id}`, prompting for confirmation unless `--yes`. **This is the only way to stop a schedule** — there is no pause/enable flag in the contract (mirrors the current backend, which has none either).
+
+**No separate "run now."** Immediate execution is `harumi run` (git-ref based); schedules only manage recurring cron runs.
+
+`Schedule` response shape: `{id, project_id, cron, start_at, scenario_id?, scenario_name?, collection_id?, collection_name?, output_format?, email_to?, kernel_spec, created_by?, updated_by?, last_executed_at?, created_at?, updated_at?}`.
+
 ## Config & credential files
 
 Precedence (highest first): **CLI flags > env vars > `~/.harumi/config.json` > defaults**.
@@ -191,7 +224,9 @@ Precedence (highest first): **CLI flags > env vars > `~/.harumi/config.json` > d
 | `harumi-api returned HTTP 403: Only SELECT queries are allowed ...` | `datasources query` SQL contains a destructive keyword or doesn't start with SELECT/WITH | Rewrite the query as a read-only SELECT/WITH |
 | `harumi-api returned HTTP 404: ...` (on `datasources get/update/remove/query`) | Datasource name doesn't exist for this project | `harumi datasources list` to check the exact name |
 | `[yellow]Result was truncated at the server-side row cap` | Query returned more rows than `--limit` (or the 100000 hard max) | Narrow the query (add a `WHERE`/`LIMIT`) or raise `--limit` |
-| `No fields to update.` | `datasources update` called with no flags | Pass at least one field flag or `--set-credentials` |
+| `No fields to update.` | `datasources update` or `schedules update` called with no flags | Pass at least one field flag (or `--set-credentials` for datasources) |
+| `Could not list/create/update/delete schedule(s) ... not yet available` | Project-scoped `/projects/{id}/schedules` endpoint not deployed yet | Wait for the backend's `notebook_id` → `project_id` schedule migration |
+| `harumi-api returned HTTP 400: Invalid cron expression: ...` | `schedules add/update --cron` failed server-side `croniter` validation | Fix the cron string (5 fields: minute hour day month weekday) |
 
 ## Python library (`Client`) alternative
 
@@ -222,6 +257,12 @@ client.download_output(binding.project_id, output.id, "./out")
 # Datasources (real endpoints)
 result = client.execute_datasource_query(binding.project_id, "sales_db", "SELECT * FROM orders LIMIT 10")
 print(result.columns, result.row_count, result.was_limited)
+
+# Schedules (assumed endpoint — git-first pivot)
+schedule = client.create_schedule(
+    binding.project_id,
+    {"cron": "0 9 * * *", "start_at": "2026-01-22T09:00:00Z", "kernel_spec": "or_python_small"},
+)
 ```
 
 `Client(api_url=..., git_url=..., org_id=...)` accepts the same overrides as the CLI flags. Requires the user to have run `harumi login` at least once.

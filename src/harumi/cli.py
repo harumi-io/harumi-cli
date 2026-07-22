@@ -11,6 +11,7 @@
     harumi outputs --project <id> [--latest] [--download <output_id>]
     harumi config set-org <ORG_ID>
     harumi datasources list|get|add|update|remove|test|query [--project <id>]
+    harumi schedules list|get|add|update|remove [--project <id>]
 
 Git-ref execution model
 -----------------------
@@ -28,6 +29,14 @@ endpoints, live today). Credentials are only ever prompted interactively
 (hidden input) — never accepted as a flag — and are stored server-side in
 AWS SSM. `datasources query` runs a SELECT/WITH-only, row-capped proxy
 query so users can validate SQL before wiring it into solver code.
+
+Schedules
+---------
+`harumi schedules` manages project-scoped cron schedules (ASSUMED
+endpoints — the git-first pivot re-keys these from notebook_id to
+project_id; calls no-op with a clear error until the backend lands).
+Cron is a raw 5-field expression interpreted in UTC; there is no
+pause/enable flag — delete the schedule to stop it firing.
 """
 
 from __future__ import annotations
@@ -813,6 +822,181 @@ def datasources_query(
             f"[yellow]Result was truncated at the server-side row cap "
             f"({result.max_rows}). Add --limit or narrow your query.[/yellow]"
         )
+
+
+# ---------------------------------------------------------------------------
+# harumi schedules
+# ---------------------------------------------------------------------------
+
+schedules_app = typer.Typer(help="Manage project cron schedules (assumed endpoints — git-first pivot).")
+app.add_typer(schedules_app, name="schedules")
+
+
+@schedules_app.command("list")
+@_handle_errors
+def schedules_list(
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """List cron schedules for a project."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    schedules = client.list_schedules(project_id)
+    if not schedules:
+        console.print("No schedules found.")
+        return
+
+    table = Table("id", "cron", "start_at", "kernel_spec", "scenario_name", "last_executed_at")
+    for s in schedules:
+        table.add_row(
+            s.id,
+            s.cron,
+            str(s.start_at or ""),
+            s.kernel_spec,
+            s.scenario_name or "",
+            str(s.last_executed_at or ""),
+        )
+    console.print(table)
+
+
+@schedules_app.command("get")
+@_handle_errors
+def schedules_get(
+    schedule_id: str = typer.Argument(..., help="Schedule id."),
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Show details for one schedule."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    s = client.get_schedule(project_id, schedule_id)
+    table = Table("field", "value")
+    for field in (
+        "id",
+        "cron",
+        "start_at",
+        "kernel_spec",
+        "scenario_id",
+        "scenario_name",
+        "output_format",
+        "email_to",
+        "last_executed_at",
+    ):
+        table.add_row(field, str(getattr(s, field, "") or ""))
+    console.print(table)
+
+
+@schedules_app.command("add")
+@_handle_errors
+def schedules_add(
+    cron: str = typer.Option(..., "--cron", help='Raw 5-field cron expression, interpreted in UTC (e.g. "0 9 * * *").'),
+    start_at: Optional[str] = typer.Option(None, "--start-at", help="ISO-8601 datetime. Defaults to now (UTC)."),
+    kernel: Optional[str] = typer.Option(None, "--kernel", help="Kernel spec (default: or_python_small)."),
+    scenario_id: Optional[str] = typer.Option(None, "--scenario-id"),
+    scenario_name: Optional[str] = typer.Option(None, "--scenario-name"),
+    output_format: Optional[str] = typer.Option(None, "--output-format"),
+    email_to: Optional[str] = typer.Option(None, "--email-to", help="only-me | team | everyone | comma-separated emails."),
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Create a new cron schedule for a project.
+
+    Cron is validated server-side (croniter) — an invalid expression returns
+    a clear 400 error. The cron is interpreted in UTC.
+    """
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    from datetime import datetime, timezone
+
+    body: dict = {
+        "cron": cron,
+        "start_at": start_at or datetime.now(timezone.utc).isoformat(),
+    }
+    if kernel:
+        body["kernel_spec"] = kernel
+    if scenario_id:
+        body["scenario_id"] = scenario_id
+    if scenario_name:
+        body["scenario_name"] = scenario_name
+    if output_format:
+        body["output_format"] = output_format
+    if email_to:
+        body["email_to"] = email_to
+
+    schedule = client.create_schedule(project_id, body)
+    console.print(
+        f"[bold green]Created[/bold green] schedule [bold]{schedule.id}[/bold] "
+        f"(cron=[bold]{schedule.cron}[/bold], UTC)."
+    )
+
+
+@schedules_app.command("update")
+@_handle_errors
+def schedules_update(
+    schedule_id: str = typer.Argument(..., help="Schedule id."),
+    cron: Optional[str] = typer.Option(None, "--cron"),
+    start_at: Optional[str] = typer.Option(None, "--start-at", help="ISO-8601 datetime."),
+    kernel: Optional[str] = typer.Option(None, "--kernel"),
+    scenario_id: Optional[str] = typer.Option(None, "--scenario-id"),
+    scenario_name: Optional[str] = typer.Option(None, "--scenario-name"),
+    output_format: Optional[str] = typer.Option(None, "--output-format"),
+    email_to: Optional[str] = typer.Option(None, "--email-to"),
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Partially update a cron schedule. Only provided fields are changed."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    body: dict = {}
+    if cron:
+        body["cron"] = cron
+    if start_at:
+        body["start_at"] = start_at
+    if kernel:
+        body["kernel_spec"] = kernel
+    if scenario_id:
+        body["scenario_id"] = scenario_id
+    if scenario_name:
+        body["scenario_name"] = scenario_name
+    if output_format:
+        body["output_format"] = output_format
+    if email_to:
+        body["email_to"] = email_to
+
+    if not body:
+        _fail("No fields to update. Pass at least one flag (e.g. --cron, --start-at).")
+
+    schedule = client.update_schedule(project_id, schedule_id, body)
+    console.print(f"[bold green]Updated[/bold green] schedule [bold]{schedule.id}[/bold].")
+
+
+@schedules_app.command("remove")
+@_handle_errors
+def schedules_remove(
+    schedule_id: str = typer.Argument(..., help="Schedule id."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Delete a cron schedule. This is the only way to stop it firing — there is no pause/enable flag."""
+    project_id = _resolve_project(project)
+
+    if not yes and not typer.confirm(f"Delete schedule '{schedule_id}'? This cannot be undone."):
+        console.print("Aborted.")
+        return
+
+    client = _get_client(api_url=api_url, org=org)
+    schedule = client.delete_schedule(project_id, schedule_id)
+    console.print(f"[bold red]Deleted[/bold red] schedule [bold]{schedule.id}[/bold].")
 
 
 def main() -> None:

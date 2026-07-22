@@ -18,6 +18,7 @@ from harumi.models import (
     LoggedUser,
     ProjectRepo,
     ProjectRunResponse,
+    Schedule,
 )
 
 __version__ = "0.1.0"
@@ -30,5 +31,6 @@ __all__ = [
     "LoggedUser",
     "ProjectRepo",
     "ProjectRunResponse",
+    "Schedule",
     "__version__",
 ]

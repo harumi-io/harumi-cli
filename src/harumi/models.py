@@ -223,3 +223,39 @@ class QueryResult(BaseModel):
     was_limited: bool = Field(False, alias="wasLimited")
     max_rows: Optional[int] = Field(None, alias="maxRows")
     dataframe_name: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Schedule model <-> assumed project-scoped re-key of
+# harumi-api/src/api/notebooks/schemas.py:NotebookSchedule
+#
+# Assumed contract — the real endpoints today are notebook_id-scoped
+# (/notebooks/{id}/schedules). This mirrors that shape re-keyed to
+# project_id per the git-first pivot (one project <-> one notebook/repo).
+# Update field names when the coworker's harumi-api branch lands.
+# ---------------------------------------------------------------------------
+
+class Schedule(BaseModel):
+    """A project-scoped cron schedule.
+
+    Assumed contract — endpoint does not exist yet in harumi-api.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    project_id: str
+    cron: str
+    start_at: Optional[datetime] = None
+    scenario_id: Optional[str] = None
+    scenario_name: Optional[str] = None
+    collection_id: Optional[str] = None
+    collection_name: Optional[str] = None
+    output_format: Optional[str] = None
+    email_to: Optional[str] = None
+    kernel_spec: str = "or_python_small"
+    created_by: Optional[str] = None
+    updated_by: Optional[str] = None
+    last_executed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None

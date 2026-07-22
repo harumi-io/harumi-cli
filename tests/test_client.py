@@ -403,3 +403,87 @@ def test_client_execute_datasource_query_rejects_non_select():
     with pytest.raises(ApiError, match="Only SELECT queries are allowed"):
         client.execute_datasource_query("proj-1", "sales_db", "DELETE FROM orders")
 
+
+def test_client_list_schedules_parses_schedule_array():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1/schedules"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "sched-1",
+                    "project_id": "proj-1",
+                    "cron": "0 9 * * *",
+                    "start_at": "2026-01-22T09:00:00Z",
+                    "kernel_spec": "or_python_small",
+                    "scenario_name": "Daily Run",
+                    "last_executed_at": None,
+                }
+            ],
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    schedules = client.list_schedules("proj-1")
+
+    assert len(schedules) == 1
+    assert schedules[0].id == "sched-1"
+    assert schedules[0].cron == "0 9 * * *"
+    assert schedules[0].kernel_spec == "or_python_small"
+
+
+def test_client_create_schedule_posts_body_and_returns_schedule():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1/schedules"
+        body = json.loads(request.content)
+        assert body["cron"] == "0 9 * * *"
+        assert body["start_at"] == "2026-01-22T09:00:00Z"
+        return httpx.Response(
+            201,
+            json={
+                "id": "sched-1",
+                "project_id": "proj-1",
+                "cron": "0 9 * * *",
+                "start_at": "2026-01-22T09:00:00Z",
+                "kernel_spec": "or_python_small",
+            },
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    schedule = client.create_schedule(
+        "proj-1", {"cron": "0 9 * * *", "start_at": "2026-01-22T09:00:00Z"}
+    )
+
+    assert schedule.id == "sched-1"
+    assert schedule.project_id == "proj-1"
+
+
+def test_client_list_schedules_wraps_missing_endpoint():
+    """When the backend doesn't have the endpoint yet, surface a clear message."""
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "Not Found"})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+
+    with pytest.raises(HarumiError, match="not yet available"):
+        client.list_schedules("proj-1")
+
+
+def test_client_create_schedule_wraps_missing_endpoint():
+    """When the backend doesn't have the endpoint yet, surface a clear message."""
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "Not Found"})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+
+    with pytest.raises(HarumiError, match="not yet available"):
+        client.create_schedule("proj-1", {"cron": "0 9 * * *", "start_at": "2026-01-22T09:00:00Z"})
+
+

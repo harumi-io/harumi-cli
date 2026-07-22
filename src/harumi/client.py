@@ -40,6 +40,7 @@ from harumi.models import (
     ProjectRepoBranch,
     ProjectRunResponse,
     QueryResult,
+    Schedule,
 )
 
 
@@ -282,6 +283,96 @@ class Client:
                 "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
             ) from exc
         return ProjectRunResponse.model_validate(response.json())
+
+    # -- Git-pivot: schedules ----------------------------------------------
+    # ASSUMED ENDPOINTS: /projects/{id}/schedules (project-scoped re-key of
+    # the current notebook_id-scoped /notebooks/{id}/schedules).
+    # Update paths/schemas when the coworker's harumi-api branch lands.
+
+    def list_schedules(self, project_id: str) -> list[Schedule]:
+        """List cron schedules for a project.
+
+        ASSUMED ENDPOINT — not yet in harumi-api.
+        """
+        try:
+            response = self.api.request("GET", f"/projects/{project_id}/schedules")
+        except ApiError as exc:
+            raise HarumiError(
+                f"Could not list schedules for project {project_id!r}. "
+                "The /projects/{id}/schedules endpoint is not yet available on this "
+                "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
+            ) from exc
+        return [Schedule.model_validate(s) for s in response.json()]
+
+    def get_schedule(self, project_id: str, schedule_id: str) -> Schedule:
+        """Fetch one schedule for a project.
+
+        ASSUMED ENDPOINT — not yet in harumi-api.
+        """
+        try:
+            response = self.api.request(
+                "GET", f"/projects/{project_id}/schedules/{schedule_id}"
+            )
+        except ApiError as exc:
+            raise HarumiError(
+                f"Could not fetch schedule {schedule_id!r} for project {project_id!r}. "
+                "The /projects/{id}/schedules endpoint is not yet available on this "
+                "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
+            ) from exc
+        return Schedule.model_validate(response.json())
+
+    def create_schedule(self, project_id: str, body: dict[str, Any]) -> Schedule:
+        """Create a cron schedule for a project.
+
+        ASSUMED ENDPOINT — not yet in harumi-api.
+        """
+        try:
+            response = self.api.request(
+                "POST", f"/projects/{project_id}/schedules", json=body
+            )
+        except ApiError as exc:
+            raise HarumiError(
+                f"Could not create a schedule for project {project_id!r}. "
+                "The /projects/{id}/schedules endpoint is not yet available on this "
+                "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
+            ) from exc
+        return Schedule.model_validate(response.json())
+
+    def update_schedule(
+        self, project_id: str, schedule_id: str, body: dict[str, Any]
+    ) -> Schedule:
+        """Partially update a cron schedule for a project.
+
+        ASSUMED ENDPOINT — not yet in harumi-api.
+        """
+        try:
+            response = self.api.request(
+                "PUT", f"/projects/{project_id}/schedules/{schedule_id}", json=body
+            )
+        except ApiError as exc:
+            raise HarumiError(
+                f"Could not update schedule {schedule_id!r} for project {project_id!r}. "
+                "The /projects/{id}/schedules endpoint is not yet available on this "
+                "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
+            ) from exc
+        return Schedule.model_validate(response.json())
+
+    def delete_schedule(self, project_id: str, schedule_id: str) -> Schedule:
+        """Delete a cron schedule for a project (the only way to stop it firing).
+
+        ASSUMED ENDPOINT — not yet in harumi-api.
+        """
+        try:
+            response = self.api.request(
+                "DELETE", f"/projects/{project_id}/schedules/{schedule_id}"
+            )
+        except ApiError as exc:
+            raise HarumiError(
+                f"Could not delete schedule {schedule_id!r} for project {project_id!r}. "
+                "The /projects/{id}/schedules endpoint is not yet available on this "
+                "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
+            ) from exc
+        return Schedule.model_validate(response.json())
 
     # -- Datasources --------------------------------------------------------
     # Real endpoints — exist today in harumi-api (src/api/datasources/router.py).
