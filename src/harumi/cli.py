@@ -1,16 +1,28 @@
 """`harumi` command-line interface.
 
-    harumi login
+    harumi login [--signup]
     harumi logout
+    harumi whoami
     harumi specs
     harumi notebooks [--project <id>]
-    harumi run <file-or-dir> --notebook <id> [--mode interactive|job] ...
-    harumi outputs --notebook <id> [--latest] [--download <output_id>]
+    harumi init --project <id> [--api-url <url>] [--git-url <url>]
+    harumi run [--branch <b>] [--commit <sha>] [--command <c>] [--kernel <k>]
+               [--watch] [--output-dir <dir>]
+    harumi outputs --project <id> [--latest] [--download <output_id>]
+    harumi config set-org <ORG_ID>
+
+Git-ref execution model
+-----------------------
+Every run goes through the project's Harumi Git (Gitea) repo.  If the
+working tree is dirty or has unpushed commits, the CLI auto-pushes a
+throwaway scratch branch so the run still executes without forcing the
+user to commit manually.
+
+Requires `harumi init` to have been run in (or above) the current directory.
 """
 
 from __future__ import annotations
 
-import base64
 import functools
 from pathlib import Path
 from typing import Optional
@@ -21,13 +33,28 @@ from rich.table import Table
 
 from harumi import __version__, auth
 from harumi.client import Client
-from harumi.config import Config
+from harumi.config import (
+    Config,
+    ProjectBinding,
+    load_git_token,
+    save_git_token,
+)
 from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
-from harumi.sse import SSEEvent
+from harumi.git import (
+    GitError,
+    NotAHarumiRepoError,
+    current_branch,
+    delete_remote_scratch,
+    ensure_remote,
+    has_unpushed_commits,
+    is_dirty,
+    push_scratch,
+    repo_root,
+)
 
 app = typer.Typer(
     name="harumi",
-    help="Run local code on Harumi's infrastructure and fetch the results.",
+    help="Run local optimization code on Harumi's infrastructure via Harumi Git.",
     no_args_is_help=True,
 )
 console = Console()
@@ -53,8 +80,12 @@ def _main(
     pass
 
 
-def _get_client(api_url: Optional[str] = None, org: Optional[str] = None) -> Client:
-    return Client(api_url=api_url, org_id=org)
+def _get_client(
+    api_url: Optional[str] = None,
+    git_url: Optional[str] = None,
+    org: Optional[str] = None,
+) -> Client:
+    return Client(api_url=api_url, git_url=git_url, org_id=org)
 
 
 def _fail(message: str) -> None:
@@ -67,6 +98,10 @@ def _handle_errors(fn):
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
+        except NotAHarumiRepoError as exc:
+            _fail(str(exc))
+        except GitError as exc:
+            _fail(str(exc))
         except NotAuthenticatedError as exc:
             _fail(str(exc))
         except ApiError as exc:
@@ -79,6 +114,10 @@ def _handle_errors(fn):
     return wrapper
 
 
+# ---------------------------------------------------------------------------
+# Auth commands
+# ---------------------------------------------------------------------------
+
 @app.command()
 @_handle_errors
 def login(
@@ -87,6 +126,7 @@ def login(
         False, "--signup", help="Create a new account for this email before sending the code."
     ),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override harumi-api base URL."),
+    git_url: Optional[str] = typer.Option(None, "--git-url", help="Override Harumi Git base URL."),
 ) -> None:
     """Log in via one-time email code and store the session locally.
 
@@ -94,7 +134,7 @@ def login(
     account first — otherwise harumi-api rejects the OTP request with
     'Signups not allowed for otp'.
     """
-    config = Config.load(api_url=api_url)
+    config = Config.load(api_url=api_url, git_url=git_url)
     email = email or typer.prompt("Email")
 
     try:
@@ -113,12 +153,10 @@ def login(
     console.print(f"[bold green]Logged in[/bold green] as {user.email or email}.")
 
     _resolve_and_store_org(config)
+    _provision_git_token(config)
 
 
 def _resolve_and_store_org(config: Config) -> None:
-    """Best-effort: if the user belongs to exactly one org, store it so
-    `X-Organization` doesn't need to be passed on every command.
-    """
     try:
         client = _get_client(api_url=config.api_url)
         response = client.api.request("GET", "/users/organizations")
@@ -143,12 +181,45 @@ def _resolve_and_store_org(config: Config) -> None:
         console.print(table)
 
 
+def _provision_git_token(config: Config) -> None:
+    """Best-effort: request a per-user Gitea token from harumi-api."""
+    try:
+        client = _get_client(api_url=config.api_url)
+        git_user = client.get_git_token()
+        save_git_token(git_user.token)
+        console.print(
+            f"[dim]Gitea user [bold]{git_user.username}[/bold] provisioned.[/dim]"
+        )
+    except HarumiError:
+        console.print(
+            "[dim]Gitea token provisioning skipped "
+            "(backend not ready — run [bold]harumi login[/bold] again after the git pivot lands).[/dim]"
+        )
+
+
 @app.command()
 def logout() -> None:
     """Clear the stored local session."""
     auth.logout()
     console.print("Logged out.")
 
+
+@app.command()
+@_handle_errors
+def whoami(
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Show the currently logged-in user."""
+    client = _get_client(api_url=api_url, org=org)
+    response = client.api.request("GET", "/users/me")
+    data = response.json()
+    console.print(f"[bold]{data.get('email', '?')}[/bold]  (id: {data.get('id', '?')})")
+
+
+# ---------------------------------------------------------------------------
+# Config sub-commands
+# ---------------------------------------------------------------------------
 
 config_app = typer.Typer(help="Manage local CLI configuration.")
 app.add_typer(config_app, name="config")
@@ -161,6 +232,10 @@ def config_set_org(org_id: str) -> None:
     config.save_org_id(org_id)
     console.print(f"Organization set to [bold]{org_id}[/bold].")
 
+
+# ---------------------------------------------------------------------------
+# Discovery commands
+# ---------------------------------------------------------------------------
 
 @app.command()
 @_handle_errors
@@ -189,7 +264,7 @@ def notebooks(
     api_url: Optional[str] = typer.Option(None, "--api-url"),
     org: Optional[str] = typer.Option(None, "--org"),
 ) -> None:
-    """List projects and their notebooks, to find a --notebook id to run against."""
+    """List projects and their notebooks."""
     client = _get_client(api_url=api_url, org=org)
 
     projects = [p for p in client.list_projects() if not project or p.id == project]
@@ -209,136 +284,255 @@ def notebooks(
         console.print(table)
 
 
+# ---------------------------------------------------------------------------
+# harumi init
+# ---------------------------------------------------------------------------
+
+@app.command()
+@_handle_errors
+def init(
+    project: str = typer.Option(..., "--project", "-p", help="Harumi project id to bind this directory to."),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    git_url: Optional[str] = typer.Option(None, "--git-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Bind the current directory to a Harumi project and configure the git remote.
+
+    Fetches the project's Gitea repo from harumi-api, writes .harumi/config.json,
+    and configures the `harumi` git remote for HTTPS+token pushes.
+
+    Run this once per project directory before using `harumi run`.
+    """
+    client = _get_client(api_url=api_url, git_url=git_url, org=org)
+
+    console.print(f"Fetching repo for project [bold]{project}[/bold]...")
+    repo = client.get_project_repo(project)
+
+    from harumi.config import ProjectBinding, RepoBinding
+
+    binding = ProjectBinding.write(
+        Path.cwd(),
+        project_id=project,
+        repo=RepoBinding(
+            owner=repo.owner,
+            name=repo.name,
+            clone_url=repo.clone_url,
+            default_branch=repo.default_branch,
+        ),
+    )
+    console.print(
+        f"Wrote [bold]{binding.config_path}[/bold] "
+        f"(project={project}, repo={repo.owner}/{repo.name})."
+    )
+
+    # Configure the harumi git remote if we're inside a git repo.
+    if repo_root() is None:
+        console.print(
+            "[yellow]Not inside a git repo — skipping remote setup.[/yellow]\n"
+            "Run [bold]git init[/bold] then [bold]harumi init --project ...[/bold] again."
+        )
+        return
+
+    git_token = load_git_token()
+    if not git_token:
+        console.print(
+            "[yellow]No Gitea token found — skipping remote setup.[/yellow]\n"
+            "Log in again with [bold]harumi login[/bold] once the git backend is live."
+        )
+        return
+
+    creds = auth.current_credentials()
+    username = (creds or {}).get("email", "harumi-user")
+
+    ensure_remote(
+        clone_url=repo.clone_url,
+        username=username,
+        token=git_token,
+    )
+    console.print(
+        f"[bold green]Remote `harumi` configured[/bold green] → {repo.clone_url}\n"
+        f"Push your code:  git push harumi {repo.default_branch}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# harumi run
+# ---------------------------------------------------------------------------
+
 @app.command()
 @_handle_errors
 def run(
-    path: Path = typer.Argument(..., help="Local file or directory to run."),
-    notebook: str = typer.Option(..., "--notebook", "-n", help="Target notebook id."),
-    mode: str = typer.Option(
-        "job", "--mode", "-m", help="'interactive' streams live output; 'job' queues an async run."
-    ),
-    kernel: str = typer.Option(
-        "or_python_small",
-        "--kernel",
-        "-k",
-        help="Kernel spec, e.g. or_python_small, gurobi_python_medium.",
-    ),
-    project: Optional[str] = typer.Option(None, "--project", help="Project id (job mode; auto-detected if omitted)."),
-    watch: bool = typer.Option(False, "--watch", "-w", help="(job mode) Block until the run finishes."),
+    branch: Optional[str] = typer.Option(None, "--branch", "-b", help="Run a specific branch."),
+    commit: Optional[str] = typer.Option(None, "--commit", help="Run a specific commit SHA."),
+    command: Optional[str] = typer.Option(None, "--command", "-c", help="Override the harumi.toml command."),
+    kernel: Optional[str] = typer.Option(None, "--kernel", "-k", help="Override the kernel spec."),
+    watch: bool = typer.Option(False, "--watch", "-w", help="Block until the run finishes."),
     output_dir: Optional[Path] = typer.Option(
-        None, "--output-dir", "-o", help="(job mode + --watch) Download output artifacts here."
+        None, "--output-dir", "-o", help="Download output artifacts here (requires --watch)."
     ),
-    scenario_id: Optional[str] = typer.Option(None, "--scenario-id"),
-    scenario_name: Optional[str] = typer.Option(None, "--scenario-name"),
-    email_to: Optional[str] = typer.Option(None, "--email-to", help="(job mode) Email results when finished."),
     api_url: Optional[str] = typer.Option(None, "--api-url"),
+    git_url: Optional[str] = typer.Option(None, "--git-url"),
     org: Optional[str] = typer.Option(None, "--org"),
 ) -> None:
-    """Run local code on Harumi's infrastructure.
+    """Run the project via its Harumi Git repo.
 
-    interactive: sends the file's code to the notebook's live sandbox kernel
-    and streams stdout/results back in real time.
+    By default, automatically pushes the working tree to a scratch branch so
+    you can iterate without committing manually.  Pass --branch or --commit
+    to run a specific ref instead.
 
-    job: uploads the path to the notebook's project, then queues the
-    notebook's live version on the async job queue (for long/heavy runs).
+    Requires `harumi init` to have been run in this directory (or a parent).
     """
-    client = _get_client(api_url=api_url, org=org)
-
-    if mode == "interactive":
-        if path.is_dir():
-            _fail("interactive mode requires a single Python file, not a directory.")
-        code = path.read_text()
-        console.print(f"[bold]Running[/bold] {path} on notebook {notebook} (interactive)...")
-        result = client.run_interactive(
-            code, notebook_id=notebook, kernel_spec=kernel, on_event=_print_sse_event
+    binding = ProjectBinding.load()
+    if binding is None:
+        _fail(
+            "No Harumi project found. Run [bold]harumi init --project <PROJECT_ID>[/bold] first."
         )
-        if output_dir:
-            _save_rich_results(result, Path(output_dir))
-        if not result.ok:
-            _print_error(result.error)
-            raise typer.Exit(code=1)
-        return
 
-    if mode != "job":
-        _fail(f"Unknown --mode {mode!r}. Use 'interactive' or 'job'.")
+    client = _get_client(api_url=api_url, git_url=git_url, org=org)
+    project_id = binding.project_id  # type: ignore[union-attr]
+    repo = binding.repo  # type: ignore[union-attr]
 
-    console.print(f"[bold]Uploading[/bold] {path} and queuing a run on notebook {notebook}...")
-    response = client.run_job(
-        path,
-        notebook_id=notebook,
-        project_id=project,
-        kernel_spec=kernel,
-        scenario_id=scenario_id,
-        scenario_name=scenario_name,
-        email_to=email_to,
-        watch=False,
-    )
-    console.print(
-        f"Queued (task_id={response.task_id}, output_id={response.output_id}). "
-        f"{response.message}"
-    )
+    scratch_branch: Optional[str] = None
 
-    if not watch:
+    if branch or commit:
+        # Explicit ref — run it directly, no scratch needed.
+        run_branch = branch
+        run_commit = commit
         console.print(
-            f"Run [bold]harumi outputs --notebook {notebook} --latest[/bold] to check on it later."
+            f"[bold]Running[/bold] project [bold]{project_id}[/bold] "
+            + (f"@ branch [bold]{run_branch}[/bold]" if run_branch else "")
+            + (f" commit [bold]{run_commit[:8]}[/bold]" if run_commit else "")
         )
-        return
-
-    if not response.output_id:
-        console.print("[yellow]No output_id returned; cannot watch this run.[/yellow]")
-        return
-
-    from harumi.execution import wait_for_output
-
-    console.print("Waiting for the run to finish...")
-    output = wait_for_output(
-        client.api,
-        notebook,
-        response.output_id,
-        on_poll=lambda o: console.print(f"  status: {o.status}"),
-    )
-
-    if output.succeeded:
-        console.print(f"[bold green]Run finished[/bold green]: {output.status}")
-        if output_dir:
-            from harumi.execution import download_output
-
-            zip_path = download_output(client.api, notebook, output.id, Path(output_dir))
-            console.print(f"Downloaded output to {zip_path}")
     else:
-        console.print(f"[bold red]Run ended with status[/bold red]: {output.status}")
-        if output.log_url:
-            console.print(f"Logs: {output.log_url}")
-        raise typer.Exit(code=1)
+        # No explicit ref — inspect the working tree.
+        dirty = is_dirty()
+        unpushed = has_unpushed_commits()
 
+        if not dirty and not unpushed:
+            # Clean and pushed: run the current branch directly.
+            run_branch = current_branch() or repo.default_branch
+            run_commit = None
+            console.print(
+                f"[bold]Running[/bold] project [bold]{project_id}[/bold] "
+                f"@ branch [bold]{run_branch}[/bold]"
+            )
+        else:
+            # Dirty or unpushed: push a scratch branch.
+            git_token = load_git_token()
+            if not git_token:
+                _fail(
+                    "No Gitea token found. Run [bold]harumi login[/bold] to provision one."
+                )
+
+            creds = auth.current_credentials()
+            username = (creds or {}).get("email", "harumi-user")
+
+            status_parts = []
+            if dirty:
+                status_parts.append("uncommitted changes")
+            if unpushed:
+                status_parts.append("unpushed commits")
+            console.print(
+                f"[dim]Working tree has {' and '.join(status_parts)}. "
+                f"Pushing scratch branch...[/dim]"
+            )
+
+            scratch_branch, _ = push_scratch(username=username, token=git_token)  # type: ignore[arg-type]
+            run_branch = scratch_branch
+            run_commit = None
+            console.print(f"[dim]Scratch branch: [bold]{scratch_branch}[/bold][/dim]")
+
+    try:
+        response = client.execute_project(
+            project_id,
+            branch=run_branch,
+            commit=run_commit,
+            command=command,
+            kernel_spec=kernel,
+        )
+        console.print(
+            f"Queued (task_id={response.task_id}, output_id={response.output_id}). "
+            f"{response.message}"
+        )
+
+        if not watch:
+            if response.output_id:
+                console.print(
+                    f"Run [bold]harumi outputs --project {project_id} --latest[/bold] "
+                    "to check on it later."
+                )
+            return
+
+        if not response.output_id:
+            console.print("[yellow]No output_id returned; cannot watch this run.[/yellow]")
+            return
+
+        from harumi.execution import wait_for_output, download_output
+
+        console.print("Waiting for the run to finish...")
+        output = wait_for_output(
+            client.api,
+            project_id,
+            response.output_id,
+            on_poll=lambda o: console.print(f"  status: {o.status}"),
+        )
+
+        if output.succeeded:
+            console.print(f"[bold green]Run finished[/bold green]: {output.status}")
+            if output_dir:
+                zip_path = download_output(client.api, project_id, output.id, output_dir)
+                console.print(f"Downloaded output to {zip_path}")
+        else:
+            console.print(f"[bold red]Run ended with status[/bold red]: {output.status}")
+            if output.log_url:
+                console.print(f"Logs: {output.log_url}")
+            raise typer.Exit(code=1)
+
+    finally:
+        if scratch_branch:
+            delete_remote_scratch(scratch_branch)
+            console.print(f"[dim]Scratch branch {scratch_branch} cleaned up.[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# harumi outputs
+# ---------------------------------------------------------------------------
 
 @app.command()
 @_handle_errors
 def outputs(
-    notebook: str = typer.Option(..., "--notebook", "-n"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id (uses .harumi binding if omitted)."),
     latest: bool = typer.Option(False, "--latest", help="Show only the most recent output."),
     download: Optional[str] = typer.Option(None, "--download", help="Download this output id's files."),
     output_dir: Path = typer.Option(Path("."), "--output-dir", "-o"),
     api_url: Optional[str] = typer.Option(None, "--api-url"),
     org: Optional[str] = typer.Option(None, "--org"),
 ) -> None:
-    """List or download outputs for a notebook."""
+    """List or download outputs for a project."""
+    resolved_project = project
+    if not resolved_project:
+        binding = ProjectBinding.load()
+        if binding:
+            resolved_project = binding.project_id
+    if not resolved_project:
+        _fail("Provide --project or run from a directory with a .harumi binding.")
+
     client = _get_client(api_url=api_url, org=org)
 
     if download:
         from harumi.execution import download_output
 
-        zip_path = download_output(client.api, notebook, download, output_dir)
+        zip_path = download_output(client.api, resolved_project, download, output_dir)
         console.print(f"Downloaded to {zip_path}")
         return
 
     from harumi.execution import get_latest_output
 
     if latest:
-        output = get_latest_output(client.api, notebook)
+        output = get_latest_output(client.api, resolved_project)
         results = [output] if output else []
     else:
-        results = client.list_outputs(notebook)
+        results = client.list_outputs(resolved_project)
 
     if not results:
         console.print("No outputs found.")
@@ -354,56 +548,6 @@ def outputs(
             o.scenario_name or "",
         )
     console.print(table)
-
-
-def _print_sse_event(event: SSEEvent) -> None:
-    if event.type == "stream":
-        text = event.data.get("text", "")
-        if event.data.get("name") == "stderr":
-            err_console.print(text, end="")
-        else:
-            console.print(text, end="")
-    elif event.type == "error":
-        _print_error(
-            {
-                "ename": event.data.get("ename", ""),
-                "evalue": event.data.get("evalue", ""),
-                "traceback": event.data.get("traceback", []),
-            }
-        )
-    elif event.type == "result":
-        data = event.data.get("data", {})
-        text_plain = data.get("text/plain")
-        if text_plain:
-            console.print(text_plain)
-        rich_keys = [k for k in data if k != "text/plain"]
-        if rich_keys:
-            console.print(f"[dim](result includes: {', '.join(rich_keys)} — use --output-dir to save)[/dim]")
-    elif event.type == "execution_complete":
-        ms = event.data.get("execution_time_ms")
-        if ms is not None:
-            console.print(f"\n[dim]Finished in {ms} ms[/dim]")
-
-
-def _print_error(error: Optional[dict]) -> None:
-    if not error:
-        return
-    err_console.print(f"[bold red]{error.get('ename', 'Error')}[/bold red]: {error.get('evalue', '')}")
-    for line in error.get("traceback", []):
-        err_console.print(line)
-
-
-def _save_rich_results(result, output_dir: Path) -> None:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for idx, data in enumerate(result.results):
-        for mime, payload in data.items():
-            if mime == "text/plain":
-                continue
-            if mime == "image/png":
-                (output_dir / f"result_{idx}.png").write_bytes(base64.b64decode(payload))
-            elif mime in ("text/html", "image/svg+xml"):
-                ext = "html" if mime == "text/html" else "svg"
-                (output_dir / f"result_{idx}.{ext}").write_text(payload)
 
 
 def main() -> None:

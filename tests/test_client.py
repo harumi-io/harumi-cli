@@ -12,7 +12,7 @@ import pytest
 
 from harumi.client import ApiClient, Client
 from harumi.config import Config
-from harumi.errors import ApiError, NotAuthenticatedError
+from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
 
 
 @pytest.fixture(autouse=True)
@@ -124,21 +124,6 @@ def test_request_without_refresh_token_raises_not_authenticated_on_401():
         api.request("GET", "/notebooks")
 
 
-def test_stream_yields_streaming_response():
-    _write_credentials()
-    config = _config()
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, stream=httpx.ByteStream(b"event: status\ndata: {}\n\n"))
-
-    api = ApiClient(config, transport=httpx.MockTransport(handler))
-
-    with api.stream("POST", "/sandbox/nb-1/execute", json={"code": "print(1)"}) as response:
-        body = b"".join(response.iter_bytes())
-
-    assert b"event: status" in body
-
-
 def test_client_list_projects_parses_projects_envelope():
     _write_credentials()
 
@@ -190,79 +175,75 @@ def test_client_get_specs_parses_kernel_specs():
     assert specs[0].size.cpu == 1
 
 
-def test_client_run_job_uploads_files_then_queues_execution(tmp_path):
+def test_client_execute_project_queues_run():
     _write_credentials()
 
-    local_file = tmp_path / "solver.py"
-    local_file.write_text("print('solving')\n")
-
-    calls = []
-
     def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request.url.path)
-        if request.url.path == "/api/projects/by-notebook/nb-1":
-            return httpx.Response(200, json=[{"id": "proj-1", "name": "P", "notebook_ids": ["nb-1"]}])
-        if request.url.path == "/api/projects/proj-1/files":
-            return httpx.Response(
-                201,
-                json={"name": "solver.py", "key": "proj-1/solver.py", "size": 18},
-            )
-        if request.url.path == "/api/notebooks/nb-1/execute":
-            return httpx.Response(
-                202,
-                json={
-                    "task_id": "task-1",
-                    "status": "queued",
-                    "message": "Notebook execution queued successfully",
-                    "output_id": "out-1",
-                    "execution_log_id": "log-1",
-                },
-            )
-        raise AssertionError(f"Unexpected request to {request.url.path}")
+        assert request.url.path == "/api/projects/proj-1/execute"
+        body = json.loads(request.content)
+        assert body["branch"] == "main"
+        return httpx.Response(
+            202,
+            json={
+                "task_id": "task-1",
+                "status": "queued",
+                "message": "Run queued successfully",
+                "output_id": "out-1",
+            },
+        )
 
     client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
-    response = client.run_job(local_file, notebook_id="nb-1")
+    response = client.execute_project("proj-1", branch="main")
 
     assert response.task_id == "task-1"
     assert response.output_id == "out-1"
-    assert "/api/projects/by-notebook/nb-1" in calls
-    assert "/api/projects/proj-1/files" in calls
-    assert "/api/notebooks/nb-1/execute" in calls
 
 
-def test_client_run_interactive_aggregates_sse_stream():
+def test_client_get_project_repo_returns_repo():
     _write_credentials()
 
-    def sse_body() -> bytes:
-        frames = [
-            'event: stream\ndata: {"name": "stdout", "text": "hello"}\n\n',
-            'event: execution_complete\ndata: {"execution_time_ms": 12}\n\n',
-        ]
-        return "".join(frames).encode()
-
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/sandbox/nb-1/execute"
-        body = json.loads(request.content)
-        assert body["code"] == "print('hi')"
-        return httpx.Response(200, stream=httpx.ByteStream(sse_body()))
+        assert request.url.path == "/api/projects/proj-1/repo"
+        return httpx.Response(
+            200,
+            json={
+                "owner": "dev-alice",
+                "name": "supply-chain",
+                "clone_url": "https://git.dev.harumi.io/dev-alice/supply-chain.git",
+                "default_branch": "main",
+            },
+        )
 
     client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
-    result = client.run_interactive("print('hi')", notebook_id="nb-1")
+    repo = client.get_project_repo("proj-1")
 
-    assert result.ok
-    assert result.stdout == "hello"
-    assert result.execution_time_ms == 12
+    assert repo.owner == "dev-alice"
+    assert repo.name == "supply-chain"
+    assert repo.default_branch == "main"
+
+
+def test_client_get_project_repo_wraps_missing_endpoint():
+    """When the backend doesn't have the endpoint yet, surface a clear message."""
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "Not Found"})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+
+    with pytest.raises(HarumiError, match="not yet available"):
+        client.get_project_repo("proj-1")
 
 
 def test_client_download_output_writes_zip_to_dest(tmp_path):
     _write_credentials()
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/notebooks/nb-1/outputs/out-1/download"
+        assert request.url.path == "/api/notebooks/proj-1/outputs/out-1/download"
         return httpx.Response(200, stream=httpx.ByteStream(b"PK\x03\x04fakezip"))
 
     client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
-    zip_path = client.download_output("nb-1", "out-1", tmp_path)
+    zip_path = client.download_output("proj-1", "out-1", tmp_path)
 
     assert zip_path == tmp_path / "output_out-1.zip"
     assert zip_path.read_bytes() == b"PK\x03\x04fakezip"

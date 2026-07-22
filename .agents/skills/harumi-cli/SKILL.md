@@ -1,81 +1,87 @@
 ---
 name: harumi-cli
-description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure from the terminal instead of the platform's notebook editor. Use when the user wants to run, upload, or debug a local script against a Harumi notebook, mentions the `harumi` command, `harumi run`/`harumi notebooks`/`harumi specs`/`harumi outputs`, asks about Harumi kernel specs, or needs to fetch/download results from a Harumi run.
+description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo. Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi init`, `harumi run`, `harumi notebooks`, `harumi specs`, `harumi outputs`, asks about Harumi kernel specs, Gitea remotes, scratch branches, or needs to fetch/download results from a Harumi run.
 ---
 
 # Harumi CLI
 
-Drives the `harumi` CLI (source: `harumi-dev-cli`, package `harumi`, entry point `harumi = "harumi.cli:app"`). It uploads/streams local code to Harumi's sandboxes and fetches results — same backend the web app and AI agent use.
+Drives the `harumi` CLI (source: `harumi-dev-cli`, package `harumi`). Every run is git-ref based: code lives in a per-project Harumi Git (Gitea) repo at `https://git.dev.harumi.io` (staging, VPN-only). The CLI auto-manages a scratch branch so users can iterate without manually committing.
 
 For the full flag-by-flag reference and troubleshooting table, see [references/commands.md](references/commands.md).
 
+## VPN requirement
+
+`git.dev.harumi.io` is an internal ALB — git push and `harumi init` only work over VPN. Surface a clear network error if the user isn't on VPN.
+
 ## Preflight
 
-1. Check the CLI is installed: `harumi --version`. If missing, install from this repo with `pip install -e .` (or `pip install harumi` once published).
-2. Check the user is authenticated. Any command will raise `Not logged in. Run harumi login first.` if not. **Never try to run `harumi login` for the user or answer the OTP prompt yourself** — it emails a one-time code and needs interactive input. Ask the user to run it themselves:
+1. Check CLI is installed: `harumi --version`. Install from this repo: `pip install -e .` (or `pip install harumi` once published).
+2. Check the user is authenticated. Any command raises `Not logged in. Run harumi login first.` if not. **Never try to automate the OTP flow** — it emails a one-time code and needs interactive input. Ask the user to run it:
    - `harumi login` for an existing account.
-   - `harumi login --signup` for a brand-new email (plain `harumi login` on a new email 422s with "Signups not allowed for otp").
-3. If they belong to multiple orgs, `harumi login` prints a table and asks them to run `harumi config set-org <ORG_ID>` (or pass `--org` per command).
+   - `harumi login --signup` for a brand-new email (plain login 422s with "Signups not allowed for otp" on new emails).
+3. `harumi login` also provisions a per-user Gitea token (best-effort — prints a notice if the backend isn't ready yet). The token is stored in `~/.harumi/credentials.json`.
 
-## Discover before running
+## The always-bound-repo invariant
 
-Never guess a `--notebook` id or `--kernel` name — always look them up first:
+Every `harumi run` requires the working directory (or a parent) to be bound to a Harumi project via `harumi init`. This is the single prerequisite — without it, `run` exits immediately with "run `harumi init` first."
 
-- `harumi notebooks` — lists projects and their notebooks; grab a `notebook_id` from the table.
-- `harumi notebooks --project <id>` — scope to one project.
-- `harumi specs` — lists available kernel specs (e.g. `or_python_small`, `gurobi_python_medium`) with CPU/RAM and whether a subscription is required.
+## Workflow
 
-## Pick the right execution mode
+### 1. Bind a directory to a project
 
-This is the most important — and most easily misused — decision. `harumi run <path>` has two modes that behave very differently:
-
-| | `--mode interactive` | `--mode job` (default) |
-|---|---|---|
-| Runs | The **actual local file's code**, sent as-is to the notebook's live sandbox kernel | The notebook's **own saved live version** in the Harumi web app — NOT the local file's code |
-| Path | Must be a single `.py` file | File or directory |
-| What happens to `path` | Sent inline, not uploaded | Uploaded to the notebook's project first (so imports/data files stay in sync) |
-| Output | Streams stdout/stderr/results live | Queues an async job; poll or `--watch` |
-| Best for | Fast iteration, "run my file as written" | Long/heavy runs; runs that must match the notebook's configured live version |
-
-If the user says "run my script"/"run this file", default to `--mode interactive`. Only use `--mode job` when they want the notebook's saved live version executed, or the run is long enough to need the async queue (and mention that job mode won't execute arbitrary local code — the file must also be saved as the notebook's live version in the web app for its logic to actually run).
-
-## Run
-
-Interactive:
+Run once per project directory:
 
 ```bash
-harumi run ./solver.py --notebook <NOTEBOOK_ID> --mode interactive --kernel or_python_small
+harumi init --project <PROJECT_ID>
 ```
 
-Job, fire-and-forget:
+This fetches the Gitea repo metadata from harumi-api, writes `.harumi/config.json`, and configures the `harumi` git remote for authenticated HTTPS pushes.
+
+Find project IDs with: `harumi notebooks`
+
+### 2. Run code
+
+**Default — scratch branch (for uncommitted/unpushed work):**
 
 ```bash
-harumi run ./project_dir --notebook <NOTEBOOK_ID> --kernel gurobi_python_medium
+harumi run
 ```
 
-Job, blocking until done and downloading artifacts:
+The CLI detects a dirty or unpushed tree, transparently pushes a throwaway branch (`harumi-scratch/<user>/<timestamp>`) to Gitea, queues the run against that ref, and cleans up the scratch branch when done. The user's real branches are never touched.
+
+If the tree is clean and fully pushed, it runs the current branch directly — no scratch branch needed.
+
+**Run a specific branch or commit:**
 
 ```bash
-harumi run ./project_dir --notebook <NOTEBOOK_ID> --watch --output-dir ./out
+harumi run --branch feature/solver-v2
+harumi run --commit abc123f
 ```
 
-## Retrieve outputs later
+**Override the `harumi.toml` command or kernel:**
 
 ```bash
-harumi outputs --notebook <NOTEBOOK_ID> --latest
-harumi outputs --notebook <NOTEBOOK_ID> --download <OUTPUT_ID> --output-dir ./out
+harumi run --command "python solver.py" --kernel gurobi_python_medium
 ```
 
-## Local backend / org config
+**Block until done and download output artifacts:**
 
-- Point at a local `harumi-api`: `--api-url http://localhost:8000/api` or `export HARUMI_API_URL=http://localhost:8000/api`.
-- Precedence everywhere: CLI flags > env vars (`HARUMI_API_URL`, `HARUMI_ORG`) > `~/.harumi/config.json` > defaults.
+```bash
+harumi run --watch --output-dir ./out
+```
 
-## Try it risk-free with the bundled demos
+### 3. Check outputs
 
-If the user just wants to smoke-test the CLI, point them at `demos/` in this repo (see `demos/README.md`):
+```bash
+harumi outputs --latest
+harumi outputs --download <OUTPUT_ID> --output-dir ./out
+```
 
-- `demos/hello_world.py` — zero-dependency smoke test, any kernel.
-- `demos/or_tools_lp.py` — OR-Tools LP, kernel `or_python_small`.
-- `demos/gurobi_knapsack.py` — Gurobi MIP, kernel `gurobi_python_medium`.
-- `demos/project_demo/` — multi-file directory (tests directory uploads in job mode).
+`--project` is optional if run from a bound directory.
+
+## Config
+
+- Gitea URL: `--git-url` or `HARUMI_GIT_URL` (default `https://git.dev.harumi.io`).
+- API URL: `--api-url` or `HARUMI_API_URL` (default `https://api.harumi.io/api`).
+- Org: `harumi config set-org <ORG_ID>` / `--org` / `HARUMI_ORG`.
+- All settings: flags > env vars > `~/.harumi/config.json` > defaults.

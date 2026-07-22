@@ -8,6 +8,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [config set-org](#config-set-org)
 - [specs](#specs)
 - [notebooks](#notebooks)
+- [init](#init)
 - [run](#run)
 - [outputs](#outputs)
 - [Config & credential files](#config--credential-files)
@@ -19,17 +20,25 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 ### `harumi login`
 
 ```
-harumi login [--email EMAIL] [--signup] [--api-url URL]
+harumi login [--email EMAIL] [--signup] [--api-url URL] [--git-url URL]
 ```
 
 - Prompts for email if `--email` omitted, then prompts for the OTP code emailed by Supabase.
-- `--signup`: creates the Supabase account first via `POST /users/sign_up`. Required the *first* time a given email logs in — without it, `POST /users/otp` 422s with `"Signups not allowed for otp"`.
-- On success, stores `access_token`/`refresh_token` at `~/.harumi/credentials.json` (mode `0600`).
-- Best-effort org resolution: if the user belongs to exactly one org, it's saved automatically; if multiple, it prints a table and instructs the user to run `harumi config set-org <ORG_ID>`.
+- `--signup`: creates the Supabase account first. Required the *first* time a new email logs in.
+- On success, stores `access_token`/`refresh_token`/`git_token` at `~/.harumi/credentials.json` (mode `0600`). The `git_token` is the per-user Gitea personal access token used by `harumi init` and `harumi run` for git-over-HTTPS. If the backend endpoint isn't live yet, login skips token provisioning and prints a notice.
+- Best-effort org resolution: if exactly one org, stored automatically; if multiple, prints a table and instructs `harumi config set-org`.
 
 ### `harumi logout`
 
 Clears `~/.harumi/credentials.json`. No flags.
+
+### `harumi whoami`
+
+```
+harumi whoami [--api-url URL] [--org ORG]
+```
+
+Prints the email and id of the currently logged-in user (`GET /users/me`).
 
 ## `config set-org`
 
@@ -37,7 +46,7 @@ Clears `~/.harumi/credentials.json`. No flags.
 harumi config set-org <ORG_ID>
 ```
 
-Persists `org_id` in `~/.harumi/config.json`; every subsequent request sends it as the `X-Organization` header (unless overridden by `--org` or `HARUMI_ORG`).
+Persists `org_id` in `~/.harumi/config.json`; every subsequent request sends it as `X-Organization`.
 
 ## `specs`
 
@@ -53,88 +62,117 @@ Lists kernel specs (`name`, `display_name`, `cpu`, `memory`, `subscription_requi
 harumi notebooks [--project PROJECT_ID] [--api-url URL] [--org ORG]
 ```
 
-Lists every project and its notebooks (`GET /projects`, then `GET /projects/{id}/notebooks` per project). `--project` filters to one project id. Output gives the `notebook_id` needed for `run --notebook` / `outputs --notebook`.
+Lists every project and its notebooks. Useful for finding `PROJECT_ID` to pass to `harumi init`.
+
+## `init`
+
+```
+harumi init --project PROJECT_ID [--api-url URL] [--git-url URL] [--org ORG]
+```
+
+**Run once per project directory.** Binds the current working directory to a Harumi project:
+
+1. Calls `GET /projects/{id}/repo` (assumed endpoint — Workstream B of the git-first pivot).
+2. Writes `.harumi/config.json` in the current directory with `project_id` + repo metadata.
+3. Configures the `harumi` git remote with an authenticated HTTPS URL (requires a `git_token` in credentials from `harumi login` and the repo to be a git working tree).
+
+After `harumi init`, `harumi run` and `harumi outputs` work without any `--project` flag.
+
+**Note:** `.harumi/config.json` is searched upward from cwd, so `harumi run` works from subdirectories.
 
 ## `run`
 
 ```
-harumi run <path> --notebook ID [--mode interactive|job] [--kernel SPEC]
-           [--project PROJECT_ID] [--watch] [--output-dir DIR]
-           [--scenario-id ID] [--scenario-name NAME] [--email-to EMAIL]
-           [--api-url URL] [--org ORG]
+harumi run [--branch B] [--commit SHA] [--command C] [--kernel K]
+           [--watch] [--output-dir DIR]
+           [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
-| Flag | Modes | Meaning |
-|---|---|---|
-| `path` (positional) | both | Local file (interactive) or file/directory (job) |
-| `--notebook, -n` | both | Target notebook id (required) |
-| `--mode, -m` | both | `interactive` or `job` (default `job`) |
-| `--kernel, -k` | both | Kernel spec name, default `or_python_small` (see `specs`) |
-| `--project` | job | Project id to upload into; auto-resolved via `GET /projects/by-notebook/{id}` if omitted |
-| `--watch, -w` | job | Block, polling `GET /notebooks/{id}/outputs/{output_id}` every 5s until terminal status |
-| `--output-dir, -o` | both | interactive: saves non-text results (`image/png`, `text/html`, `image/svg+xml`) as files. job: with `--watch`, downloads the output zip here on success |
-| `--scenario-id` / `--scenario-name` | job | Tag the run with a scenario |
-| `--email-to` | job | Email results when the job finishes |
-| `--api-url` / `--org` | both | Per-invocation overrides |
+Requires the directory (or a parent) to be bound via `harumi init`.
 
-Interactive mode internals: `POST /sandbox/{notebook_id}/execute` with `{"code": <file contents>, "kernel_spec": ...}`, streamed as SSE (`stream`, `error`, `result`, `execution_complete` events). Errors print as `ename: evalue` + traceback and exit code 1.
+| Flag | Meaning |
+|---|---|
+| `--branch, -b` | Run a specific branch. Default: current branch (or scratch branch if dirty/unpushed). |
+| `--commit` | Run a specific commit SHA. |
+| `--command, -c` | Override the command in `harumi.toml`. |
+| `--kernel, -k` | Override the kernel spec (e.g. `or_python_small`, `gurobi_python_medium`). |
+| `--watch, -w` | Block until the run reaches a terminal status. |
+| `--output-dir, -o` | With `--watch`: download output zip here on success. |
 
-Job mode internals: uploads `path` to the project (`upload_path`), then `POST /notebooks/{notebook_id}/execute` (no code payload — re-runs whatever is currently saved as the notebook's live version). Returns `task_id`, `output_id`, `message`. Without `--watch`, prints a hint to check back with `harumi outputs --notebook <id> --latest`.
+**Scratch-branch flow (default when tree is dirty or has unpushed commits):**
+
+The CLI detects local changes, creates a temporary branch `harumi-scratch/<user>/<yyyymmdd-HHMMSS>` from HEAD, commits the full working tree to it using a throwaway git index (the user's real index/HEAD are untouched), pushes it to the `harumi` remote, queues the run, then deletes the remote scratch branch when finished (best-effort cleanup). The user never has to commit manually for a quick iteration.
+
+**Calls:** `POST /projects/{id}/execute` with `{ branch, commit?, command?, kernel_spec? }` (assumed endpoint — Workstream C of the git-first pivot).
 
 ## `outputs`
 
 ```
-harumi outputs --notebook ID [--latest] [--download OUTPUT_ID] [--output-dir DIR]
+harumi outputs [--project ID] [--latest] [--download OUTPUT_ID] [--output-dir DIR]
                [--api-url URL] [--org ORG]
 ```
 
-- No flags beyond `--notebook`: table of all outputs (`id`, `status`, `started`, `ended`, `scenario`) from `GET /notebooks/{id}/outputs`.
+- `--project` optional if run from a bound directory.
+- No extra flags: table of all outputs (`id`, `status`, `started`, `ended`, `scenario`).
 - `--latest`: only the most recently started output.
-- `--download <id> [--output-dir DIR]`: streams `GET /notebooks/{id}/outputs/{id}/download` to `<output-dir>/output_<id>.zip` (default output dir `.`).
-
-Terminal statuses: `finished`, `completed`, `failed`, `timeout`, `cancelled`. `succeeded` is `finished`/`completed` only.
+- `--download <id> [--output-dir DIR]`: streams the output zip to `<output-dir>/output_<id>.zip`.
 
 ## Config & credential files
 
-Precedence for every setting (highest first): **CLI flags > environment variables > `~/.harumi/config.json` > hardcoded defaults**.
+Precedence (highest first): **CLI flags > env vars > `~/.harumi/config.json` > defaults**.
 
-| Setting | Env var | Config file key | Default |
+| Setting | Env var | Config key | Default |
 |---|---|---|---|
 | API base URL | `HARUMI_API_URL` | `api_url` | `https://api.harumi.io/api` |
+| Gitea URL | `HARUMI_GIT_URL` | `git_url` | `https://git.dev.harumi.io` |
 | Org id (`X-Organization`) | `HARUMI_ORG` | `org_id` | none (from login) |
 
-- `~/.harumi/config.json` — non-secret settings (`api_url`, `org_id`), written by `config set-org` / org auto-resolution.
-- `~/.harumi/credentials.json` — `access_token`, `refresh_token`, `user_id`, `email`, `expires_at`; mode `0600`; written by `login`, cleared by `logout`.
-- Override the home dir for both files with `HARUMI_HOME` (defaults to `~/.harumi`).
-- Access tokens are proactively refreshed if within 60s of expiry, and reactively refreshed-and-retried once on any HTTP 401.
+- `~/.harumi/config.json` — non-secret settings.
+- `~/.harumi/credentials.json` — `access_token`, `refresh_token`, `git_token`, `user_id`, `email`, `expires_at`; mode `0600`.
+- `.harumi/config.json` (per-project) — `project_id`, `repo.owner/name/clone_url/default_branch`; written by `harumi init`, searched upward from cwd.
+- Override the home dir with `HARUMI_HOME`.
 
 ## Troubleshooting
 
-| Symptom / error text | Cause | Fix |
+| Symptom / error | Cause | Fix |
 |---|---|---|
-| `Error: Not logged in. Run harumi login first.` | No/expired session, refresh token also invalid | Ask the user to run `harumi login` (or `--signup` for a new email) |
-| `harumi-api returned HTTP 422: ... Signups not allowed for otp` | Email has no Supabase account yet | Ask the user to re-run `harumi login --signup` |
-| `interactive mode requires a single Python file, not a directory` | `--mode interactive` given a directory | Point at one `.py` file, or switch to `--mode job` |
-| `Notebook <id> is not linked to any project; pass --project explicitly.` | Job mode couldn't auto-resolve the project | Ask user for the project id, or run `harumi notebooks` to find it, then pass `--project` |
-| `Timed out after <n>s waiting for output <id> (last status: '...')` | `--watch` exceeded its timeout | Re-check later with `harumi outputs --notebook <id> --latest`; the run may still be in progress |
-| `No output_id returned; cannot watch this run.` | Job queued but backend didn't return an `output_id` | Check `harumi outputs --notebook <id>` manually |
-| Run ended with status `failed`/`timeout`/`cancelled` | Job-mode run didn't succeed | Follow the printed `Logs: <log_url>` if present |
-| `FileNotFoundError` | Local `path` doesn't exist | Verify the path relative to the current working directory |
+| `Error: Not logged in. Run harumi login first.` | No/expired session | Ask user to run `harumi login` |
+| `harumi-api returned HTTP 422: ... Signups not allowed for otp` | New email, no account | Re-run `harumi login --signup` |
+| `No Harumi project found ... Run harumi init` | `.harumi/config.json` missing in cwd + parents | `harumi init --project <ID>` |
+| `No Gitea token found. Run harumi login` | `git_token` absent in credentials | `harumi login` again once backend is live |
+| `The Gitea user provisioning endpoint (/users/git-token) is not yet available` | Workstream B not deployed | Ask team; token provisioning is a no-op until the backend lands |
+| `Could not fetch repo for project ... not yet available` | Workstream B not deployed | Wait for backend; meanwhile the assumed endpoint contract is in `client.py` |
+| `Could not queue a run ... not yet available` | Workstream C not deployed | Wait for backend |
+| `git push failed: ...` | Network (VPN not connected) or bad credentials | Check VPN; re-run `harumi login` to refresh token |
+| `git not found` | git missing from PATH | Install git |
+| `Timed out after <n>s waiting for output` | Job still running past timeout | Check `harumi outputs --latest` manually |
+| `No output_id returned; cannot watch` | Backend didn't return an output_id | Check `harumi outputs` manually |
 
 ## Python library (`Client`) alternative
 
-When scripting/automation is a better fit than shelling out to the CLI (e.g. inside a Python build step):
+When scripting is better than shelling out:
 
 ```python
 from harumi import Client
+from harumi.config import ProjectBinding
 
-client = Client()  # loads ~/.harumi/credentials.json + ~/.harumi/config.json
-client.run_job("./solver.py", notebook_id="...", watch=True, output_dir="./out")
+binding = ProjectBinding.load()        # reads .harumi/config.json
+client = Client()                      # loads ~/.harumi/credentials.json
 
-result = client.run_interactive(open("./solver.py").read(), notebook_id="...")
-print(result.ok, result.stdout)
+# Queue a git-ref run (assumed endpoint — Workstream C)
+response = client.execute_project(
+    binding.project_id,
+    branch="feature/solver-v2",
+    command="python main.py",
+)
 
-outputs = client.list_outputs(notebook_id="...")
+# Poll until done
+from harumi.execution import wait_for_output
+output = wait_for_output(client.api, binding.project_id, response.output_id)
+print(output.status, output.output_url)
+
+# Download artifacts
+client.download_output(binding.project_id, output.id, "./out")
 ```
 
-`Client(api_url=..., org_id=...)` accepts the same overrides as the CLI's `--api-url`/`--org` flags. This still requires the user to have already run `harumi login` once (same credentials file).
+`Client(api_url=..., git_url=..., org_id=...)` accepts the same overrides as the CLI flags. Requires the user to have run `harumi login` at least once.

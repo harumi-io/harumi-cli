@@ -1,5 +1,15 @@
 """HTTP client for harumi-api: auth injection, 401-refresh-and-retry, and the
 public `Client` SDK surface used by both the CLI and library consumers.
+
+Assumed git-pivot endpoints (Workstream B/C — not yet in harumi-api):
+  GET  /projects/{id}/repo           -> ProjectRepo
+  GET  /projects/{id}/repo/branches  -> list[ProjectRepoBranch]
+  POST /projects/{id}/execute        -> ProjectRunResponse
+  POST /users/git-token              -> GitUserToken
+
+Methods wrapping assumed endpoints are clearly marked.  When the coworker's
+branch lands, update the path strings and schema field names here — all
+callers in cli.py go through this layer so changes are contained.
 """
 
 from __future__ import annotations
@@ -12,8 +22,17 @@ import httpx
 
 from harumi import auth
 from harumi.config import Config
-from harumi.errors import ApiError, NotAuthenticatedError
-from harumi.models import KernelSpec, Notebook, Project
+from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
+from harumi.models import (
+    ExecutionOutput,
+    GitUserToken,
+    KernelSpec,
+    Notebook,
+    Project,
+    ProjectRepo,
+    ProjectRepoBranch,
+    ProjectRunResponse,
+)
 
 
 class ApiClient:
@@ -127,16 +146,17 @@ class Client:
 
     Usage:
         client = Client()  # loads ~/.harumi/credentials.json
-        client.run_job("solver.py", notebook_id="...", watch=True)
+        client.execute_project("proj-id", branch="main")
     """
 
     def __init__(
         self,
         api_url: Optional[str] = None,
+        git_url: Optional[str] = None,
         org_id: Optional[str] = None,
         transport: Optional[httpx.BaseTransport] = None,
     ) -> None:
-        self.config = Config.load(api_url=api_url, org_id=org_id)
+        self.config = Config.load(api_url=api_url, git_url=git_url, org_id=org_id)
         self.api = ApiClient(self.config, transport=transport)
 
     # -- Auth -------------------------------------------------------------
@@ -150,7 +170,27 @@ class Client:
     def logout(self) -> None:
         auth.logout()
 
-    # -- Discovery ----------------------------------------------------------
+    # -- Git credential ---------------------------------------------------
+    # ASSUMED ENDPOINT: POST /users/git-token
+    # Returns the per-user Gitea token (provisioned at first login).
+    # Update path/schema when the coworker's harumi-api branch lands.
+
+    def get_git_token(self) -> GitUserToken:
+        """Fetch (or create) the per-user Gitea personal access token.
+
+        ASSUMED ENDPOINT — not yet in harumi-api.
+        """
+        try:
+            response = self.api.request("POST", "/users/git-token")
+        except ApiError as exc:
+            raise HarumiError(
+                "The Gitea user provisioning endpoint (/users/git-token) is not yet "
+                "available on this harumi-api version. "
+                "Ask your team when Workstream B of the git-first pivot lands."
+            ) from exc
+        return GitUserToken.model_validate(response.json())
+
+    # -- Discovery --------------------------------------------------------
 
     def list_projects(self) -> list[Project]:
         response = self.api.request("GET", "/projects")
@@ -166,52 +206,85 @@ class Client:
         response = self.api.request("GET", "/sandbox/specs")
         return [KernelSpec.model_validate(s) for s in response.json()]
 
-    # -- Files ----------------------------------------------------------
+    # -- Git-pivot: repo metadata -----------------------------------------
+    # ASSUMED ENDPOINTS: GET /projects/{id}/repo and /repo/branches
+    # Update paths/schemas when the coworker's harumi-api branch lands.
 
-    def upload_path(self, project_id: str, local_path: Path) -> list[dict]:
-        from harumi.files import upload_path
+    def get_project_repo(self, project_id: str) -> ProjectRepo:
+        """Return the Gitea repo bound to a project.
 
-        return upload_path(self.api, project_id, local_path)
+        ASSUMED ENDPOINT — not yet in harumi-api.
+        """
+        try:
+            response = self.api.request("GET", f"/projects/{project_id}/repo")
+        except ApiError as exc:
+            raise HarumiError(
+                f"Could not fetch repo for project {project_id!r}. "
+                "The /projects/{id}/repo endpoint is not yet available on this "
+                "harumi-api version. Ask your team when Workstream B lands."
+            ) from exc
+        return ProjectRepo.model_validate(response.json())
 
-    # -- Execution --------------------------------------------------------
+    def list_repo_branches(self, project_id: str) -> list[ProjectRepoBranch]:
+        """List branches for the Gitea repo bound to a project.
 
-    def run_interactive(self, code: str, notebook_id: str, kernel_spec: Optional[str] = None, **kwargs):
-        from harumi.execution import run_interactive
+        ASSUMED ENDPOINT — not yet in harumi-api.
+        """
+        try:
+            response = self.api.request("GET", f"/projects/{project_id}/repo/branches")
+        except ApiError as exc:
+            raise HarumiError(
+                f"Could not list branches for project {project_id!r}. "
+                "The /projects/{id}/repo/branches endpoint is not yet available."
+            ) from exc
+        return [ProjectRepoBranch.model_validate(b) for b in response.json()]
 
-        return run_interactive(self.api, code, notebook_id, kernel_spec=kernel_spec, **kwargs)
+    # -- Git-pivot: execution ---------------------------------------------
+    # ASSUMED ENDPOINT: POST /projects/{id}/execute
+    # Update path/schema when the coworker's harumi-api branch lands.
 
-    def run_job(
+    def execute_project(
         self,
-        path: Path | str,
-        notebook_id: str,
-        project_id: Optional[str] = None,
+        project_id: str,
+        branch: Optional[str] = None,
+        commit: Optional[str] = None,
+        command: Optional[str] = None,
         kernel_spec: Optional[str] = None,
-        watch: bool = False,
-        **kwargs: Any,
-    ):
-        from harumi.execution import run_job
+    ) -> ProjectRunResponse:
+        """Queue a git-ref-based run for a project.
 
-        return run_job(
-            self.api,
-            Path(path),
-            notebook_id,
-            project_id=project_id,
-            kernel_spec=kernel_spec,
-            watch=watch,
-            **kwargs,
-        )
+        ASSUMED ENDPOINT — not yet in harumi-api.
+        """
+        body: dict[str, Any] = {}
+        if branch:
+            body["branch"] = branch
+        if commit:
+            body["commit"] = commit
+        if command:
+            body["command"] = command
+        if kernel_spec:
+            body["kernel_spec"] = kernel_spec
 
-    def list_outputs(self, notebook_id: str):
+        try:
+            response = self.api.request("POST", f"/projects/{project_id}/execute", json=body)
+        except ApiError as exc:
+            raise HarumiError(
+                f"Could not queue a run for project {project_id!r}. "
+                "The /projects/{id}/execute endpoint is not yet available on this "
+                "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
+            ) from exc
+        return ProjectRunResponse.model_validate(response.json())
+
+    # -- Outputs ----------------------------------------------------------
+
+    def list_outputs(self, notebook_id: str) -> list[ExecutionOutput]:
         from harumi.execution import list_outputs
-
         return list_outputs(self.api, notebook_id)
 
-    def wait_for_output(self, notebook_id: str, output_id: str, **kwargs):
+    def wait_for_output(self, notebook_id: str, output_id: str, **kwargs: Any):
         from harumi.execution import wait_for_output
-
         return wait_for_output(self.api, notebook_id, output_id, **kwargs)
 
     def download_output(self, notebook_id: str, output_id: str, dest_dir: Path | str):
         from harumi.execution import download_output
-
         return download_output(self.api, notebook_id, output_id, Path(dest_dir))

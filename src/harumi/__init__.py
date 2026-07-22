@@ -2,10 +2,10 @@
 
 Public API:
 
-    from harumi import Client, login, run_job, run_interactive
+    from harumi import Client
 
     client = Client()                 # loads stored credentials
-    result = client.run_job("solver.py", notebook_id="...", watch=True)
+    result = client.execute_project("proj-id", branch="main", watch=True)
 """
 
 from __future__ import annotations
@@ -13,9 +13,11 @@ from __future__ import annotations
 from harumi.client import Client
 from harumi.models import (
     ExecutionOutput,
-    InteractiveResult,
+    GitUserToken,
     KernelSpec,
     LoggedUser,
+    ProjectRepo,
+    ProjectRunResponse,
 )
 
 __version__ = "0.1.0"
@@ -23,8 +25,10 @@ __version__ = "0.1.0"
 __all__ = [
     "Client",
     "ExecutionOutput",
-    "InteractiveResult",
+    "GitUserToken",
     "KernelSpec",
     "LoggedUser",
+    "ProjectRepo",
+    "ProjectRunResponse",
     "__version__",
 ]

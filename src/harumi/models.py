@@ -5,6 +5,7 @@ can parse responses without depending on harumi-api's package:
   - LoggedUser  <-> harumi-api/src/api/users/schemas.py:LoggedUser
   - KernelSpec  <-> harumi-api/src/api/sandbox/specs.py:get_all_specs()
   - ExecutionOutput <-> harumi-api/src/api/notebooks/schemas.py:NotebookOutput
+  - ProjectRepo / ProjectRunResponse <-> assumed git-pivot endpoints (Workstream B/C)
 """
 
 from __future__ import annotations
@@ -63,16 +64,6 @@ class Notebook(BaseModel):
     name: Optional[str] = None
 
 
-class ProjectFile(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    name: str
-    key: str
-    last_modified: Optional[datetime] = None
-    etag: Optional[str] = None
-    size: Optional[int] = None
-
-
 class ExecutionOutput(BaseModel):
     """One entry from GET /notebooks/{id}/outputs (NotebookOutput schema)."""
 
@@ -98,20 +89,12 @@ class ExecutionOutput(BaseModel):
         return self.status in {"finished", "completed"}
 
 
-class NotebookExecuteResponse(BaseModel):
-    """Response from POST /notebooks/{id}/execute."""
-
-    model_config = ConfigDict(extra="allow")
-
-    task_id: str
-    status: str
-    message: str
-    output_id: Optional[str] = None
-    execution_log_id: Optional[str] = None
-
-
 class InteractiveResult(BaseModel):
-    """Aggregated result of an interactive SSE run (see sse.py)."""
+    """Aggregated result of a raw SSE execution run (see sse.py).
+
+    Retained so sse.py and its tests continue to work. Not used by the
+    git-ref execution path in the CLI.
+    """
 
     status: str = "success"
     stdout: str = ""
@@ -124,3 +107,61 @@ class InteractiveResult(BaseModel):
     @property
     def ok(self) -> bool:
         return self.status == "success"
+
+
+# ---------------------------------------------------------------------------
+# Git-pivot models (assumed contract — Workstream B/C of the git-first pivot)
+# These mirror the planned endpoints in harumi-api. Update when the coworker's
+# branch lands and the real schemas are confirmed.
+# ---------------------------------------------------------------------------
+
+class ProjectRepo(BaseModel):
+    """Response from GET /projects/{id}/repo.
+
+    Assumed contract — endpoint does not exist yet in harumi-api.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    owner: str
+    name: str
+    clone_url: str
+    default_branch: str = "main"
+
+
+class ProjectRepoBranch(BaseModel):
+    """One entry from GET /projects/{id}/repo/branches."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    commit_sha: Optional[str] = None
+
+
+class ProjectRunResponse(BaseModel):
+    """Response from POST /projects/{id}/execute.
+
+    Assumed contract — endpoint does not exist yet in harumi-api.
+    Mirrors the shape of NotebookExecuteResponse so wait_for_output
+    can be reused unchanged.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    task_id: str
+    status: str
+    message: str
+    output_id: Optional[str] = None
+    execution_log_id: Optional[str] = None
+
+
+class GitUserToken(BaseModel):
+    """Response from POST /users/git-token (assumed — per-user Gitea token).
+
+    Assumed contract — endpoint does not exist yet in harumi-api.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    token: str
+    username: str
