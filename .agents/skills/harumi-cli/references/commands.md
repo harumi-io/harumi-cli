@@ -11,6 +11,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [init](#init)
 - [run](#run)
 - [outputs](#outputs)
+- [datasources](#datasources)
 - [Config & credential files](#config--credential-files)
 - [Troubleshooting](#troubleshooting)
 - [Python library (`Client`) alternative](#python-library-client-alternative)
@@ -117,6 +118,46 @@ harumi outputs [--project ID] [--latest] [--download OUTPUT_ID] [--output-dir DI
 - `--latest`: only the most recently started output.
 - `--download <id> [--output-dir DIR]`: streams the output zip to `<output-dir>/output_<id>.zip`.
 
+## `datasources`
+
+Real endpoints, live today (`harumi-api/src/api/datasources/router.py`) — not part of the assumed git-pivot contract. Scoped per-project by `(project_id, name)`.
+
+```
+harumi datasources list [--project ID] [--api-url URL] [--org ORG]
+harumi datasources get NAME [--project ID]
+harumi datasources add NAME --type TYPE [--host H] [--port P] [--database D] [--username U]
+                            [--use-proxy] [--proxy-host H] [--proxy-port P] [--proxy-server-name N]
+                            [--project ID]
+harumi datasources update NAME [--name NEW_NAME] [--type T] [--host H] [--port P] [--database D]
+                               [--username U] [--set-credentials] [--use-proxy/--no-use-proxy]
+                               [--proxy-host H] [--proxy-port P] [--proxy-server-name N] [--project ID]
+harumi datasources remove NAME [--yes] [--project ID]
+harumi datasources test --type TYPE --host H --port P --database D --username U
+                        [--use-proxy] [--proxy-host H] [--proxy-port P] [--proxy-server-name N]
+harumi datasources query NAME --sql "SELECT ..." [--limit N] [--csv PATH] [--project ID]
+```
+
+`--project` on every subcommand overrides the `.harumi` binding.
+
+**Credentials are always prompted, never a flag.** `add`, `update --set-credentials`, and `test` each prompt with `typer.prompt(hide_input=True)`. This is deliberate — secrets must never land in shell history, process listings, or `--help` output. The server stores credentials in AWS SSM (SecureString) and never returns them; `get`/`list` responses have no credential field.
+
+**`type`** must be one of `postgresql | mysql | sqlserver | oracle`.
+
+**`add`** calls `POST /datasources/{project_id}` — the backend tests the connection before persisting, so a bad host/credentials fails the `add` with the same error `test` would surface.
+
+**`update`** calls `PUT /datasources/{project_id}/{name}` with only the fields you pass (partial update). Passing `--name` renames the datasource (and its SSM parameter, server-side). Omit `--set-credentials` to leave the stored credentials untouched.
+
+**`remove`** calls `DELETE /datasources/{project_id}/{name}`, prompting for confirmation unless `--yes`. Deletes the DB row and the SSM parameter.
+
+**`test`** calls `POST /datasources/test-connection` — validates without persisting. Useful to sanity-check credentials before `add`.
+
+**`query`** calls `POST /datasources/{project_id}/{name}/execute`, the read-only proxy:
+
+- Server validates the SQL is **SELECT/WITH-only**; any of `INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE|EXEC|EXECUTE|CALL|MERGE|UPSERT` (as a whole word, case-insensitive) → **403** with a message naming the forbidden keyword.
+- Rows are capped server-side at `--limit` (default 10000, hard max 100000). If actual rows exceed the cap, the response sets `wasLimited=true` and the CLI prints a yellow warning.
+- Response shape: `{ columns: string[], data: any[][], rowCount, wasLimited, maxRows, dataframe_name }`. The CLI renders `columns`/`data` as a Rich table, or writes them as CSV with `--csv <path>`.
+- Datasource not found → 404. Query execution error (bad SQL, connection issue) → 400.
+
 ## Config & credential files
 
 Precedence (highest first): **CLI flags > env vars > `~/.harumi/config.json` > defaults**.
@@ -147,6 +188,10 @@ Precedence (highest first): **CLI flags > env vars > `~/.harumi/config.json` > d
 | `git not found` | git missing from PATH | Install git |
 | `Timed out after <n>s waiting for output` | Job still running past timeout | Check `harumi outputs --latest` manually |
 | `No output_id returned; cannot watch` | Backend didn't return an output_id | Check `harumi outputs` manually |
+| `harumi-api returned HTTP 403: Only SELECT queries are allowed ...` | `datasources query` SQL contains a destructive keyword or doesn't start with SELECT/WITH | Rewrite the query as a read-only SELECT/WITH |
+| `harumi-api returned HTTP 404: ...` (on `datasources get/update/remove/query`) | Datasource name doesn't exist for this project | `harumi datasources list` to check the exact name |
+| `[yellow]Result was truncated at the server-side row cap` | Query returned more rows than `--limit` (or the 100000 hard max) | Narrow the query (add a `WHERE`/`LIMIT`) or raise `--limit` |
+| `No fields to update.` | `datasources update` called with no flags | Pass at least one field flag or `--set-credentials` |
 
 ## Python library (`Client`) alternative
 
@@ -173,6 +218,10 @@ print(output.status, output.output_url)
 
 # Download artifacts
 client.download_output(binding.project_id, output.id, "./out")
+
+# Datasources (real endpoints)
+result = client.execute_datasource_query(binding.project_id, "sales_db", "SELECT * FROM orders LIMIT 10")
+print(result.columns, result.row_count, result.was_limited)
 ```
 
 `Client(api_url=..., git_url=..., org_id=...)` accepts the same overrides as the CLI flags. Requires the user to have run `harumi login` at least once.

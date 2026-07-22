@@ -247,3 +247,159 @@ def test_client_download_output_writes_zip_to_dest(tmp_path):
 
     assert zip_path == tmp_path / "output_out-1.zip"
     assert zip_path.read_bytes() == b"PK\x03\x04fakezip"
+
+
+def test_client_list_datasources_parses_envelope():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/datasources/proj-1"
+        assert request.url.params["limit"] == "100"
+        assert request.url.params["offset"] == "0"
+        return httpx.Response(
+            200,
+            json={
+                "datasources": [
+                    {
+                        "id": "ds-1",
+                        "project_id": "proj-1",
+                        "name": "sales_db",
+                        "type": "postgresql",
+                        "host": "db.internal",
+                        "port": 5432,
+                        "database": "sales",
+                        "username": "reader",
+                        "use_proxy": False,
+                        "ssm_parameter_name": "/harumi/projects/proj-1/datasources/sales_db",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "updated_at": "2026-01-01T00:00:00Z",
+                    }
+                ],
+                "total_count": 1,
+            },
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    result = client.list_datasources("proj-1")
+
+    assert result.total_count == 1
+    assert result.datasources[0].name == "sales_db"
+    assert result.datasources[0].type == "postgresql"
+    # Credentials must never be present on the response model.
+    assert not hasattr(result.datasources[0], "credentials")
+
+
+def test_client_get_datasource_url_encodes_name():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.raw_path == b"/api/datasources/proj-1/sales%20db"
+        return httpx.Response(
+            200,
+            json={
+                "id": "ds-1",
+                "project_id": "proj-1",
+                "name": "sales db",
+                "type": "postgresql",
+            },
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    ds = client.get_datasource("proj-1", "sales db")
+
+    assert ds.name == "sales db"
+
+
+def test_client_create_datasource_sends_credentials_and_returns_datasource():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/datasources/proj-1"
+        body = json.loads(request.content)
+        assert body["credentials"] == "s3cr3t"
+        assert body["name"] == "sales_db"
+        return httpx.Response(
+            201,
+            json={
+                "id": "ds-1",
+                "project_id": "proj-1",
+                "name": "sales_db",
+                "type": "postgresql",
+            },
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    ds = client.create_datasource(
+        "proj-1",
+        {"name": "sales_db", "type": "postgresql", "credentials": "s3cr3t"},
+    )
+
+    assert ds.name == "sales_db"
+
+
+def test_client_test_datasource_connection_reports_failure():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/datasources/test-connection"
+        return httpx.Response(400, json={"detail": "Connection refused"})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+
+    with pytest.raises(ApiError, match="Connection refused"):
+        client.test_datasource_connection(
+            {
+                "type": "postgresql",
+                "host": "db.internal",
+                "port": 5432,
+                "database": "sales",
+                "username": "reader",
+                "credentials": "s3cr3t",
+            }
+        )
+
+
+def test_client_execute_datasource_query_parses_result_shape():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/datasources/proj-1/sales_db/execute"
+        body = json.loads(request.content)
+        assert body["query"] == "SELECT * FROM orders"
+        assert body["limit"] == 10000
+        return httpx.Response(
+            200,
+            json={
+                "columns": ["id", "total"],
+                "data": [[1, 100], [2, 250]],
+                "rowCount": 2,
+                "wasLimited": False,
+                "maxRows": 10000,
+                "dataframe_name": "df",
+            },
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    result = client.execute_datasource_query("proj-1", "sales_db", "SELECT * FROM orders")
+
+    assert result.columns == ["id", "total"]
+    assert result.row_count == 2
+    assert result.was_limited is False
+    assert result.data == [[1, 100], [2, 250]]
+
+
+def test_client_execute_datasource_query_rejects_non_select():
+    """The server enforces read-only queries with a 403; the CLI should surface it clearly."""
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            403,
+            json={"detail": "Only SELECT queries are allowed. Destructive operations (DELETE) are not permitted."},
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+
+    with pytest.raises(ApiError, match="Only SELECT queries are allowed"):
+        client.execute_datasource_query("proj-1", "sales_db", "DELETE FROM orders")
+

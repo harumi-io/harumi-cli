@@ -10,6 +10,7 @@
                [--watch] [--output-dir <dir>]
     harumi outputs --project <id> [--latest] [--download <output_id>]
     harumi config set-org <ORG_ID>
+    harumi datasources list|get|add|update|remove|test|query [--project <id>]
 
 Git-ref execution model
 -----------------------
@@ -19,6 +20,14 @@ throwaway scratch branch so the run still executes without forcing the
 user to commit manually.
 
 Requires `harumi init` to have been run in (or above) the current directory.
+
+Datasources
+-----------
+`harumi datasources` manages project-scoped database connections (real
+endpoints, live today). Credentials are only ever prompted interactively
+(hidden input) — never accepted as a flag — and are stored server-side in
+AWS SSM. `datasources query` runs a SELECT/WITH-only, row-capped proxy
+query so users can validate SQL before wiring it into solver code.
 """
 
 from __future__ import annotations
@@ -91,6 +100,17 @@ def _get_client(
 def _fail(message: str) -> None:
     err_console.print(f"[bold red]Error:[/bold red] {message}")
     raise typer.Exit(code=1)
+
+
+def _resolve_project(project: Optional[str]) -> str:
+    """Resolve a project id from --project, falling back to the .harumi binding."""
+    if project:
+        return project
+    binding = ProjectBinding.load()
+    if binding:
+        return binding.project_id
+    _fail("Provide --project or run from a directory with a .harumi binding (see `harumi init`).")
+    raise AssertionError("unreachable")  # _fail always raises
 
 
 def _handle_errors(fn):
@@ -509,13 +529,7 @@ def outputs(
     org: Optional[str] = typer.Option(None, "--org"),
 ) -> None:
     """List or download outputs for a project."""
-    resolved_project = project
-    if not resolved_project:
-        binding = ProjectBinding.load()
-        if binding:
-            resolved_project = binding.project_id
-    if not resolved_project:
-        _fail("Provide --project or run from a directory with a .harumi binding.")
+    resolved_project = _resolve_project(project)
 
     client = _get_client(api_url=api_url, org=org)
 
@@ -548,6 +562,257 @@ def outputs(
             o.scenario_name or "",
         )
     console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# harumi datasources
+# ---------------------------------------------------------------------------
+
+datasources_app = typer.Typer(help="Manage project datasources (database connections).")
+app.add_typer(datasources_app, name="datasources")
+
+
+def _prompt_credentials(current: str = "credentials") -> str:
+    return typer.prompt(f"Enter {current} (hidden)", hide_input=True)
+
+
+@datasources_app.command("list")
+@_handle_errors
+def datasources_list(
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """List datasources for a project."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    result = client.list_datasources(project_id)
+    if not result.datasources:
+        console.print("No datasources found.")
+        return
+
+    table = Table("name", "type", "host", "database", "use_proxy")
+    for ds in result.datasources:
+        table.add_row(ds.name, ds.type, ds.host or "", ds.database or "", "yes" if ds.use_proxy else "no")
+    console.print(table)
+
+
+@datasources_app.command("get")
+@_handle_errors
+def datasources_get(
+    name: str = typer.Argument(..., help="Datasource name."),
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Show details for one datasource (credentials are never returned)."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    ds = client.get_datasource(project_id, name)
+    table = Table("field", "value")
+    for field in ("id", "name", "type", "host", "port", "database", "username", "use_proxy", "proxy_host"):
+        table.add_row(field, str(getattr(ds, field, "") or ""))
+    console.print(table)
+
+
+@datasources_app.command("add")
+@_handle_errors
+def datasources_add(
+    name: str = typer.Argument(..., help="Datasource name (unique per project)."),
+    type: str = typer.Option(..., "--type", help="postgresql | mysql | sqlserver | oracle"),
+    host: Optional[str] = typer.Option(None, "--host"),
+    port: Optional[int] = typer.Option(None, "--port"),
+    database: Optional[str] = typer.Option(None, "--database"),
+    username: Optional[str] = typer.Option(None, "--username"),
+    use_proxy: bool = typer.Option(False, "--use-proxy", help="Route traffic via the mTLS proxy."),
+    proxy_host: Optional[str] = typer.Option(None, "--proxy-host"),
+    proxy_port: Optional[int] = typer.Option(None, "--proxy-port"),
+    proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name"),
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Create a new datasource. Credentials are prompted interactively (never a flag)."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    credentials = _prompt_credentials()
+
+    body: dict = {
+        "name": name,
+        "type": type,
+        "host": host,
+        "port": port,
+        "database": database,
+        "username": username,
+        "credentials": credentials,
+        "use_proxy": use_proxy,
+    }
+    if use_proxy:
+        body["proxy_host"] = proxy_host
+        body["proxy_port"] = proxy_port
+        if proxy_server_name:
+            body["proxy_server_name"] = proxy_server_name
+
+    ds = client.create_datasource(project_id, body)
+    console.print(f"[bold green]Created[/bold green] datasource [bold]{ds.name}[/bold] ({ds.type}).")
+
+
+@datasources_app.command("update")
+@_handle_errors
+def datasources_update(
+    name: str = typer.Argument(..., help="Datasource name."),
+    new_name: Optional[str] = typer.Option(None, "--name", help="Rename the datasource."),
+    type: Optional[str] = typer.Option(None, "--type"),
+    host: Optional[str] = typer.Option(None, "--host"),
+    port: Optional[int] = typer.Option(None, "--port"),
+    database: Optional[str] = typer.Option(None, "--database"),
+    username: Optional[str] = typer.Option(None, "--username"),
+    set_credentials: bool = typer.Option(False, "--set-credentials", help="Prompt to replace the stored credentials."),
+    use_proxy: Optional[bool] = typer.Option(None, "--use-proxy/--no-use-proxy"),
+    proxy_host: Optional[str] = typer.Option(None, "--proxy-host"),
+    proxy_port: Optional[int] = typer.Option(None, "--proxy-port"),
+    proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name"),
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Partially update a datasource. Only provided fields are changed."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    body: dict = {}
+    if new_name:
+        body["name"] = new_name
+    if type:
+        body["type"] = type
+    if host:
+        body["host"] = host
+    if port is not None:
+        body["port"] = port
+    if database:
+        body["database"] = database
+    if username:
+        body["username"] = username
+    if use_proxy is not None:
+        body["use_proxy"] = use_proxy
+    if proxy_host:
+        body["proxy_host"] = proxy_host
+    if proxy_port is not None:
+        body["proxy_port"] = proxy_port
+    if proxy_server_name:
+        body["proxy_server_name"] = proxy_server_name
+    if set_credentials:
+        body["credentials"] = _prompt_credentials()
+
+    if not body:
+        _fail("No fields to update. Pass at least one flag (e.g. --host, --set-credentials).")
+
+    ds = client.update_datasource(project_id, name, body)
+    console.print(f"[bold green]Updated[/bold green] datasource [bold]{ds.name}[/bold].")
+
+
+@datasources_app.command("remove")
+@_handle_errors
+def datasources_remove(
+    name: str = typer.Argument(..., help="Datasource name."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Delete a datasource (removes the DB row and its stored credentials)."""
+    project_id = _resolve_project(project)
+
+    if not yes and not typer.confirm(f"Delete datasource '{name}'? This cannot be undone."):
+        console.print("Aborted.")
+        return
+
+    client = _get_client(api_url=api_url, org=org)
+    ds = client.delete_datasource(project_id, name)
+    console.print(f"[bold red]Deleted[/bold red] datasource [bold]{ds.name}[/bold].")
+
+
+@datasources_app.command("test")
+@_handle_errors
+def datasources_test(
+    type: str = typer.Option(..., "--type", help="postgresql | mysql | sqlserver | oracle"),
+    host: str = typer.Option(..., "--host"),
+    port: int = typer.Option(..., "--port"),
+    database: str = typer.Option(..., "--database"),
+    username: str = typer.Option(..., "--username"),
+    use_proxy: bool = typer.Option(False, "--use-proxy"),
+    proxy_host: Optional[str] = typer.Option(None, "--proxy-host"),
+    proxy_port: Optional[int] = typer.Option(None, "--proxy-port"),
+    proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Test a connection without persisting it. Credentials are prompted interactively."""
+    client = _get_client(api_url=api_url, org=org)
+    credentials = _prompt_credentials()
+
+    body: dict = {
+        "type": type,
+        "host": host,
+        "port": port,
+        "database": database,
+        "username": username,
+        "credentials": credentials,
+        "use_proxy": use_proxy,
+    }
+    if use_proxy:
+        body["proxy_host"] = proxy_host
+        body["proxy_port"] = proxy_port
+        if proxy_server_name:
+            body["proxy_server_name"] = proxy_server_name
+
+    result = client.test_datasource_connection(body)
+    if result.success:
+        console.print(f"[bold green]Success[/bold green]: {result.message}")
+    else:
+        _fail(result.message)
+
+
+@datasources_app.command("query")
+@_handle_errors
+def datasources_query(
+    name: str = typer.Argument(..., help="Datasource name."),
+    sql: str = typer.Option(..., "--sql", help="SELECT/WITH-only SQL to run."),
+    limit: int = typer.Option(10000, "--limit", help="Max rows to return (server-capped at 100000)."),
+    csv: Optional[Path] = typer.Option(None, "--csv", help="Write results to this CSV path instead of printing a table."),
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Run a read-only query against a datasource (SELECT/WITH-only, row-capped server-side)."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    result = client.execute_datasource_query(project_id, name, sql, limit=limit)
+
+    if csv:
+        import csv as csv_module
+
+        with open(csv, "w", newline="") as f:
+            writer = csv_module.writer(f)
+            writer.writerow(result.columns)
+            writer.writerows(result.data)
+        console.print(f"Wrote {result.row_count} rows to {csv}")
+    else:
+        table = Table(*result.columns)
+        for row in result.data:
+            table.add_row(*(str(v) for v in row))
+        console.print(table)
+        console.print(f"[dim]{result.row_count} row(s) returned.[/dim]")
+
+    if result.was_limited:
+        console.print(
+            f"[yellow]Result was truncated at the server-side row cap "
+            f"({result.max_rows}). Add --limit or narrow your query.[/yellow]"
+        )
 
 
 def main() -> None:

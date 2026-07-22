@@ -1,6 +1,6 @@
 ---
 name: harumi-cli
-description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo. Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi init`, `harumi run`, `harumi notebooks`, `harumi specs`, `harumi outputs`, asks about Harumi kernel specs, Gitea remotes, scratch branches, or needs to fetch/download results from a Harumi run.
+description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, and to manage project datasources (database connections). Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi init`, `harumi run`, `harumi notebooks`, `harumi specs`, `harumi outputs`, `harumi datasources`, asks about Harumi kernel specs, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, or needs to fetch/download results from a Harumi run.
 ---
 
 # Harumi CLI
@@ -78,6 +78,28 @@ harumi outputs --download <OUTPUT_ID> --output-dir ./out
 ```
 
 `--project` is optional if run from a bound directory.
+
+## Manage datasources
+
+`harumi datasources` manages project-scoped database connections against real, live endpoints (no assumed contract here — unlike `run`/`init`). Credentials are **always prompted interactively with hidden input** — the CLI never accepts them as a flag, and the server never returns them back (stored in AWS SSM).
+
+```bash
+harumi datasources list                                   # table of datasources for the bound project
+harumi datasources get <name>                              # detail view (no credentials)
+harumi datasources add <name> --type postgresql --host ... --port 5432 --database ... --username ...
+harumi datasources update <name> --host newhost --set-credentials
+harumi datasources remove <name>
+harumi datasources test --type postgresql --host ... --port 5432 --database ... --username ...
+harumi datasources query <name> --sql "SELECT * FROM orders LIMIT 10"
+```
+
+`query` is the most useful command for iteration: it runs SQL against the real datasource through a server-side proxy that **only allows `SELECT`/`WITH`** (any destructive keyword is rejected with a 403) and **caps rows** (default limit 10000, server max 100000). Use it to validate a query before hardcoding it into solver code. Add `--csv <path>` to save results instead of printing a table.
+
+All `datasources` subcommands accept `--project` to override the `.harumi` binding.
+
+## Not yet supported: scheduled runs
+
+Harumi supports cron-based scheduled runs, but they are still keyed by **notebook id** in harumi-api (`/notebooks/{notebook_id}/schedules`), which conflicts with this CLI's project + git-ref model. This CLI intentionally does not manage schedules yet — wait until the backend re-keys schedules to `project_id`/`branch` (part of the git-first pivot) before adding CLI support.
 
 ## Config
 

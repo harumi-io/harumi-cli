@@ -165,3 +165,61 @@ class GitUserToken(BaseModel):
 
     token: str
     username: str
+
+
+# ---------------------------------------------------------------------------
+# Datasource models <-> harumi-api/src/api/datasources/schemas.py
+# These endpoints exist today (not assumed) — see client.py.
+# ---------------------------------------------------------------------------
+
+class Datasource(BaseModel):
+    """Response shape for datasource endpoints (never includes credentials)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    project_id: str
+    name: str
+    type: str
+    host: Optional[str] = None
+    port: Optional[int] = None
+    database: Optional[str] = None
+    username: Optional[str] = None
+    use_proxy: bool = False
+    proxy_host: Optional[str] = None
+    proxy_port: Optional[int] = None
+    proxy_server_name: Optional[str] = None
+    ssm_parameter_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class DatasourceList(BaseModel):
+    """Response from GET /datasources/{project_id}."""
+
+    model_config = ConfigDict(extra="allow")
+
+    datasources: list[Datasource] = Field(default_factory=list)
+    total_count: int = 0
+
+
+class ConnectionTestResponse(BaseModel):
+    """Response from POST /datasources/test-connection."""
+
+    model_config = ConfigDict(extra="allow")
+
+    success: bool
+    message: str
+
+
+class QueryResult(BaseModel):
+    """Response from POST /datasources/{project_id}/{name}/execute."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    columns: list[str] = Field(default_factory=list)
+    data: list[list[Any]] = Field(default_factory=list)
+    row_count: int = Field(0, alias="rowCount")
+    was_limited: bool = Field(False, alias="wasLimited")
+    max_rows: Optional[int] = Field(None, alias="maxRows")
+    dataframe_name: Optional[str] = None

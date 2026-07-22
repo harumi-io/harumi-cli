@@ -10,6 +10,9 @@ Assumed git-pivot endpoints (Workstream B/C — not yet in harumi-api):
 Methods wrapping assumed endpoints are clearly marked.  When the coworker's
 branch lands, update the path strings and schema field names here — all
 callers in cli.py go through this layer so changes are contained.
+
+Datasource endpoints (below) are real and exist today in harumi-api
+(src/api/datasources/router.py) — no wrapping needed.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
+from urllib.parse import quote
 
 import httpx
 
@@ -24,6 +28,9 @@ from harumi import auth
 from harumi.config import Config
 from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
 from harumi.models import (
+    ConnectionTestResponse,
+    Datasource,
+    DatasourceList,
     ExecutionOutput,
     GitUserToken,
     KernelSpec,
@@ -32,6 +39,7 @@ from harumi.models import (
     ProjectRepo,
     ProjectRepoBranch,
     ProjectRunResponse,
+    QueryResult,
 )
 
 
@@ -274,6 +282,55 @@ class Client:
                 "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
             ) from exc
         return ProjectRunResponse.model_validate(response.json())
+
+    # -- Datasources --------------------------------------------------------
+    # Real endpoints — exist today in harumi-api (src/api/datasources/router.py).
+    # Scoped per-project; credentials are write-only (never returned).
+
+    def list_datasources(self, project_id: str, limit: int = 100, offset: int = 0) -> DatasourceList:
+        response = self.api.request(
+            "GET",
+            f"/datasources/{project_id}",
+            params={"limit": limit, "offset": offset},
+        )
+        return DatasourceList.model_validate(response.json())
+
+    def get_datasource(self, project_id: str, name: str) -> Datasource:
+        response = self.api.request("GET", f"/datasources/{project_id}/{quote(name, safe='')}")
+        return Datasource.model_validate(response.json())
+
+    def create_datasource(self, project_id: str, body: dict[str, Any]) -> Datasource:
+        response = self.api.request("POST", f"/datasources/{project_id}", json=body)
+        return Datasource.model_validate(response.json())
+
+    def update_datasource(self, project_id: str, name: str, body: dict[str, Any]) -> Datasource:
+        response = self.api.request(
+            "PUT", f"/datasources/{project_id}/{quote(name, safe='')}", json=body
+        )
+        return Datasource.model_validate(response.json())
+
+    def delete_datasource(self, project_id: str, name: str) -> Datasource:
+        response = self.api.request("DELETE", f"/datasources/{project_id}/{quote(name, safe='')}")
+        return Datasource.model_validate(response.json())
+
+    def test_datasource_connection(self, body: dict[str, Any]) -> ConnectionTestResponse:
+        response = self.api.request("POST", "/datasources/test-connection", json=body)
+        return ConnectionTestResponse.model_validate(response.json())
+
+    def execute_datasource_query(
+        self,
+        project_id: str,
+        name: str,
+        query: str,
+        dataframe_name: str = "df",
+        limit: int = 10000,
+    ) -> QueryResult:
+        response = self.api.request(
+            "POST",
+            f"/datasources/{project_id}/{quote(name, safe='')}/execute",
+            json={"query": query, "dataframe_name": dataframe_name, "limit": limit},
+        )
+        return QueryResult.model_validate(response.json())
 
     # -- Outputs ----------------------------------------------------------
 
