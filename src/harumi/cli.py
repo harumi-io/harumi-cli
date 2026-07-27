@@ -5,6 +5,7 @@
     harumi whoami
     harumi specs
     harumi notebooks [--project <id>]
+    harumi projects create <NAME> [--customer-id <id>] [--template-id <id>] [--no-bind]
     harumi init --project <id> [--api-url <url>] [--git-url <url>]
     harumi run [--branch <b>] [--commit <sha>] [--command <c>] [--kernel <k>]
                [--watch] [--output-dir <dir>]
@@ -37,6 +38,15 @@ endpoints — the git-first pivot re-keys these from notebook_id to
 project_id; calls no-op with a clear error until the backend lands).
 Cron is a raw 5-field expression interpreted in UTC; there is no
 pause/enable flag — delete the schedule to stop it firing.
+
+Creating projects
+-----------------
+`harumi projects create` calls the real `POST /projects` endpoint. Repo
+provisioning on create is an ASSUMED contract (part of the git-first
+pivot) — the command errors clearly if harumi-api doesn't yet return repo
+metadata, instead of leaving you with an unusable project. On success it
+binds the current directory the same way `harumi init` does (skip with
+`--no-bind`).
 """
 
 from __future__ import annotations
@@ -317,31 +327,19 @@ def notebooks(
 # harumi init
 # ---------------------------------------------------------------------------
 
-@app.command()
-@_handle_errors
-def init(
-    project: str = typer.Option(..., "--project", "-p", help="Harumi project id to bind this directory to."),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    git_url: Optional[str] = typer.Option(None, "--git-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
-) -> None:
-    """Bind the current directory to a Harumi project and configure the git remote.
+def _bind_and_configure_remote(project_id: str, repo) -> None:
+    """Write .harumi/config.json for `project_id`/`repo` and configure the
+    `harumi` git remote in the current directory, if possible.
 
-    Fetches the project's Gitea repo from harumi-api, writes .harumi/config.json,
-    and configures the `harumi` git remote for HTTPS+token pushes.
-
-    Run this once per project directory before using `harumi run`.
+    Shared by `init` (binding an existing project) and `projects create`
+    (binding a just-created project). `repo` is a `ProjectRepo`-shaped object
+    (owner/name/clone_url/default_branch).
     """
-    client = _get_client(api_url=api_url, git_url=git_url, org=org)
-
-    console.print(f"Fetching repo for project [bold]{project}[/bold]...")
-    repo = client.get_project_repo(project)
-
     from harumi.config import ProjectBinding, RepoBinding
 
     binding = ProjectBinding.write(
         Path.cwd(),
-        project_id=project,
+        project_id=project_id,
         repo=RepoBinding(
             owner=repo.owner,
             name=repo.name,
@@ -351,7 +349,7 @@ def init(
     )
     console.print(
         f"Wrote [bold]{binding.config_path}[/bold] "
-        f"(project={project}, repo={repo.owner}/{repo.name})."
+        f"(project={project_id}, repo={repo.owner}/{repo.name})."
     )
 
     # Configure the harumi git remote if we're inside a git repo.
@@ -382,6 +380,71 @@ def init(
         f"[bold green]Remote `harumi` configured[/bold green] → {repo.clone_url}\n"
         f"Push your code:  git push harumi {repo.default_branch}"
     )
+
+
+@app.command()
+@_handle_errors
+def init(
+    project: str = typer.Option(..., "--project", "-p", help="Harumi project id to bind this directory to."),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    git_url: Optional[str] = typer.Option(None, "--git-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Bind the current directory to a Harumi project and configure the git remote.
+
+    Fetches the project's Gitea repo from harumi-api, writes .harumi/config.json,
+    and configures the `harumi` git remote for HTTPS+token pushes.
+
+    Run this once per project directory before using `harumi run`.
+    """
+    client = _get_client(api_url=api_url, git_url=git_url, org=org)
+
+    console.print(f"Fetching repo for project [bold]{project}[/bold]...")
+    repo = client.get_project_repo(project)
+
+    _bind_and_configure_remote(project, repo)
+
+
+# ---------------------------------------------------------------------------
+# harumi projects
+# ---------------------------------------------------------------------------
+
+projects_app = typer.Typer(help="Create Harumi projects.")
+app.add_typer(projects_app, name="projects")
+
+
+@projects_app.command("create")
+@_handle_errors
+def projects_create(
+    name: str = typer.Argument(..., help="Project name."),
+    customer_id: Optional[str] = typer.Option(None, "--customer-id", help="Customer/organization id (optional)."),
+    template_id: Optional[str] = typer.Option(None, "--template-id", help="Template id to pre-configure the project (optional)."),
+    bind: bool = typer.Option(
+        True, "--bind/--no-bind", help="Bind the current directory to the new project (like `harumi init`)."
+    ),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    git_url: Optional[str] = typer.Option(None, "--git-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Create a new Harumi project and its Gitea repo, then bind this directory to it.
+
+    ASSUMED CONTRACT: `POST /projects` is real today but only creates a bare
+    project row — it does not yet provision a Gitea repo. Under the
+    git-first pivot (one project <-> one notebook/repo), project creation is
+    expected to provision the repo atomically. This command errors clearly
+    if harumi-api doesn't return repo metadata yet, rather than silently
+    leaving you with a project you can't `harumi init` into.
+    """
+    client = _get_client(api_url=api_url, git_url=git_url, org=org)
+
+    console.print(f"Creating project [bold]{name}[/bold]...")
+    project = client.create_project(name, customer_id=customer_id, template_id=template_id)
+    console.print(f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id}).")
+
+    if not bind:
+        return
+
+    _bind_and_configure_remote(project.id, project.repo)
 
 
 # ---------------------------------------------------------------------------

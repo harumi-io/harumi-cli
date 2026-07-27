@@ -8,6 +8,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [config set-org](#config-set-org)
 - [specs](#specs)
 - [notebooks](#notebooks)
+- [projects create](#projects-create)
 - [init](#init)
 - [run](#run)
 - [outputs](#outputs)
@@ -65,6 +66,22 @@ harumi notebooks [--project PROJECT_ID] [--api-url URL] [--org ORG]
 ```
 
 Lists every project and its notebooks. Useful for finding `PROJECT_ID` to pass to `harumi init`.
+
+## `projects create`
+
+```
+harumi projects create NAME [--customer-id ID] [--template-id ID] [--bind/--no-bind]
+                       [--api-url URL] [--git-url URL] [--org ORG]
+```
+
+Creates a new Harumi project, then binds the current directory to it (same behavior as `harumi init`) unless `--no-bind` is passed.
+
+**`POST /projects` is a real, live endpoint today** — but it only creates a bare project row (`{name, customer_id?, notebook_ids: [], template_id?}`). It does **not** yet provision a Gitea repo. Under the git-first pivot (one project <-> one notebook/repo), project creation is expected to become atomic: create the project *and* its repo in one call, returning a `repo` field.
+
+`create_project()` in `client.py` calls the real endpoint and checks the response:
+
+- If `repo` is present → returns the project and (unless `--no-bind`) writes `.harumi/config.json` + configures the `harumi` git remote, exactly like `init`.
+- If `repo` is **absent** (today's real behavior) → raises a clear `HarumiError` naming the created project id and explaining that repo provisioning isn't live yet, instead of silently leaving a project you can't `harumi init`/`run` against.
 
 ## `init`
 
@@ -227,6 +244,7 @@ Precedence (highest first): **CLI flags > env vars > `~/.harumi/config.json` > d
 | `No fields to update.` | `datasources update` or `schedules update` called with no flags | Pass at least one field flag (or `--set-credentials` for datasources) |
 | `Could not list/create/update/delete schedule(s) ... not yet available` | Project-scoped `/projects/{id}/schedules` endpoint not deployed yet | Wait for the backend's `notebook_id` → `project_id` schedule migration |
 | `harumi-api returned HTTP 400: Invalid cron expression: ...` | `schedules add/update --cron` failed server-side `croniter` validation | Fix the cron string (5 fields: minute hour day month weekday) |
+| `Project '...' was created, but harumi-api did not return repo metadata` | `projects create` succeeded but the backend's atomic project+repo provisioning isn't live yet | Wait for the git-first pivot's project-creation work; the project row itself was created and is visible via `harumi notebooks` |
 
 ## Python library (`Client`) alternative
 
@@ -263,6 +281,9 @@ schedule = client.create_schedule(
     binding.project_id,
     {"cron": "0 9 * * *", "start_at": "2026-01-22T09:00:00Z", "kernel_spec": "or_python_small"},
 )
+
+# Create a project (real endpoint; repo provisioning is still an assumed contract)
+project = client.create_project("New Project")  # raises HarumiError if no repo yet
 ```
 
 `Client(api_url=..., git_url=..., org_id=...)` accepts the same overrides as the CLI flags. Requires the user to have run `harumi login` at least once.

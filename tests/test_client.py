@@ -235,6 +235,53 @@ def test_client_get_project_repo_wraps_missing_endpoint():
         client.get_project_repo("proj-1")
 
 
+def test_client_create_project_returns_project_with_repo():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects"
+        body = json.loads(request.content)
+        assert body["name"] == "New Project"
+        return httpx.Response(
+            201,
+            json={
+                "id": "proj-2",
+                "name": "New Project",
+                "notebook_ids": [],
+                "repo": {
+                    "owner": "dev-alice",
+                    "name": "new-project",
+                    "clone_url": "https://git.dev.harumi.io/dev-alice/new-project.git",
+                    "default_branch": "main",
+                },
+            },
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    project = client.create_project("New Project")
+
+    assert project.id == "proj-2"
+    assert project.repo is not None
+    assert project.repo.clone_url == "https://git.dev.harumi.io/dev-alice/new-project.git"
+
+
+def test_client_create_project_without_repo_raises_clear_error():
+    """Today's real POST /projects only creates a bare project (no repo yet)."""
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects"
+        return httpx.Response(
+            201,
+            json={"id": "proj-3", "name": "Bare Project", "notebook_ids": []},
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+
+    with pytest.raises(HarumiError, match="did not return"):
+        client.create_project("Bare Project")
+
+
 def test_client_download_output_writes_zip_to_dest(tmp_path):
     _write_credentials()
 

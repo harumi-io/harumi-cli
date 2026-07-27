@@ -138,6 +138,25 @@ class ProjectRepoBranch(BaseModel):
     commit_sha: Optional[str] = None
 
 
+class ProjectWithRepo(BaseModel):
+    """Response from POST /projects (assumed atomic create+provision contract).
+
+    Assumed contract — today POST /projects is real but only creates a bare
+    project row (no repo). This mirrors the git-pivot's target shape where
+    creating a project also provisions its Gitea repo. `repo` is optional so
+    a bare-project response (today's real behavior) can still be parsed;
+    client.create_project() surfaces the missing-repo case explicitly.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    kernel_spec: Optional[str] = None
+    notebook_ids: list[str] = Field(default_factory=list)
+    repo: Optional[ProjectRepo] = None
+
+
 class ProjectRunResponse(BaseModel):
     """Response from POST /projects/{id}/execute.
 

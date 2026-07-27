@@ -6,6 +6,7 @@ Assumed git-pivot endpoints (Workstream B/C — not yet in harumi-api):
   GET  /projects/{id}/repo/branches  -> list[ProjectRepoBranch]
   POST /projects/{id}/execute        -> ProjectRunResponse
   POST /users/git-token              -> GitUserToken
+  POST /projects/{project_id}/schedules (+ /{schedule_id})  -> Schedule
 
 Methods wrapping assumed endpoints are clearly marked.  When the coworker's
 branch lands, update the path strings and schema field names here — all
@@ -13,6 +14,10 @@ callers in cli.py go through this layer so changes are contained.
 
 Datasource endpoints (below) are real and exist today in harumi-api
 (src/api/datasources/router.py) — no wrapping needed.
+
+POST /projects is also real today, but only creates a bare project (no
+repo) — create_project() calls it and clearly flags the still-assumed
+repo-provisioning contract if `repo` comes back empty. See create_project().
 """
 
 from __future__ import annotations
@@ -39,6 +44,7 @@ from harumi.models import (
     ProjectRepo,
     ProjectRepoBranch,
     ProjectRunResponse,
+    ProjectWithRepo,
     QueryResult,
     Schedule,
 )
@@ -214,6 +220,47 @@ class Client:
     def get_specs(self) -> list[KernelSpec]:
         response = self.api.request("GET", "/sandbox/specs")
         return [KernelSpec.model_validate(s) for s in response.json()]
+
+    # -- Project creation ---------------------------------------------------
+    # POST /projects is a REAL, live endpoint today — but it only creates a
+    # bare project row (name/customer_id/notebook_ids/template_id). It does
+    # NOT yet provision a Gitea repo. Per the git-first pivot, project
+    # creation is expected to become atomic (create project + provision its
+    # repo in one call). This method calls the real endpoint and clearly
+    # flags the missing `repo` field rather than silently returning a
+    # half-usable project (one you can't `harumi init` into yet).
+
+    def create_project(
+        self,
+        name: str,
+        customer_id: Optional[str] = None,
+        template_id: Optional[str] = None,
+    ) -> ProjectWithRepo:
+        """Create a new Harumi project.
+
+        Calls the real POST /projects endpoint. Once the git-first pivot
+        lands, the response is expected to include a `repo` field (the
+        project's auto-provisioned Gitea repo) so the project is immediately
+        usable with `harumi init`. Until then, raises HarumiError if `repo`
+        is absent so callers don't proceed assuming a repo exists.
+        """
+        body: dict[str, Any] = {"name": name}
+        if customer_id:
+            body["customer_id"] = customer_id
+        if template_id:
+            body["template_id"] = template_id
+
+        response = self.api.request("POST", "/projects", json=body)
+        project = ProjectWithRepo.model_validate(response.json())
+        if project.repo is None:
+            raise HarumiError(
+                f"Project {project.id!r} was created, but harumi-api did not return "
+                "repo metadata (no Gitea repo was provisioned). Atomic project+repo "
+                "creation is not yet available on this harumi-api version — ask your "
+                "team when the git-first pivot's project creation flow lands, then "
+                "retry `harumi init --project " + project.id + "` once it does."
+            )
+        return project
 
     # -- Git-pivot: repo metadata -----------------------------------------
     # ASSUMED ENDPOINTS: GET /projects/{id}/repo and /repo/branches

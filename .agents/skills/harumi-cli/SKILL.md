@@ -1,6 +1,6 @@
 ---
 name: harumi-cli
-description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to manage project datasources (database connections), and to manage project cron schedules. Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi init`, `harumi run`, `harumi notebooks`, `harumi specs`, `harumi outputs`, `harumi datasources`, `harumi schedules`, asks about Harumi kernel specs, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, or needs to fetch/download results from a Harumi run.
+description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to create new projects, to manage project datasources (database connections), and to manage project cron schedules. Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi init`, `harumi run`, `harumi notebooks`, `harumi specs`, `harumi outputs`, `harumi projects`, `harumi datasources`, `harumi schedules`, asks about creating a new Harumi project, Harumi kernel specs, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, or needs to fetch/download results from a Harumi run.
 ---
 
 # Harumi CLI
@@ -38,6 +38,14 @@ harumi init --project <PROJECT_ID>
 This fetches the Gitea repo metadata from harumi-api, writes `.harumi/config.json`, and configures the `harumi` git remote for authenticated HTTPS pushes.
 
 Find project IDs with: `harumi notebooks`
+
+**Creating a brand-new project instead of binding to an existing one:**
+
+```bash
+harumi projects create "My Project" [--customer-id ID] [--template-id ID]
+```
+
+This calls the real `POST /projects` endpoint, then binds the current directory the same way `harumi init` does (pass `--no-bind` to skip that). **Repo provisioning on create is an assumed contract** — the git-first pivot is expected to make project creation atomically provision the project's Gitea repo. Until that lands, `harumi projects create` will succeed in creating the bare project but then raise a clear error (rather than silently leaving you with a project you can't run against) if harumi-api doesn't return repo metadata yet.
 
 ### 2. Run code
 
