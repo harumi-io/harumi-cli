@@ -12,7 +12,7 @@ import pytest
 
 from harumi.client import ApiClient, Client
 from harumi.config import Config
-from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
+from harumi.errors import ApiError, NotAuthenticatedError
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +23,11 @@ def isolated_harumi_home(tmp_path, monkeypatch):
     monkeypatch.setattr("harumi.config.HARUMI_HOME", tmp_path)
     monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "credentials.json")
     monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "config.json")
+    monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
+    monkeypatch.delenv("HARUMI_ENV", raising=False)
+    monkeypatch.delenv("HARUMI_API_URL", raising=False)
+    monkeypatch.delenv("HARUMI_GIT_URL", raising=False)
+    monkeypatch.delenv("HARUMI_ORG", raising=False)
     yield
 
 
@@ -185,18 +190,18 @@ def test_client_execute_project_queues_run():
         return httpx.Response(
             202,
             json={
-                "task_id": "task-1",
+                "execution_log_id": "log-1",
                 "status": "queued",
-                "message": "Run queued successfully",
-                "output_id": "out-1",
+                "workflow_run_id": "wf-1",
+                "project_run_id": "run-1",
             },
         )
 
     client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
     response = client.execute_project("proj-1", branch="main")
 
-    assert response.task_id == "task-1"
-    assert response.output_id == "out-1"
+    assert response.execution_log_id == "log-1"
+    assert response.project_run_id == "run-1"
 
 
 def test_client_get_project_repo_returns_repo():
@@ -207,6 +212,7 @@ def test_client_get_project_repo_returns_repo():
         return httpx.Response(
             200,
             json={
+                "project_id": "proj-1",
                 "owner": "dev-alice",
                 "name": "supply-chain",
                 "clone_url": "https://git.dev.harumi.io/dev-alice/supply-chain.git",
@@ -222,38 +228,42 @@ def test_client_get_project_repo_returns_repo():
     assert repo.default_branch == "main"
 
 
-def test_client_get_project_repo_wraps_missing_endpoint():
-    """When the backend doesn't have the endpoint yet, surface a clear message."""
+def test_client_get_project_repo_raises_api_error_on_404():
     _write_credentials()
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(404, json={"detail": "Not Found"})
+        return httpx.Response(404, json={"detail": "No repository provisioned for this project"})
 
     client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
 
-    with pytest.raises(HarumiError, match="not yet available"):
+    with pytest.raises(ApiError) as exc_info:
         client.get_project_repo("proj-1")
+    assert exc_info.value.status_code == 404
 
 
-def test_client_create_project_returns_project_with_repo():
+def test_client_create_project_fetches_repo_separately():
+    """POST /projects returns a bare project; the repo is a separate GET."""
     _write_credentials()
 
+    calls = []
+
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/projects"
-        body = json.loads(request.content)
-        assert body["name"] == "New Project"
+        calls.append(request.url.path)
+        if request.url.path == "/api/projects":
+            body = json.loads(request.content)
+            assert body["name"] == "New Project"
+            return httpx.Response(
+                201, json={"id": "proj-2", "name": "New Project", "notebook_ids": []}
+            )
+        assert request.url.path == "/api/projects/proj-2/repo"
         return httpx.Response(
-            201,
+            200,
             json={
-                "id": "proj-2",
-                "name": "New Project",
-                "notebook_ids": [],
-                "repo": {
-                    "owner": "dev-alice",
-                    "name": "new-project",
-                    "clone_url": "https://git.dev.harumi.io/dev-alice/new-project.git",
-                    "default_branch": "main",
-                },
+                "project_id": "proj-2",
+                "owner": "dev-alice",
+                "name": "new-project",
+                "clone_url": "https://git.dev.harumi.io/dev-alice/new-project.git",
+                "default_branch": "main",
             },
         )
 
@@ -263,37 +273,235 @@ def test_client_create_project_returns_project_with_repo():
     assert project.id == "proj-2"
     assert project.repo is not None
     assert project.repo.clone_url == "https://git.dev.harumi.io/dev-alice/new-project.git"
+    assert calls == ["/api/projects", "/api/projects/proj-2/repo"]
 
 
-def test_client_create_project_without_repo_raises_clear_error():
-    """Today's real POST /projects only creates a bare project (no repo yet)."""
+def test_client_create_project_repo_none_when_not_provisioned():
+    """A 404 fetching the repo (Harumi Git unconfigured) leaves repo=None, not an error."""
     _write_credentials()
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/projects"
+        if request.url.path == "/api/projects":
+            return httpx.Response(
+                201, json={"id": "proj-3", "name": "Bare Project", "notebook_ids": []}
+            )
+        return httpx.Response(404, json={"detail": "No repository provisioned for this project"})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    project = client.create_project("Bare Project")
+
+    assert project.id == "proj-3"
+    assert project.repo is None
+
+
+def test_client_get_project_returns_project():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1"
+        return httpx.Response(200, json={"id": "proj-1", "name": "Routing", "notebook_ids": []})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    project = client.get_project("proj-1")
+
+    assert project.id == "proj-1"
+    assert project.name == "Routing"
+
+
+def test_client_update_project_sends_patch_body():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1"
+        assert request.method == "PUT"
+        body = json.loads(request.content)
+        assert body == {"name": "Renamed"}
+        return httpx.Response(200, json={"id": "proj-1", "name": "Renamed", "notebook_ids": []})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    project = client.update_project("proj-1", {"name": "Renamed"})
+
+    assert project.name == "Renamed"
+
+
+def test_client_delete_project_returns_deleted_project():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1"
+        assert request.method == "DELETE"
+        return httpx.Response(200, json={"id": "proj-1", "name": "Routing", "notebook_ids": []})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    deleted = client.delete_project("proj-1")
+
+    assert deleted.id == "proj-1"
+
+
+def test_client_get_git_token_calls_credentials_endpoint():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/git/credentials"
+        assert request.method == "POST"
         return httpx.Response(
-            201,
-            json={"id": "proj-3", "name": "Bare Project", "notebook_ids": []},
+            200,
+            json={
+                "username": "harumi-alice",
+                "token": "gitea-token-abc",
+                "git_url": "https://git.dev.harumi.io",
+            },
         )
 
     client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    creds = client.get_git_token()
 
-    with pytest.raises(HarumiError, match="did not return"):
-        client.create_project("Bare Project")
+    assert creds.username == "harumi-alice"
+    assert creds.token == "gitea-token-abc"
 
 
-def test_client_download_output_writes_zip_to_dest(tmp_path):
+def test_client_list_repo_files_and_get_file_content():
     _write_credentials()
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/notebooks/proj-1/outputs/out-1/download"
-        return httpx.Response(200, stream=httpx.ByteStream(b"PK\x03\x04fakezip"))
+        if request.url.path == "/api/projects/proj-1/repo/files":
+            return httpx.Response(
+                200,
+                json=[{"name": "main.py", "path": "main.py", "type": "file", "size": 10}],
+            )
+        assert request.url.path == "/api/projects/proj-1/repo/file-content"
+        assert request.url.params["path"] == "main.py"
+        return httpx.Response(
+            200,
+            json={"path": "main.py", "sha": "abc123", "encoding": "base64", "content": "cHJpbnQoJ2hpJyk="},
+        )
 
     client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
-    zip_path = client.download_output("proj-1", "out-1", tmp_path)
+    files = client.list_repo_files("proj-1")
+    assert files[0].path == "main.py"
 
-    assert zip_path == tmp_path / "output_out-1.zip"
-    assert zip_path.read_bytes() == b"PK\x03\x04fakezip"
+    content = client.get_repo_file("proj-1", "main.py")
+    assert content.content == "cHJpbnQoJ2hpJyk="
+
+
+def test_client_apply_repo_changes_sends_operations():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1/repo/changes"
+        body = json.loads(request.content)
+        assert body["operations"] == [
+            {"action": "update", "path": "main.py", "content": "aGVsbG8="}
+        ]
+        return httpx.Response(200, json={"commit_sha": "deadbeef", "changed": 1})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    result = client.apply_repo_changes(
+        "proj-1", [{"action": "update", "path": "main.py", "content": "aGVsbG8="}]
+    )
+
+    assert result.commit_sha == "deadbeef"
+    assert result.changed == 1
+
+
+def test_client_list_repo_branches_flags_live():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1/repo/branches"
+        return httpx.Response(
+            200,
+            json=[
+                {"name": "main", "commit_sha": "abc", "is_live": True},
+                {"name": "feature-x", "commit_sha": "def", "is_live": False},
+            ],
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    branches = client.list_repo_branches("proj-1")
+
+    assert branches[0].is_live is True
+    assert branches[1].name == "feature-x"
+
+
+def test_client_list_runs_parses_envelope():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1/runs"
+        return httpx.Response(
+            200,
+            json={
+                "runs": [
+                    {
+                        "id": "run-1",
+                        "project_id": "proj-1",
+                        "status": "completed",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "updated_at": "2026-01-01T00:05:00Z",
+                    }
+                ]
+            },
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    runs = client.list_runs("proj-1")
+
+    assert len(runs) == 1
+    assert runs[0].id == "run-1"
+    assert runs[0].succeeded is True
+    assert runs[0].finished is True
+
+
+def test_client_get_run_surfaces_stdout_and_error():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1/runs/run-1"
+        return httpx.Response(
+            200,
+            json={
+                "id": "run-1",
+                "project_id": "proj-1",
+                "status": "failed",
+                "stdout": "hello\n",
+                "stderr": "",
+                "error": "boom",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:05:00Z",
+            },
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    run = client.get_run("proj-1", "run-1")
+
+    assert run.stdout == "hello\n"
+    assert run.error == "boom"
+    assert run.succeeded is False
+    assert run.finished is True
+
+
+def test_client_cancel_run_posts_to_cancel_endpoint():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1/runs/run-1/cancel"
+        assert request.method == "POST"
+        return httpx.Response(
+            200,
+            json={
+                "id": "run-1",
+                "project_id": "proj-1",
+                "status": "cancelled",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:05:00Z",
+            },
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    run = client.cancel_run("proj-1", "run-1")
+
+    assert run.status == "cancelled"
 
 
 def test_client_list_datasources_parses_envelope():
@@ -458,17 +666,21 @@ def test_client_list_schedules_parses_schedule_array():
         assert request.url.path == "/api/projects/proj-1/schedules"
         return httpx.Response(
             200,
-            json=[
-                {
-                    "id": "sched-1",
-                    "project_id": "proj-1",
-                    "cron": "0 9 * * *",
-                    "start_at": "2026-01-22T09:00:00Z",
-                    "kernel_spec": "or_python_small",
-                    "scenario_name": "Daily Run",
-                    "last_executed_at": None,
-                }
-            ],
+            json={
+                "schedules": [
+                    {
+                        "id": "sched-1",
+                        "project_id": "proj-1",
+                        "cron": "0 9 * * *",
+                        "start_at": "2026-01-22T09:00:00Z",
+                        "git_branch": "main",
+                        "kernel_spec": "or_python_small",
+                        "last_executed_at": None,
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "updated_at": "2026-01-01T00:00:00Z",
+                    }
+                ]
+            },
         )
 
     client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
@@ -477,6 +689,7 @@ def test_client_list_schedules_parses_schedule_array():
     assert len(schedules) == 1
     assert schedules[0].id == "sched-1"
     assert schedules[0].cron == "0 9 * * *"
+    assert schedules[0].git_branch == "main"
     assert schedules[0].kernel_spec == "or_python_small"
 
 
@@ -495,7 +708,10 @@ def test_client_create_schedule_posts_body_and_returns_schedule():
                 "project_id": "proj-1",
                 "cron": "0 9 * * *",
                 "start_at": "2026-01-22T09:00:00Z",
+                "git_branch": "main",
                 "kernel_spec": "or_python_small",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
             },
         )
 
@@ -508,8 +724,7 @@ def test_client_create_schedule_posts_body_and_returns_schedule():
     assert schedule.project_id == "proj-1"
 
 
-def test_client_list_schedules_wraps_missing_endpoint():
-    """When the backend doesn't have the endpoint yet, surface a clear message."""
+def test_client_list_schedules_raises_api_error_on_404():
     _write_credentials()
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -517,20 +732,118 @@ def test_client_list_schedules_wraps_missing_endpoint():
 
     client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
 
-    with pytest.raises(HarumiError, match="not yet available"):
+    with pytest.raises(ApiError) as exc_info:
         client.list_schedules("proj-1")
+    assert exc_info.value.status_code == 404
 
 
-def test_client_create_schedule_wraps_missing_endpoint():
-    """When the backend doesn't have the endpoint yet, surface a clear message."""
+def test_client_delete_schedule_returns_deleted_row():
     _write_credentials()
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(404, json={"detail": "Not Found"})
+        assert request.url.path == "/api/projects/proj-1/schedules/sched-1"
+        assert request.method == "DELETE"
+        return httpx.Response(
+            200,
+            json={
+                "id": "sched-1",
+                "project_id": "proj-1",
+                "cron": "0 9 * * *",
+                "git_branch": "main",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+        )
 
     client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    schedule = client.delete_schedule("proj-1", "sched-1")
 
-    with pytest.raises(HarumiError, match="not yet available"):
-        client.create_schedule("proj-1", {"cron": "0 9 * * *", "start_at": "2026-01-22T09:00:00Z"})
+    assert schedule.id == "sched-1"
+
+
+def test_client_list_secrets_returns_names_and_values():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1/secrets"
+        return httpx.Response(200, json=[{"name": "API_KEY", "value": "***"}])
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    secrets = client.list_secrets("proj-1")
+
+    assert secrets[0].name == "API_KEY"
+
+
+def test_client_create_secret_sends_name_and_value():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1/secrets"
+        body = json.loads(request.content)
+        assert body == {"name": "API_KEY", "value": "s3cr3t"}
+        return httpx.Response(200, json={"name": "API_KEY", "value": "s3cr3t"})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    secret = client.create_secret("proj-1", "API_KEY", "s3cr3t")
+
+    assert secret.name == "API_KEY"
+
+
+def test_client_delete_secret_uses_name_as_secret_id():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1/secrets/API_KEY"
+        assert request.method == "DELETE"
+        return httpx.Response(204)
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    client.delete_secret("proj-1", "API_KEY")
+
+
+def test_client_list_organizations_and_members():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/users/organizations":
+            return httpx.Response(
+                200, json=[{"id": "org-1", "business_name": "Acme", "role": "owner"}]
+            )
+        assert request.url.path == "/api/users/organizations/org-1/users"
+        return httpx.Response(
+            200,
+            json=[
+                {"user_id": "u-1", "role": "owner", "email": "a@example.com", "pending": False}
+            ],
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    orgs = client.list_organizations()
+    assert orgs[0].business_name == "Acme"
+
+    members = client.list_organization_members("org-1")
+    assert members[0].email == "a@example.com"
+
+
+def test_client_get_profile_and_git_credentials_use_new_paths():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/users/profile":
+            return httpx.Response(
+                200, json={"id": "u-1", "email": "a@example.com", "first_name": "Alice"}
+            )
+        assert request.url.path == "/api/git/credentials"
+        return httpx.Response(
+            200,
+            json={"username": "harumi-alice", "token": "tok", "git_url": "https://git.dev.harumi.io"},
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    profile = client.get_profile()
+    assert profile.email == "a@example.com"
+
+    creds = client.get_git_token()
+    assert creds.username == "harumi-alice"
 
 

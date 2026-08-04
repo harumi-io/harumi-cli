@@ -5,34 +5,40 @@ Public API:
     from harumi import Client
 
     client = Client()                 # loads stored credentials
-    result = client.execute_project("proj-id", branch="main", watch=True)
+    result = client.execute_project("proj-id", branch="main")
 """
 
 from __future__ import annotations
 
 from harumi.client import Client
 from harumi.models import (
-    ExecutionOutput,
-    GitUserToken,
+    BranchInfo,
+    GitCredentials,
     KernelSpec,
     LoggedUser,
-    ProjectRepo,
-    ProjectRunResponse,
+    Project,
+    ProjectExecuteResponse,
+    ProjectRun,
     ProjectWithRepo,
+    RepoInfo,
     Schedule,
+    Secret,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "Client",
-    "ExecutionOutput",
-    "GitUserToken",
+    "BranchInfo",
+    "GitCredentials",
     "KernelSpec",
     "LoggedUser",
-    "ProjectRepo",
-    "ProjectRunResponse",
+    "Project",
+    "ProjectExecuteResponse",
+    "ProjectRun",
     "ProjectWithRepo",
+    "RepoInfo",
     "Schedule",
+    "Secret",
     "__version__",
 ]

@@ -1,11 +1,8 @@
 """Pydantic models mirroring harumi-api response shapes.
 
 These intentionally mirror (a subset of) the backend schemas so the CLI/SDK
-can parse responses without depending on harumi-api's package:
-  - LoggedUser  <-> harumi-api/src/api/users/schemas.py:LoggedUser
-  - KernelSpec  <-> harumi-api/src/api/sandbox/specs.py:get_all_specs()
-  - ExecutionOutput <-> harumi-api/src/api/notebooks/schemas.py:NotebookOutput
-  - ProjectRepo / ProjectRunResponse <-> assumed git-pivot endpoints (Workstream B/C)
+can parse responses without depending on harumi-api's package. Each section
+below cites the harumi-api schema file it mirrors.
 """
 
 from __future__ import annotations
@@ -29,6 +26,19 @@ class LoggedUser(BaseModel):
     expires_at: Optional[int] = None
 
 
+class UserProfile(BaseModel):
+    """Response from GET/POST /users/profile <-> users/schemas.py:UserProfile."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: Optional[str] = None
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    bio: Optional[str] = None
+    avatar: Optional[str] = None
+
+
 class KernelSpecSize(BaseModel):
     name: str
     cpu: float
@@ -49,12 +59,19 @@ class KernelSpec(BaseModel):
 
 
 class Project(BaseModel):
+    """A Harumi project <-> projects/schemas.py:Project."""
+
     model_config = ConfigDict(extra="allow")
 
     id: str
     name: str
+    customer_id: Optional[str] = None
     kernel_spec: Optional[str] = None
     notebook_ids: list[str] = Field(default_factory=list)
+    template_id: Optional[str] = None
+    role_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class Notebook(BaseModel):
@@ -62,31 +79,6 @@ class Notebook(BaseModel):
 
     id: str
     name: Optional[str] = None
-
-
-class ExecutionOutput(BaseModel):
-    """One entry from GET /notebooks/{id}/outputs (NotebookOutput schema)."""
-
-    model_config = ConfigDict(extra="allow")
-
-    id: str
-    notebook_id: str
-    scenario_id: Optional[str] = None
-    scenario_name: Optional[str] = None
-    status: Optional[str] = None
-    started: Optional[datetime] = None
-    ended: Optional[datetime] = None
-    output_url: Optional[str] = None
-    log_url: Optional[str] = None
-    execution_log_id: Optional[str] = None
-
-    @property
-    def finished(self) -> bool:
-        return self.status in {"finished", "completed", "failed", "timeout", "cancelled"}
-
-    @property
-    def succeeded(self) -> bool:
-        return self.status in {"finished", "completed"}
 
 
 class InteractiveResult(BaseModel):
@@ -110,42 +102,83 @@ class InteractiveResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Git-pivot models (assumed contract — Workstream B/C of the git-first pivot)
-# These mirror the planned endpoints in harumi-api. Update when the coworker's
-# branch lands and the real schemas are confirmed.
+# Git repo (Gitea) <-> harumi-api/src/api/git/schemas.py — all live endpoints.
 # ---------------------------------------------------------------------------
 
-class ProjectRepo(BaseModel):
-    """Response from GET /projects/{id}/repo.
-
-    Assumed contract — endpoint does not exist yet in harumi-api.
-    """
+class RepoInfo(BaseModel):
+    """Response from GET /projects/{id}/repo."""
 
     model_config = ConfigDict(extra="allow")
 
+    project_id: Optional[str] = None
     owner: str
     name: str
     clone_url: str
     default_branch: str = "main"
 
 
-class ProjectRepoBranch(BaseModel):
-    """One entry from GET /projects/{id}/repo/branches."""
+class BranchInfo(BaseModel):
+    """One entry from GET /projects/{id}/repo/branches. `is_live` marks the
+    default branch — the version apps/schedules always run."""
 
     model_config = ConfigDict(extra="allow")
 
     name: str
     commit_sha: Optional[str] = None
+    is_live: bool = False
+
+
+class PromoteResult(BaseModel):
+    """Response from POST /projects/{id}/repo/promote."""
+
+    model_config = ConfigDict(extra="allow")
+
+    merged: bool
+    conflict: bool = False
+    pr_number: Optional[int] = None
+    message: Optional[str] = None
+    deleted: Optional[bool] = None
+
+
+class RepoFileEntry(BaseModel):
+    """One entry from GET /projects/{id}/repo/files (flat, recursive)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    path: str
+    type: str
+    sha: Optional[str] = None
+    size: Optional[int] = None
+
+
+class RepoFileContent(BaseModel):
+    """Response from GET /projects/{id}/repo/file-content. `content` is base64."""
+
+    model_config = ConfigDict(extra="allow")
+
+    path: str
+    sha: Optional[str] = None
+    encoding: str = "base64"
+    content: str = ""
+
+
+class RepoChangesResult(BaseModel):
+    """Response from POST /projects/{id}/repo/changes (the one write endpoint)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    commit_sha: Optional[str] = None
+    changed: int = 0
 
 
 class ProjectWithRepo(BaseModel):
-    """Response from POST /projects (assumed atomic create+provision contract).
+    """A just-created project plus its (best-effort, auto-provisioned) Gitea repo.
 
-    Assumed contract — today POST /projects is real but only creates a bare
-    project row (no repo). This mirrors the git-pivot's target shape where
-    creating a project also provisions its Gitea repo. `repo` is optional so
-    a bare-project response (today's real behavior) can still be parsed;
-    client.create_project() surfaces the missing-repo case explicitly.
+    `POST /projects` provisions the repo server-side but returns a bare
+    `Project` (no `repo` field); the CLI fetches it separately via
+    `GET /projects/{id}/repo`. `repo` is `None` only when Harumi Git isn't
+    configured on the backend (e.g. local dev without Gitea).
     """
 
     model_config = ConfigDict(extra="allow")
@@ -154,41 +187,76 @@ class ProjectWithRepo(BaseModel):
     name: str
     kernel_spec: Optional[str] = None
     notebook_ids: list[str] = Field(default_factory=list)
-    repo: Optional[ProjectRepo] = None
+    repo: Optional[RepoInfo] = None
 
 
-class ProjectRunResponse(BaseModel):
-    """Response from POST /projects/{id}/execute.
-
-    Assumed contract — endpoint does not exist yet in harumi-api.
-    Mirrors the shape of NotebookExecuteResponse so wait_for_output
-    can be reused unchanged.
-    """
+class GitCredentials(BaseModel):
+    """Response from POST /git/credentials (provisions the CLI's Gitea identity)."""
 
     model_config = ConfigDict(extra="allow")
 
-    task_id: str
-    status: str
-    message: str
-    output_id: Optional[str] = None
-    execution_log_id: Optional[str] = None
-
-
-class GitUserToken(BaseModel):
-    """Response from POST /users/git-token (assumed — per-user Gitea token).
-
-    Assumed contract — endpoint does not exist yet in harumi-api.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    token: str
     username: str
+    token: str
+    git_url: str
 
 
 # ---------------------------------------------------------------------------
-# Datasource models <-> harumi-api/src/api/datasources/schemas.py
-# These endpoints exist today (not assumed) — see client.py.
+# Runs <-> harumi-api/src/api/git/schemas.py:ProjectRun/ProjectExecuteResponse
+# ---------------------------------------------------------------------------
+
+_TERMINAL_RUN_STATUSES = {"completed", "finished", "failed", "timeout", "cancelled"}
+_SUCCESS_RUN_STATUSES = {"completed", "finished"}
+
+
+class ProjectExecuteResponse(BaseModel):
+    """Response from POST /projects/{id}/execute (202)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    execution_log_id: str
+    status: str
+    workflow_run_id: Optional[str] = None
+    project_run_id: Optional[str] = None
+
+
+class ProjectRun(BaseModel):
+    """One entry from GET /projects/{id}/runs, or the single-run detail (which
+    additionally populates stdout/stderr/error)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    project_id: str
+    execution_log_id: Optional[str] = None
+    run_type: Optional[str] = None
+    source: Optional[str] = None
+    git_branch: Optional[str] = None
+    git_commit: Optional[str] = None
+    command: Optional[str] = None
+    kernel_spec: Optional[str] = None
+    status: str
+    exit_code: Optional[int] = None
+    output_url: Optional[str] = None
+    triggered_by: Optional[str] = None
+    stdout: Optional[str] = None
+    stderr: Optional[str] = None
+    error: Optional[str] = None
+    started: Optional[datetime] = None
+    ended: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    @property
+    def finished(self) -> bool:
+        return self.status in _TERMINAL_RUN_STATUSES
+
+    @property
+    def succeeded(self) -> bool:
+        return self.status in _SUCCESS_RUN_STATUSES
+
+
+# ---------------------------------------------------------------------------
+# Datasource models <-> harumi-api/src/api/datasources/schemas.py — live.
 # ---------------------------------------------------------------------------
 
 class Datasource(BaseModel):
@@ -245,36 +313,67 @@ class QueryResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Schedule model <-> assumed project-scoped re-key of
-# harumi-api/src/api/notebooks/schemas.py:NotebookSchedule
-#
-# Assumed contract — the real endpoints today are notebook_id-scoped
-# (/notebooks/{id}/schedules). This mirrors that shape re-keyed to
-# project_id per the git-first pivot (one project <-> one notebook/repo).
-# Update field names when the coworker's harumi-api branch lands.
+# Schedule <-> harumi-api/src/api/git/schemas.py:ProjectSchedule — live,
+# project-scoped git-ref cron schedules.
 # ---------------------------------------------------------------------------
 
 class Schedule(BaseModel):
-    """A project-scoped cron schedule.
-
-    Assumed contract — endpoint does not exist yet in harumi-api.
-    """
-
     model_config = ConfigDict(extra="allow")
 
     id: str
     project_id: str
     cron: str
     start_at: Optional[datetime] = None
-    scenario_id: Optional[str] = None
-    scenario_name: Optional[str] = None
-    collection_id: Optional[str] = None
-    collection_name: Optional[str] = None
+    git_branch: str = "main"
+    git_commit: Optional[str] = None
+    command: Optional[str] = None
+    kernel_spec: str = "or_python_small"
     output_format: Optional[str] = None
     email_to: Optional[str] = None
-    kernel_spec: str = "or_python_small"
+    status: Optional[str] = None
     created_by: Optional[str] = None
     updated_by: Optional[str] = None
     last_executed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+# ---------------------------------------------------------------------------
+# Secrets <-> harumi-api/src/api/projects/schemas.py:Secret — live.
+# Stored in AWS SSM under /harumi/projects/{id}/secrets/{name}; `secret_id`
+# used by the delete endpoint is just the secret's name.
+# ---------------------------------------------------------------------------
+
+class Secret(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    value: str
+
+
+# ---------------------------------------------------------------------------
+# Organizations / members <-> harumi-api/src/api/users/schemas.py — live.
+# ---------------------------------------------------------------------------
+
+class Organization(BaseModel):
+    """Response entry from GET /users/organizations, or from create/update."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    business_name: str
+    role: Optional[str] = None
+    role_name: Optional[str] = None
+
+
+class OrganizationMember(BaseModel):
+    """One entry from GET /users/organizations/{id}/users."""
+
+    model_config = ConfigDict(extra="allow")
+
+    user_id: str
+    role: str
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    pending: bool = False

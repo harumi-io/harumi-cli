@@ -1,23 +1,9 @@
 """HTTP client for harumi-api: auth injection, 401-refresh-and-retry, and the
 public `Client` SDK surface used by both the CLI and library consumers.
 
-Assumed git-pivot endpoints (Workstream B/C — not yet in harumi-api):
-  GET  /projects/{id}/repo           -> ProjectRepo
-  GET  /projects/{id}/repo/branches  -> list[ProjectRepoBranch]
-  POST /projects/{id}/execute        -> ProjectRunResponse
-  POST /users/git-token              -> GitUserToken
-  POST /projects/{project_id}/schedules (+ /{schedule_id})  -> Schedule
-
-Methods wrapping assumed endpoints are clearly marked.  When the coworker's
-branch lands, update the path strings and schema field names here — all
-callers in cli.py go through this layer so changes are contained.
-
-Datasource endpoints (below) are real and exist today in harumi-api
-(src/api/datasources/router.py) — no wrapping needed.
-
-POST /projects is also real today, but only creates a bare project (no
-repo) — create_project() calls it and clearly flags the still-assumed
-repo-provisioning contract if `repo` comes back empty. See create_project().
+All paths below are confirmed live in harumi-api (see src/api/*/router.py in
+that repo). Every caller in cli.py goes through this layer so a future path
+or schema change only needs to be made here.
 """
 
 from __future__ import annotations
@@ -31,23 +17,36 @@ import httpx
 
 from harumi import auth
 from harumi.config import Config
-from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
+from harumi.errors import ApiError, NotAuthenticatedError
 from harumi.models import (
+    BranchInfo,
     ConnectionTestResponse,
     Datasource,
     DatasourceList,
-    ExecutionOutput,
-    GitUserToken,
+    GitCredentials,
     KernelSpec,
     Notebook,
+    Organization,
+    OrganizationMember,
     Project,
-    ProjectRepo,
-    ProjectRepoBranch,
-    ProjectRunResponse,
+    ProjectExecuteResponse,
+    ProjectRun,
     ProjectWithRepo,
+    PromoteResult,
     QueryResult,
+    RepoChangesResult,
+    RepoFileContent,
+    RepoFileEntry,
+    RepoInfo,
     Schedule,
+    Secret,
+    UserProfile,
 )
+
+
+def _q(value: str) -> str:
+    """URL-quote a path segment (names/ids that may contain spaces, slashes)."""
+    return quote(value, safe="")
 
 
 class ApiClient:
@@ -118,17 +117,18 @@ class ApiClient:
         path: str,
         *,
         json: Any = None,
+        params: Optional[dict[str, Any]] = None,
         timeout: Optional[float] = None,
     ) -> Iterator[httpx.Response]:
-        """Open a streaming (e.g. SSE) request. Retries once on 401 like
-        `request()`, but since the retry needs a fresh connection, the
+        """Open a streaming (e.g. file download) request. Retries once on 401
+        like `request()`, but since the retry needs a fresh connection, the
         auth check happens eagerly before the stream is opened.
         """
         url = f"{self.config.api_url}{path}"
         headers = self._headers()
 
         with httpx.Client(timeout=timeout or self.timeout, transport=self.transport) as client:
-            with client.stream(method, url, json=json, headers=headers) as response:
+            with client.stream(method, url, json=json, params=params, headers=headers) as response:
                 if response.status_code == 401:
                     creds = auth.current_credentials()
                     if not creds or not creds.get("refresh_token"):
@@ -136,7 +136,7 @@ class ApiClient:
                     auth.refresh_session(self.config, creds["refresh_token"], transport=self.transport)
                     headers = self._headers()
                     with client.stream(
-                        method, url, json=json, headers=headers
+                        method, url, json=json, params=params, headers=headers
                     ) as retried_response:
                         _raise_for_status(retried_response, streamed=True)
                         yield retried_response
@@ -169,12 +169,15 @@ class Client:
         api_url: Optional[str] = None,
         git_url: Optional[str] = None,
         org_id: Optional[str] = None,
+        environment: Optional[str] = None,
         transport: Optional[httpx.BaseTransport] = None,
     ) -> None:
-        self.config = Config.load(api_url=api_url, git_url=git_url, org_id=org_id)
+        self.config = Config.load(
+            api_url=api_url, git_url=git_url, org_id=org_id, environment=environment
+        )
         self.api = ApiClient(self.config, transport=transport)
 
-    # -- Auth -------------------------------------------------------------
+    # -- Auth ---------------------------------------------------------------
 
     def request_otp(self, email: str) -> None:
         auth.request_otp(self.config, email)
@@ -185,33 +188,42 @@ class Client:
     def logout(self) -> None:
         auth.logout()
 
-    # -- Git credential ---------------------------------------------------
-    # ASSUMED ENDPOINT: POST /users/git-token
-    # Returns the per-user Gitea token (provisioned at first login).
-    # Update path/schema when the coworker's harumi-api branch lands.
+    def get_profile(self) -> UserProfile:
+        response = self.api.request("GET", "/users/profile")
+        return UserProfile.model_validate(response.json())
 
-    def get_git_token(self) -> GitUserToken:
-        """Fetch (or create) the per-user Gitea personal access token.
+    def update_profile(self, body: dict[str, Any]) -> UserProfile:
+        response = self.api.request("POST", "/users/profile", json=body)
+        return UserProfile.model_validate(response.json())
 
-        ASSUMED ENDPOINT — not yet in harumi-api.
-        """
-        try:
-            response = self.api.request("POST", "/users/git-token")
-        except ApiError as exc:
-            raise HarumiError(
-                "The Gitea user provisioning endpoint (/users/git-token) is not yet "
-                "available on this harumi-api version. "
-                "Ask your team when Workstream B of the git-first pivot lands."
-            ) from exc
-        return GitUserToken.model_validate(response.json())
+    # -- Git credentials ------------------------------------------------
+    # POST /git/credentials — provisions (idempotently) the current user's
+    # Gitea identity and returns their CLI token. This is `harumi login`.
 
-    # -- Discovery --------------------------------------------------------
+    def get_git_token(self) -> GitCredentials:
+        """Fetch (or create) the per-user Gitea personal access token."""
+        response = self.api.request("POST", "/git/credentials")
+        return GitCredentials.model_validate(response.json())
+
+    # -- Discovery ------------------------------------------------------
 
     def list_projects(self) -> list[Project]:
         response = self.api.request("GET", "/projects")
         data = response.json()
         projects = data.get("projects", data) if isinstance(data, dict) else data
         return [Project.model_validate(p) for p in projects]
+
+    def get_project(self, project_id: str) -> Project:
+        response = self.api.request("GET", f"/projects/{project_id}")
+        return Project.model_validate(response.json())
+
+    def update_project(self, project_id: str, body: dict[str, Any]) -> Project:
+        response = self.api.request("PUT", f"/projects/{project_id}", json=body)
+        return Project.model_validate(response.json())
+
+    def delete_project(self, project_id: str) -> Project:
+        response = self.api.request("DELETE", f"/projects/{project_id}")
+        return Project.model_validate(response.json())
 
     def list_notebooks(self, project_id: str) -> list[Notebook]:
         response = self.api.request("GET", f"/projects/{project_id}/notebooks")
@@ -221,14 +233,10 @@ class Client:
         response = self.api.request("GET", "/sandbox/specs")
         return [KernelSpec.model_validate(s) for s in response.json()]
 
-    # -- Project creation ---------------------------------------------------
-    # POST /projects is a REAL, live endpoint today — but it only creates a
-    # bare project row (name/customer_id/notebook_ids/template_id). It does
-    # NOT yet provision a Gitea repo. Per the git-first pivot, project
-    # creation is expected to become atomic (create project + provision its
-    # repo in one call). This method calls the real endpoint and clearly
-    # flags the missing `repo` field rather than silently returning a
-    # half-usable project (one you can't `harumi init` into yet).
+    # -- Project creation -------------------------------------------------
+    # POST /projects creates the project row AND (best-effort, synchronously)
+    # provisions its Gitea repo server-side — but the response body is a bare
+    # `Project` with no `repo` field. Fetch the repo separately.
 
     def create_project(
         self,
@@ -236,13 +244,11 @@ class Client:
         customer_id: Optional[str] = None,
         template_id: Optional[str] = None,
     ) -> ProjectWithRepo:
-        """Create a new Harumi project.
+        """Create a new Harumi project and fetch its (auto-provisioned) repo.
 
-        Calls the real POST /projects endpoint. Once the git-first pivot
-        lands, the response is expected to include a `repo` field (the
-        project's auto-provisioned Gitea repo) so the project is immediately
-        usable with `harumi init`. Until then, raises HarumiError if `repo`
-        is absent so callers don't proceed assuming a repo exists.
+        `repo` is `None` only when Harumi Git isn't configured on this
+        backend (e.g. local dev without Gitea) — callers should handle that
+        case rather than assume a repo always exists.
         """
         body: dict[str, Any] = {"name": name}
         if customer_id:
@@ -252,52 +258,124 @@ class Client:
 
         response = self.api.request("POST", "/projects", json=body)
         project = ProjectWithRepo.model_validate(response.json())
-        if project.repo is None:
-            raise HarumiError(
-                f"Project {project.id!r} was created, but harumi-api did not return "
-                "repo metadata (no Gitea repo was provisioned). Atomic project+repo "
-                "creation is not yet available on this harumi-api version — ask your "
-                "team when the git-first pivot's project creation flow lands, then "
-                "retry `harumi init --project " + project.id + "` once it does."
-            )
+
+        try:
+            project.repo = self.get_project_repo(project.id)
+        except ApiError as exc:
+            if exc.status_code != 404:
+                raise
+            project.repo = None
+
         return project
 
-    # -- Git-pivot: repo metadata -----------------------------------------
-    # ASSUMED ENDPOINTS: GET /projects/{id}/repo and /repo/branches
-    # Update paths/schemas when the coworker's harumi-api branch lands.
+    # -- Repo metadata + branches (versions) -----------------------------
 
-    def get_project_repo(self, project_id: str) -> ProjectRepo:
-        """Return the Gitea repo bound to a project.
+    def get_project_repo(self, project_id: str) -> RepoInfo:
+        """Return the Gitea repo bound to a project."""
+        response = self.api.request("GET", f"/projects/{project_id}/repo")
+        return RepoInfo.model_validate(response.json())
 
-        ASSUMED ENDPOINT — not yet in harumi-api.
+    def list_repo_branches(self, project_id: str) -> list[BranchInfo]:
+        """List versions (git branches) for a project's repo."""
+        response = self.api.request("GET", f"/projects/{project_id}/repo/branches")
+        return [BranchInfo.model_validate(b) for b in response.json()]
+
+    def create_repo_branch(
+        self, project_id: str, name: str, from_branch: Optional[str] = None
+    ) -> BranchInfo:
+        body: dict[str, Any] = {"name": name}
+        if from_branch:
+            body["from_branch"] = from_branch
+        response = self.api.request(
+            "POST", f"/projects/{project_id}/repo/branches", json=body
+        )
+        return BranchInfo.model_validate(response.json())
+
+    def delete_repo_branch(self, project_id: str, name: str) -> None:
+        self.api.request("DELETE", f"/projects/{project_id}/repo/branches/{_q(name)}")
+
+    def promote_repo_branch(
+        self,
+        project_id: str,
+        name: str,
+        title: Optional[str] = None,
+        delete_after: bool = False,
+    ) -> PromoteResult:
+        body: dict[str, Any] = {"name": name, "delete_after": delete_after}
+        if title:
+            body["title"] = title
+        response = self.api.request(
+            "POST", f"/projects/{project_id}/repo/promote", json=body
+        )
+        return PromoteResult.model_validate(response.json())
+
+    # -- Repo files (the only write path is `apply_repo_changes`) -------
+
+    def list_repo_files(self, project_id: str, ref: Optional[str] = None) -> list[RepoFileEntry]:
+        params = {"ref": ref} if ref else None
+        response = self.api.request(
+            "GET", f"/projects/{project_id}/repo/files", params=params
+        )
+        return [RepoFileEntry.model_validate(f) for f in response.json()]
+
+    def get_repo_file(
+        self, project_id: str, path: str, ref: Optional[str] = None
+    ) -> RepoFileContent:
+        params: dict[str, Any] = {"path": path}
+        if ref:
+            params["ref"] = ref
+        response = self.api.request(
+            "GET", f"/projects/{project_id}/repo/file-content", params=params
+        )
+        return RepoFileContent.model_validate(response.json())
+
+    def apply_repo_changes(
+        self,
+        project_id: str,
+        operations: list[dict[str, Any]],
+        message: Optional[str] = None,
+        branch: Optional[str] = None,
+    ) -> RepoChangesResult:
+        """Apply create/update/delete/move operations as one commit.
+
+        Each operation is `{action, path, from_path?, content?}` — `content`
+        must be base64-encoded (required for create, replaces on update).
         """
-        try:
-            response = self.api.request("GET", f"/projects/{project_id}/repo")
-        except ApiError as exc:
-            raise HarumiError(
-                f"Could not fetch repo for project {project_id!r}. "
-                "The /projects/{id}/repo endpoint is not yet available on this "
-                "harumi-api version. Ask your team when Workstream B lands."
-            ) from exc
-        return ProjectRepo.model_validate(response.json())
+        body: dict[str, Any] = {"operations": operations}
+        if message:
+            body["message"] = message
+        if branch:
+            body["branch"] = branch
+        response = self.api.request(
+            "POST", f"/projects/{project_id}/repo/changes", json=body
+        )
+        return RepoChangesResult.model_validate(response.json())
 
-    def list_repo_branches(self, project_id: str) -> list[ProjectRepoBranch]:
-        """List branches for the Gitea repo bound to a project.
+    def download_repo_archive(
+        self,
+        project_id: str,
+        dest_path: Path | str,
+        path: str = "",
+        ref: Optional[str] = None,
+    ) -> Path:
+        """Download the repo (or a folder within it) as a zip to `dest_path`."""
+        dest_path = Path(dest_path)
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        params: dict[str, Any] = {"path": path}
+        if ref:
+            params["ref"] = ref
+        with self.api.stream(
+            "GET",
+            f"/projects/{project_id}/repo/archive",
+            params=params,
+            timeout=300.0,
+        ) as response:
+            with open(dest_path, "wb") as f:
+                for chunk in response.iter_bytes():
+                    f.write(chunk)
+        return dest_path
 
-        ASSUMED ENDPOINT — not yet in harumi-api.
-        """
-        try:
-            response = self.api.request("GET", f"/projects/{project_id}/repo/branches")
-        except ApiError as exc:
-            raise HarumiError(
-                f"Could not list branches for project {project_id!r}. "
-                "The /projects/{id}/repo/branches endpoint is not yet available."
-            ) from exc
-        return [ProjectRepoBranch.model_validate(b) for b in response.json()]
-
-    # -- Git-pivot: execution ---------------------------------------------
-    # ASSUMED ENDPOINT: POST /projects/{id}/execute
-    # Update path/schema when the coworker's harumi-api branch lands.
+    # -- Execution / runs --------------------------------------------------
 
     def execute_project(
         self,
@@ -306,12 +384,10 @@ class Client:
         commit: Optional[str] = None,
         command: Optional[str] = None,
         kernel_spec: Optional[str] = None,
-    ) -> ProjectRunResponse:
-        """Queue a git-ref-based run for a project.
-
-        ASSUMED ENDPOINT — not yet in harumi-api.
-        """
-        body: dict[str, Any] = {}
+        source: str = "cli",
+    ) -> ProjectExecuteResponse:
+        """Queue a git-ref-based run for a project."""
+        body: dict[str, Any] = {"source": source}
         if branch:
             body["branch"] = branch
         if commit:
@@ -321,108 +397,73 @@ class Client:
         if kernel_spec:
             body["kernel_spec"] = kernel_spec
 
-        try:
-            response = self.api.request("POST", f"/projects/{project_id}/execute", json=body)
-        except ApiError as exc:
-            raise HarumiError(
-                f"Could not queue a run for project {project_id!r}. "
-                "The /projects/{id}/execute endpoint is not yet available on this "
-                "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
-            ) from exc
-        return ProjectRunResponse.model_validate(response.json())
+        response = self.api.request("POST", f"/projects/{project_id}/execute", json=body)
+        return ProjectExecuteResponse.model_validate(response.json())
 
-    # -- Git-pivot: schedules ----------------------------------------------
-    # ASSUMED ENDPOINTS: /projects/{id}/schedules (project-scoped re-key of
-    # the current notebook_id-scoped /notebooks/{id}/schedules).
-    # Update paths/schemas when the coworker's harumi-api branch lands.
+    def list_runs(self, project_id: str) -> list[ProjectRun]:
+        from harumi.execution import list_runs
+
+        return list_runs(self.api, project_id)
+
+    def get_run(self, project_id: str, run_id: str) -> ProjectRun:
+        from harumi.execution import get_run
+
+        return get_run(self.api, project_id, run_id)
+
+    def cancel_run(self, project_id: str, run_id: str) -> ProjectRun:
+        from harumi.execution import cancel_run
+
+        return cancel_run(self.api, project_id, run_id)
+
+    def get_latest_run(self, project_id: str):
+        from harumi.execution import get_latest_run
+
+        return get_latest_run(self.api, project_id)
+
+    def wait_for_run(self, project_id: str, run_id: str, **kwargs: Any) -> ProjectRun:
+        from harumi.execution import wait_for_run
+
+        return wait_for_run(self.api, project_id, run_id, **kwargs)
+
+    def download_run_output(self, project_id: str, run: ProjectRun, dest_dir: Path | str) -> Path:
+        from harumi.execution import download_run_output
+
+        return download_run_output(self.api, project_id, run, Path(dest_dir))
+
+    # -- Schedules ----------------------------------------------------------
+    # /projects/{id}/schedules — project-scoped git-ref cron schedules.
 
     def list_schedules(self, project_id: str) -> list[Schedule]:
-        """List cron schedules for a project.
-
-        ASSUMED ENDPOINT — not yet in harumi-api.
-        """
-        try:
-            response = self.api.request("GET", f"/projects/{project_id}/schedules")
-        except ApiError as exc:
-            raise HarumiError(
-                f"Could not list schedules for project {project_id!r}. "
-                "The /projects/{id}/schedules endpoint is not yet available on this "
-                "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
-            ) from exc
-        return [Schedule.model_validate(s) for s in response.json()]
+        response = self.api.request("GET", f"/projects/{project_id}/schedules")
+        return [Schedule.model_validate(s) for s in response.json().get("schedules", [])]
 
     def get_schedule(self, project_id: str, schedule_id: str) -> Schedule:
-        """Fetch one schedule for a project.
-
-        ASSUMED ENDPOINT — not yet in harumi-api.
-        """
-        try:
-            response = self.api.request(
-                "GET", f"/projects/{project_id}/schedules/{schedule_id}"
-            )
-        except ApiError as exc:
-            raise HarumiError(
-                f"Could not fetch schedule {schedule_id!r} for project {project_id!r}. "
-                "The /projects/{id}/schedules endpoint is not yet available on this "
-                "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
-            ) from exc
+        response = self.api.request(
+            "GET", f"/projects/{project_id}/schedules/{schedule_id}"
+        )
         return Schedule.model_validate(response.json())
 
     def create_schedule(self, project_id: str, body: dict[str, Any]) -> Schedule:
-        """Create a cron schedule for a project.
-
-        ASSUMED ENDPOINT — not yet in harumi-api.
-        """
-        try:
-            response = self.api.request(
-                "POST", f"/projects/{project_id}/schedules", json=body
-            )
-        except ApiError as exc:
-            raise HarumiError(
-                f"Could not create a schedule for project {project_id!r}. "
-                "The /projects/{id}/schedules endpoint is not yet available on this "
-                "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
-            ) from exc
+        response = self.api.request(
+            "POST", f"/projects/{project_id}/schedules", json=body
+        )
         return Schedule.model_validate(response.json())
 
     def update_schedule(
         self, project_id: str, schedule_id: str, body: dict[str, Any]
     ) -> Schedule:
-        """Partially update a cron schedule for a project.
-
-        ASSUMED ENDPOINT — not yet in harumi-api.
-        """
-        try:
-            response = self.api.request(
-                "PUT", f"/projects/{project_id}/schedules/{schedule_id}", json=body
-            )
-        except ApiError as exc:
-            raise HarumiError(
-                f"Could not update schedule {schedule_id!r} for project {project_id!r}. "
-                "The /projects/{id}/schedules endpoint is not yet available on this "
-                "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
-            ) from exc
+        response = self.api.request(
+            "PUT", f"/projects/{project_id}/schedules/{schedule_id}", json=body
+        )
         return Schedule.model_validate(response.json())
 
     def delete_schedule(self, project_id: str, schedule_id: str) -> Schedule:
-        """Delete a cron schedule for a project (the only way to stop it firing).
-
-        ASSUMED ENDPOINT — not yet in harumi-api.
-        """
-        try:
-            response = self.api.request(
-                "DELETE", f"/projects/{project_id}/schedules/{schedule_id}"
-            )
-        except ApiError as exc:
-            raise HarumiError(
-                f"Could not delete schedule {schedule_id!r} for project {project_id!r}. "
-                "The /projects/{id}/schedules endpoint is not yet available on this "
-                "harumi-api version. Ask your team when Workstream C of the git-first pivot lands."
-            ) from exc
+        response = self.api.request(
+            "DELETE", f"/projects/{project_id}/schedules/{schedule_id}"
+        )
         return Schedule.model_validate(response.json())
 
     # -- Datasources --------------------------------------------------------
-    # Real endpoints — exist today in harumi-api (src/api/datasources/router.py).
     # Scoped per-project; credentials are write-only (never returned).
 
     def list_datasources(self, project_id: str, limit: int = 100, offset: int = 0) -> DatasourceList:
@@ -434,7 +475,7 @@ class Client:
         return DatasourceList.model_validate(response.json())
 
     def get_datasource(self, project_id: str, name: str) -> Datasource:
-        response = self.api.request("GET", f"/datasources/{project_id}/{quote(name, safe='')}")
+        response = self.api.request("GET", f"/datasources/{project_id}/{_q(name)}")
         return Datasource.model_validate(response.json())
 
     def create_datasource(self, project_id: str, body: dict[str, Any]) -> Datasource:
@@ -443,12 +484,12 @@ class Client:
 
     def update_datasource(self, project_id: str, name: str, body: dict[str, Any]) -> Datasource:
         response = self.api.request(
-            "PUT", f"/datasources/{project_id}/{quote(name, safe='')}", json=body
+            "PUT", f"/datasources/{project_id}/{_q(name)}", json=body
         )
         return Datasource.model_validate(response.json())
 
     def delete_datasource(self, project_id: str, name: str) -> Datasource:
-        response = self.api.request("DELETE", f"/datasources/{project_id}/{quote(name, safe='')}")
+        response = self.api.request("DELETE", f"/datasources/{project_id}/{_q(name)}")
         return Datasource.model_validate(response.json())
 
     def test_datasource_connection(self, body: dict[str, Any]) -> ConnectionTestResponse:
@@ -465,21 +506,80 @@ class Client:
     ) -> QueryResult:
         response = self.api.request(
             "POST",
-            f"/datasources/{project_id}/{quote(name, safe='')}/execute",
+            f"/datasources/{project_id}/{_q(name)}/execute",
             json={"query": query, "dataframe_name": dataframe_name, "limit": limit},
         )
         return QueryResult.model_validate(response.json())
 
-    # -- Outputs ----------------------------------------------------------
+    # -- Secrets --------------------------------------------------------
+    # Stored in AWS SSM under /harumi/projects/{id}/secrets/{name}; the
+    # delete endpoint's `secret_id` path segment is just the secret's name.
 
-    def list_outputs(self, notebook_id: str) -> list[ExecutionOutput]:
-        from harumi.execution import list_outputs
-        return list_outputs(self.api, notebook_id)
+    def list_secrets(self, project_id: str) -> list[Secret]:
+        response = self.api.request("GET", f"/projects/{project_id}/secrets")
+        return [Secret.model_validate(s) for s in response.json()]
 
-    def wait_for_output(self, notebook_id: str, output_id: str, **kwargs: Any):
-        from harumi.execution import wait_for_output
-        return wait_for_output(self.api, notebook_id, output_id, **kwargs)
+    def create_secret(self, project_id: str, name: str, value: str) -> Secret:
+        response = self.api.request(
+            "POST", f"/projects/{project_id}/secrets", json={"name": name, "value": value}
+        )
+        return Secret.model_validate(response.json())
 
-    def download_output(self, notebook_id: str, output_id: str, dest_dir: Path | str):
-        from harumi.execution import download_output
-        return download_output(self.api, notebook_id, output_id, Path(dest_dir))
+    def delete_secret(self, project_id: str, name: str) -> None:
+        self.api.request("DELETE", f"/projects/{project_id}/secrets/{_q(name)}")
+
+    # -- Organizations / members ------------------------------------------
+
+    def list_organizations(self) -> list[Organization]:
+        response = self.api.request("GET", "/users/organizations")
+        return [Organization.model_validate(o) for o in response.json()]
+
+    def get_organization(self, organization_id: str) -> Organization:
+        response = self.api.request("GET", f"/users/organizations/{organization_id}")
+        return Organization.model_validate(response.json())
+
+    def create_organization(self, business_name: str) -> Organization:
+        response = self.api.request(
+            "POST", "/users/organizations", json={"business_name": business_name}
+        )
+        return Organization.model_validate(response.json())
+
+    def update_organization(self, organization_id: str, business_name: str) -> Organization:
+        response = self.api.request(
+            "PATCH",
+            f"/users/organizations/{organization_id}",
+            json={"business_name": business_name},
+        )
+        return Organization.model_validate(response.json())
+
+    def delete_organization(self, organization_id: str) -> None:
+        self.api.request("DELETE", f"/users/organizations/{organization_id}")
+
+    def list_organization_members(self, organization_id: str) -> list[OrganizationMember]:
+        response = self.api.request("GET", f"/users/organizations/{organization_id}/users")
+        return [OrganizationMember.model_validate(m) for m in response.json()]
+
+    def invite_organization_member(
+        self, organization_id: str, email: str, role: str
+    ) -> OrganizationMember:
+        response = self.api.request(
+            "POST",
+            f"/users/organizations/{organization_id}/users",
+            json={"email": email, "role": role},
+        )
+        return OrganizationMember.model_validate(response.json())
+
+    def update_organization_member_role(
+        self, organization_id: str, user_id: str, role: str
+    ) -> OrganizationMember:
+        response = self.api.request(
+            "PUT",
+            f"/users/organizations/{organization_id}/users/{user_id}",
+            json={"role": role},
+        )
+        return OrganizationMember.model_validate(response.json())
+
+    def remove_organization_member(self, organization_id: str, user_id: str) -> None:
+        self.api.request(
+            "DELETE", f"/users/organizations/{organization_id}/users/{user_id}"
+        )

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harumi"
-version = "0.1.0"
+version = "0.2.0"
 description = "Run local optimization code on Harumi's infrastructure from your own machine or IDE."
 readme = "README.md"
 requires-python = ">=3.9"
