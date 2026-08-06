@@ -635,7 +635,44 @@ def projects_create(
     _bind_and_configure_remote(project.id, project.repo)
 
 
-@projects_app.command("list")
+@projects_app.command("import")
+@_handle_errors
+def projects_import(
+    notebook_id: str = typer.Argument(..., help="Legacy notebook id to import."),
+    project_name: Optional[str] = typer.Option(
+        None, "--project-name", help="Name for the new project (defaults to the notebook name)."
+    ),
+    bind: bool = typer.Option(
+        True, "--bind/--no-bind", help="Bind the current directory to the new project (like `harumi init`)."
+    ),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    git_url: Optional[str] = typer.Option(None, "--git-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Import a legacy notebook into a new git-based project and bind this directory to it."""
+    client = _get_client(api_url=api_url, git_url=git_url, org=org)
+
+    console.print(f"Importing notebook [bold]{notebook_id}[/bold]...")
+    result = client.import_notebook(notebook_id, project_name=project_name)
+    project = result.project
+    console.print(
+        f"[bold green]Imported[/bold green] into project [bold]{project.name}[/bold] (id={project.id})."
+    )
+
+    for note in result.follow_up:
+        console.print(f"[yellow]•[/yellow] {note}")
+
+    if result.repo is None:
+        console.print(
+            "[yellow]No Gitea repo was provisioned for this project "
+            "(Harumi Git may not be configured on this backend).[/yellow]"
+        )
+        return
+
+    if not bind:
+        return
+
+    _bind_and_configure_remote(project.id, result.repo)
 @_handle_errors
 def projects_list(
     api_url: Optional[str] = typer.Option(None, "--api-url"),
