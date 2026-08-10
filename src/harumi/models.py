@@ -128,16 +128,6 @@ class BranchInfo(BaseModel):
     is_live: bool = False
 
 
-class NotebookImportResult(BaseModel):
-    """Response from POST /projects/import."""
-
-    model_config = ConfigDict(extra="allow")
-
-    project: Project
-    repo: Optional[RepoInfo] = None
-    follow_up: list[str] = Field(default_factory=list)
-
-
 class PromoteResult(BaseModel):
     """Response from POST /projects/{id}/repo/promote."""
 

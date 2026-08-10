@@ -7,6 +7,7 @@
     harumi specs
     harumi notebooks [--project <id>]
     harumi init --project <id> [--api-url <url>] [--git-url <url>]
+    harumi import [path] [--from-git <url>] [--project-name <name>]
     harumi run [--branch <b>] [--commit <sha>] [--command <c>] [--kernel <k>]
                [--watch] [--output-dir <dir>]
     harumi runs list|get|cancel [--project <id>]
@@ -95,6 +96,7 @@ from harumi.git import (
     ensure_remote,
     has_unpushed_commits,
     is_dirty,
+    push_folder,
     push_scratch,
     repo_root,
 )
@@ -516,18 +518,19 @@ def notebooks(
 # harumi init
 # ---------------------------------------------------------------------------
 
-def _bind_and_configure_remote(project_id: str, repo) -> None:
+def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None) -> None:
     """Write .harumi/config.json for `project_id`/`repo` and configure the
-    `harumi` git remote in the current directory, if possible.
+    `harumi` git remote in the target directory (defaults to cwd), if possible.
 
-    Shared by `init` (binding an existing project) and `projects create`
-    (binding a just-created project). `repo` is a `RepoInfo`-shaped object
-    (owner/name/clone_url/default_branch).
+    Shared by `init` (binding an existing project), `projects create`
+    (binding a just-created project), and `import` (binding an imported folder).
+    `repo` is a `RepoInfo`-shaped object (owner/name/clone_url/default_branch).
     """
     from harumi.config import ProjectBinding, RepoBinding
 
+    target = cwd or Path.cwd()
     binding = ProjectBinding.write(
-        Path.cwd(),
+        target,
         project_id=project_id,
         repo=RepoBinding(
             owner=repo.owner,
@@ -542,7 +545,7 @@ def _bind_and_configure_remote(project_id: str, repo) -> None:
     )
 
     # Configure the harumi git remote if we're inside a git repo.
-    if repo_root() is None:
+    if repo_root(cwd=target) is None:
         console.print(
             "[yellow]Not inside a git repo — skipping remote setup.[/yellow]\n"
             "Run [bold]git init[/bold] then [bold]harumi init --project ...[/bold] again."
@@ -564,6 +567,7 @@ def _bind_and_configure_remote(project_id: str, repo) -> None:
         clone_url=repo.clone_url,
         username=username,
         token=git_token,
+        cwd=target,
     )
     console.print(
         f"[bold green]Remote `harumi` configured[/bold green] → {repo.clone_url}\n"
@@ -592,6 +596,138 @@ def init(
     repo = client.get_project_repo(project)
 
     _bind_and_configure_remote(project, repo)
+
+
+# ---------------------------------------------------------------------------
+# harumi import
+# ---------------------------------------------------------------------------
+
+def _merge_git_repo_flat(from_git: str, dest: Path) -> None:
+    """Clone `from_git` and copy its tree (minus .git) FLAT into `dest`.
+
+    Mirrors how the legacy sandbox cloned the connected GitHub repo into the run
+    working directory (next to the code), so relative imports/opens keep working.
+    On a filename collision the existing (exported) file wins — it is the
+    authoritative runnable artifact — and we warn.
+    """
+    import shutil
+    import tempfile
+
+    from harumi.git import _run  # local git subprocess runner
+
+    with tempfile.TemporaryDirectory() as tmp:
+        clone_dir = Path(tmp) / "repo"
+        console.print(f"Cloning [bold]{from_git}[/bold]...")
+        _run(["clone", "--depth", "1", from_git, str(clone_dir)])
+        shutil.rmtree(clone_dir / ".git", ignore_errors=True)
+
+        collisions: list[str] = []
+        for src in clone_dir.rglob("*"):
+            rel = src.relative_to(clone_dir)
+            target = dest / rel
+            if src.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            if target.exists():
+                collisions.append(str(rel))
+                continue  # exported file wins
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, target)
+
+    if collisions:
+        console.print(
+            "[yellow]Kept the exported version of "
+            f"{len(collisions)} file(s) that also exist in the repo "
+            f"(e.g. {', '.join(collisions[:3])}); merge manually if needed.[/yellow]"
+        )
+
+
+@app.command(name="import")
+@_handle_errors
+def import_project(
+    path: Path = typer.Argument(
+        Path("."),
+        help="Folder to import (an unzipped project export). Defaults to the current directory.",
+    ),
+    project_name: Optional[str] = typer.Option(
+        None, "--project-name", help="Name for the new project (defaults to the folder name)."
+    ),
+    from_git: Optional[str] = typer.Option(
+        None,
+        "--from-git",
+        help="Also clone this git URL (the project's old GitHub repo) flat into the folder before importing.",
+    ),
+    bind: bool = typer.Option(
+        True, "--bind/--no-bind", help="Bind the folder to the new project (like `harumi init`)."
+    ),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    git_url: Optional[str] = typer.Option(None, "--git-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Turn a downloaded project folder into a new git-based Harumi project.
+
+    Creates a project (which provisions a Harumi Git repo), optionally clones the
+    project's old GitHub repo flat into the folder, then commits and pushes the
+    whole folder as the repo's initial content. Read `HARUMI_IMPORT.md` in the
+    export for follow-ups (datasource credentials, the GitHub repo URL).
+    """
+    folder = path.resolve()
+    if not folder.is_dir():
+        _fail(f"Not a directory: {folder}")
+
+    client = _get_client(api_url=api_url, git_url=git_url, org=org)
+
+    if from_git:
+        _merge_git_repo_flat(from_git, folder)
+
+    name = project_name or folder.name
+    console.print(f"Creating project [bold]{name}[/bold]...")
+    project = client.create_project(name)
+    console.print(
+        f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id})."
+    )
+
+    if project.repo is None:
+        console.print(
+            "[yellow]No Gitea repo was provisioned for this project "
+            "(Harumi Git may not be configured on this backend); nothing pushed.[/yellow]"
+        )
+        return
+
+    repo = project.repo
+    git_token = load_git_token()
+    if not git_token:
+        console.print(
+            "[yellow]No Gitea token found — can't push.[/yellow] "
+            "Run [bold]harumi login[/bold], then push manually from the folder."
+        )
+        return
+
+    creds = auth.current_credentials()
+    username = (creds or {}).get("email", "harumi-user")
+
+    console.print("Pushing project files...")
+    push_folder(
+        folder,
+        clone_url=repo.clone_url,
+        username=username,
+        token=git_token,
+        branch=repo.default_branch,
+        message="Import project",
+    )
+    console.print(
+        f"[bold green]Pushed[/bold green] to {repo.clone_url} ({repo.default_branch})."
+    )
+
+    notes = folder / "HARUMI_IMPORT.md"
+    if notes.exists():
+        console.print(
+            "[yellow]•[/yellow] See [bold]HARUMI_IMPORT.md[/bold] for follow-ups "
+            "(datasource credentials, GitHub repo)."
+        )
+
+    if bind:
+        _bind_and_configure_remote(project.id, repo, cwd=folder)
 
 
 # ---------------------------------------------------------------------------
@@ -635,44 +771,7 @@ def projects_create(
     _bind_and_configure_remote(project.id, project.repo)
 
 
-@projects_app.command("import")
-@_handle_errors
-def projects_import(
-    notebook_id: str = typer.Argument(..., help="Legacy notebook id to import."),
-    project_name: Optional[str] = typer.Option(
-        None, "--project-name", help="Name for the new project (defaults to the notebook name)."
-    ),
-    bind: bool = typer.Option(
-        True, "--bind/--no-bind", help="Bind the current directory to the new project (like `harumi init`)."
-    ),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    git_url: Optional[str] = typer.Option(None, "--git-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
-) -> None:
-    """Import a legacy notebook into a new git-based project and bind this directory to it."""
-    client = _get_client(api_url=api_url, git_url=git_url, org=org)
-
-    console.print(f"Importing notebook [bold]{notebook_id}[/bold]...")
-    result = client.import_notebook(notebook_id, project_name=project_name)
-    project = result.project
-    console.print(
-        f"[bold green]Imported[/bold green] into project [bold]{project.name}[/bold] (id={project.id})."
-    )
-
-    for note in result.follow_up:
-        console.print(f"[yellow]•[/yellow] {note}")
-
-    if result.repo is None:
-        console.print(
-            "[yellow]No Gitea repo was provisioned for this project "
-            "(Harumi Git may not be configured on this backend).[/yellow]"
-        )
-        return
-
-    if not bind:
-        return
-
-    _bind_and_configure_remote(project.id, result.repo)
+@projects_app.command("list")
 @_handle_errors
 def projects_list(
     api_url: Optional[str] = typer.Option(None, "--api-url"),

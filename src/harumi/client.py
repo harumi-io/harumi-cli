@@ -26,7 +26,6 @@ from harumi.models import (
     GitCredentials,
     KernelSpec,
     Notebook,
-    NotebookImportResult,
     Organization,
     OrganizationMember,
     Project,
@@ -268,20 +267,6 @@ class Client:
             project.repo = None
 
         return project
-
-    def import_notebook(
-        self, notebook_id: str, project_name: Optional[str] = None
-    ) -> NotebookImportResult:
-        """Import a legacy notebook into a new git-based project.
-
-        The backend decodes the notebook, provisions a repo, commits main.py
-        (+ params.json + uploaded files), and copies datasource metadata.
-        """
-        body: dict[str, Any] = {"notebook_id": notebook_id}
-        if project_name:
-            body["project_name"] = project_name
-        response = self.api.request("POST", "/projects/import", json=body)
-        return NotebookImportResult.model_validate(response.json())
 
     # -- Repo metadata + branches (versions) -----------------------------
 
