@@ -25,6 +25,10 @@ class Environment:
     name: str
     api_url: str
     git_url: str
+    # Where the Harumi web app lives for this environment — used to print
+    # user-facing project links. Never print `git_url` directly to the user;
+    # Gitea is an implementation detail, not something we surface.
+    platform_url: str
     # Internal envs are VPN-only and hidden from `harumi env list` unless the
     # user opts in (HARUMI_INTERNAL=1 or `--all`). This is UX only — real access
     # is gated by needing an account in that environment's Supabase + the VPN.
@@ -40,6 +44,7 @@ ENVIRONMENTS: dict[str, Environment] = {
         name="production",
         api_url="https://api.harumi.io/api",
         git_url="https://git.harumi.io",
+        platform_url="https://platform.harumi.io",
         internal=False,
         description="Public production environment.",
     ),
@@ -47,6 +52,7 @@ ENVIRONMENTS: dict[str, Environment] = {
         name="staging",
         api_url="https://api.dev.harumi.io/api",
         git_url="https://git.dev.harumi.io",
+        platform_url="https://platform.dev.harumi.io",
         internal=True,
         description="Internal staging/dev environment (VPN-only).",
     ),
@@ -132,6 +138,19 @@ def set_active_environment(name: str) -> None:
 
 def active_environment() -> str:
     return _ACTIVE_ENV or resolve_environment()
+
+
+def active_platform_url() -> str:
+    """Harumi web app URL for the active environment (honors the same
+    HARUMI_PLATFORM_URL / env config.json override as Config.load)."""
+    name = active_environment()
+    env_config = _read_json(env_config_path(name))
+    url = (
+        os.environ.get("HARUMI_PLATFORM_URL")
+        or env_config.get("platform_url")
+        or ENVIRONMENTS[name].platform_url
+    )
+    return url.rstrip("/")
 
 
 def save_environment(name: str) -> None:
@@ -258,6 +277,7 @@ class Config:
 
     api_url: str
     git_url: str
+    platform_url: str
     org_id: Optional[str] = None
     environment: str = DEFAULT_ENVIRONMENT
 
@@ -296,6 +316,7 @@ class Config:
         return cls(
             api_url=resolved_api_url.rstrip("/"),
             git_url=resolved_git_url.rstrip("/"),
+            platform_url=active_platform_url(),
             org_id=resolved_org_id,
             environment=env_name,
         )
