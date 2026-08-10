@@ -28,6 +28,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 from harumi.errors import HarumiError
 
@@ -148,13 +149,22 @@ def _authenticated_url(clone_url: str, username: str, token: str) -> str:
     Gitea expects `https://<user>:<token>@<host>/...` for git-over-HTTPS
     with token auth.  We never embed credentials in the stored clone_url —
     only in the ephemeral URL passed to individual git operations.
+
+    Both `username` and `token` are percent-encoded: an unescaped `@`, `:`,
+    or `/` in either would re-split the URL's authority section (e.g. an
+    email-like username `user@harumi.io` yields
+    `https://user@harumi.io:token@host/...`, whose authority becomes
+    `harumi.io:token@host` — `:token` is then parsed as a bogus port,
+    producing "Port number was not a decimal number").
     """
     if not clone_url.startswith("https://"):
         return clone_url
     host_and_path = clone_url[len("https://"):]
     # Strip any existing credentials to avoid doubling them.
     host_and_path = re.sub(r"^[^@]+@", "", host_and_path)
-    return f"https://{username}:{token}@{host_and_path}"
+    safe_username = quote(username, safe="")
+    safe_token = quote(token, safe="")
+    return f"https://{safe_username}:{safe_token}@{host_and_path}"
 
 
 def ensure_remote(

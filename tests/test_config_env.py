@@ -107,3 +107,18 @@ def test_save_environment_persists_selection():
     # A fresh resolve (no explicit arg / env var) picks it up.
     config.set_active_environment(config.resolve_environment())
     assert config.active_environment() == "staging"
+
+
+def test_save_git_token_persists_username_for_url_auth():
+    # Regression: the git remote's basic-auth username must be the real Gitea
+    # account name, never the Harumi login email — an email contains '@',
+    # which breaks unescaped basic-auth URLs. save_git_token/load_git_username
+    # is the persistence half of that fix.
+    config.save_git_token("tok123", git_url="https://git.dev.harumi.io", username="u-abc123")
+    assert config.load_git_token() == "tok123"
+    assert config.load_git_username() == "u-abc123"
+
+
+def test_load_git_username_is_none_when_absent():
+    config.save_git_token("tok123")  # no username — simulates a pre-fix credentials.json
+    assert config.load_git_username() is None
