@@ -82,6 +82,7 @@ from harumi.config import (
     Config,
     ProjectBinding,
     active_environment,
+    active_platform_url,
     load_git_token,
     load_git_username,
     resolve_environment,
@@ -544,6 +545,7 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
         f"Wrote [bold]{binding.config_path}[/bold] "
         f"(project={project_id}, repo={repo.owner}/{repo.name})."
     )
+    console.print(f"View project: {active_platform_url()}/projects/{project_id}")
 
     # Configure the harumi git remote if we're inside a git repo.
     if repo_root(cwd=target) is None:
@@ -576,7 +578,7 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
         cwd=target,
     )
     console.print(
-        f"[bold green]Remote `harumi` configured[/bold green] → {repo.clone_url}\n"
+        "[bold green]Remote `harumi` configured.[/bold green]\n"
         f"Push your code:  git push harumi {repo.default_branch}"
     )
 
@@ -726,8 +728,10 @@ def import_project(
         message="Import project",
     )
     console.print(
-        f"[bold green]Pushed[/bold green] to {repo.clone_url} ({repo.default_branch})."
+        f"[bold green]Pushed[/bold green] to Harumi ({repo.default_branch})."
     )
+    if not bind:
+        console.print(f"View project: {active_platform_url()}/projects/{project.id}")
 
     notes = folder / "HARUMI_IMPORT.md"
     if notes.exists():

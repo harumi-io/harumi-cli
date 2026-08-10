@@ -30,6 +30,7 @@ def test_default_environment_is_production():
     # Regression: git_url must follow the same environment as api_url (they used
     # to default to mismatched prod-api / staging-git).
     assert cfg.git_url == "https://git.harumi.io"
+    assert cfg.platform_url == "https://platform.harumi.io"
 
 
 def test_staging_environment_urls():
@@ -37,6 +38,17 @@ def test_staging_environment_urls():
     assert cfg.environment == "staging"
     assert cfg.api_url == "https://api.dev.harumi.io/api"
     assert cfg.git_url == "https://git.dev.harumi.io"
+    assert cfg.platform_url == "https://platform.dev.harumi.io"
+
+
+def test_active_platform_url_follows_active_environment():
+    # Regression: user-facing output (e.g. `harumi import`) must link to the
+    # Harumi platform, never the underlying Gitea git_url.
+    Config.load(environment="production")
+    assert config.active_platform_url() == "https://platform.harumi.io"
+
+    Config.load(environment="staging")
+    assert config.active_platform_url() == "https://platform.dev.harumi.io"
 
 
 def test_environment_precedence_env_var_over_saved(monkeypatch):
