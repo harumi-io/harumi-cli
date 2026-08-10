@@ -1,0 +1,70 @@
+name: CI
+
+# Runs the offline test suite (pytest + import/compile check) on every push to
+# main/dev and every pull request. The `test` job is the required status check
+# that gates merges into main (see the repo's branch protection) — keep its
+# job id/name stable, or the required check stops reporting.
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install (with dev extras)
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - name: Compile check
+        run: python -m compileall -q src
+
+      - name: Test
+        run: pytest -q
+
+  # Validates the `requires-python = ">=3.9"` floor advertised in
+  # pyproject.toml against both ends of the supported range. Not wired into
+  # branch protection as required (only `test` is) — see the note above.
+  compat:
+    name: compat (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install (with dev extras)
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - name: Compile check
+        run: python -m compileall -q src
+
+      - name: Test
+        run: pytest -q

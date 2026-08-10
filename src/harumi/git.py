@@ -277,3 +277,50 @@ def delete_remote_scratch(
         _run(["push", remote, f":refs/heads/{branch}"], cwd=cwd, check=False)
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Import: push a plain folder as the initial commit of a project's repo
+# ---------------------------------------------------------------------------
+
+def push_folder(
+    folder: Path,
+    clone_url: str,
+    username: str,
+    token: str,
+    branch: str = "main",
+    remote: str = "harumi",
+    message: str = "Import project",
+) -> str:
+    """Commit everything in ``folder`` and push it to ``remote/branch``.
+
+    Used by ``harumi import`` to seed a freshly-provisioned project repo from a
+    downloaded/exported folder. Initializes a git repo in-place if the folder is
+    not already one, force-updates the target branch to a single commit of the
+    current tree, and pushes. Returns the commit SHA.
+
+    Force-push is intentional: the provisioned repo only contains a scaffold
+    commit, and the exported folder is the authoritative content. ponytail:
+    overwrites the target branch — fine for import (fresh repo), not a general
+    push primitive.
+    """
+    if not folder.is_dir():
+        raise HarumiError(f"Not a directory: {folder}")
+
+    # Initialize a repo in the folder if it isn't one already. If the folder is
+    # a clone of the user's GitHub repo, it already is one — reuse it.
+    if repo_root(cwd=folder) != folder:
+        _run(["init"], cwd=folder)
+
+    ensure_remote(clone_url, username, token, name=remote, cwd=folder)
+
+    _run(["add", "--all"], cwd=folder)
+    # Commit; allow an empty diff to still produce a commit so push has a ref.
+    _run(
+        ["-c", "user.email=cli@harumi.io", "-c", "user.name=harumi-cli",
+         "commit", "--allow-empty", "-m", message],
+        cwd=folder,
+    )
+    sha = head_sha(cwd=folder)
+    _run(["push", "--force", remote, f"HEAD:refs/heads/{branch}"], cwd=folder)
+    return sha

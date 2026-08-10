@@ -7,12 +7,16 @@ Optimization/solver code (Gurobi, OR-Tools, etc.) is often too heavy to run on a
 ## Install
 
 ```bash
-pip install -e .
-# or, once published:
 pip install harumi
 ```
 
 This installs the `harumi` CLI and the `harumi` Python package (`import harumi`).
+
+Installing from source instead (for contributing, or an unreleased fix):
+
+```bash
+pip install -e .
+```
 
 ## Quick start
 
