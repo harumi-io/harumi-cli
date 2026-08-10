@@ -1,6 +1,6 @@
 ---
 name: harumi-cli
-description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to select the backend environment (production vs internal staging), create/manage projects, browse and edit the project's git repo, inspect and cancel runs, manage datasources, schedules, secrets, organizations, and your profile. Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi init`, `harumi run`, `harumi runs`, `harumi repo`, `harumi env`, `harumi projects`, `harumi datasources`, `harumi schedules`, `harumi secrets`, `harumi org`, `harumi profile`, asks about switching between production and staging, creating a new Harumi project, Harumi kernel specs, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, managing environment variables/secrets, organization members, or needs to fetch/download results or files from a Harumi run/repo.
+description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to select the backend environment (production vs internal staging), create/manage projects, import a downloaded project export as a new project, browse and edit the project's git repo, inspect and cancel runs, manage datasources, schedules, secrets, organizations, and your profile. Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi init`, `harumi import`, `harumi run`, `harumi runs`, `harumi repo`, `harumi env`, `harumi projects`, `harumi datasources`, `harumi schedules`, `harumi secrets`, `harumi org`, `harumi profile`, asks about switching between production and staging, creating a new Harumi project, importing/uploading a downloaded project zip to the CLI, Harumi kernel specs, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, managing environment variables/secrets, organization members, or needs to fetch/download results or files from a Harumi run/repo.
 ---
 
 # Harumi CLI
@@ -17,7 +17,7 @@ The staging endpoints (`api.dev.harumi.io`, `git.dev.harumi.io`) are internal AL
 
 ## Preflight
 
-1. Check CLI is installed: `harumi --version`. Install from this repo: `pip install -e .` (or `pip install harumi` once published).
+1. Check CLI is installed: `harumi --version`. Install with `pip install harumi` (or `pip install -e .` from this repo for an unreleased fix).
 2. Check the user is authenticated. Any command raises `Not logged in. Run harumi login first.` if not. **Never try to automate the OTP flow** — it emails a one-time code and needs interactive input. Ask the user to run it:
    - `harumi login` for an existing account.
    - `harumi login --signup` for a brand-new email (plain login 422s with "Signups not allowed for otp" on new emails).
@@ -48,6 +48,14 @@ harumi projects create "My Project" [--customer-id ID] [--template-id ID]
 ```
 
 Calls `POST /projects`, then fetches its repo and binds the current directory the same way `harumi init` does (pass `--no-bind` to skip that). If the backend hasn't provisioned a Gitea repo for the project, the CLI still creates the bare project and prints a warning instead of failing.
+
+**Importing a downloaded project export (e.g. from the web app's "Download project" button) as a new project:**
+
+```bash
+harumi import [PATH] [--project-name NAME] [--from-git URL]
+```
+
+`PATH` must be an **unzipped folder** (default: current directory) — unzip the export first. Creates a project, then pushes the whole folder as the repo's initial commit and binds the directory, same as `projects create` above. `--from-git URL` additionally clones an old GitHub repo flat into the folder before pushing (exported files win on any filename collision). See [references/commands.md#import](references/commands.md#import) for the full flag/behavior breakdown.
 
 ### 2. Run code
 
