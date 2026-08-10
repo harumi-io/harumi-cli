@@ -331,20 +331,35 @@ def save_credentials(
     _write_json(credentials_path(), data)
 
 
-def save_git_token(git_token: str, git_url: Optional[str] = None) -> None:
-    """Persist a Gitea personal access token (and its git_url) for the current
-    user, scoped to the active environment."""
+def save_git_token(git_token: str, git_url: Optional[str] = None, username: Optional[str] = None) -> None:
+    """Persist a Gitea personal access token (and its git_url/username) for the
+    current user, scoped to the active environment.
+
+    `username` is the real Gitea account name (e.g. `u-<user_id>`) — the git
+    credential username. Callers must never substitute the Harumi account
+    email here: emails contain `@`, which breaks unescaped basic-auth URLs
+    (`https://user:token@host/...`) by introducing a second `@`.
+    """
     path = credentials_path()
     creds = _read_json(path)
     creds["git_token"] = git_token
     if git_url:
         creds["git_url"] = git_url
+    if username:
+        creds["git_username"] = username
     _write_json(path, creds)
 
 
 def load_git_token() -> Optional[str]:
     creds = _read_json(credentials_path())
     return creds.get("git_token") or None
+
+
+def load_git_username() -> Optional[str]:
+    """Return the persisted Gitea username, or None if not yet provisioned
+    (e.g. a token saved by a CLI version predating this field)."""
+    creds = _read_json(credentials_path())
+    return creds.get("git_username") or None
 
 
 def clear_credentials() -> None:

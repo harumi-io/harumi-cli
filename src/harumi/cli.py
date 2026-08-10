@@ -83,6 +83,7 @@ from harumi.config import (
     ProjectBinding,
     active_environment,
     load_git_token,
+    load_git_username,
     resolve_environment,
     save_environment,
     save_git_token,
@@ -279,7 +280,7 @@ def _provision_git_token(config: Config) -> None:
     try:
         client = _get_client(api_url=config.api_url)
         creds = client.get_git_token()
-        save_git_token(creds.token, creds.git_url)
+        save_git_token(creds.token, creds.git_url, creds.username)
         console.print(
             f"[dim]Gitea user [bold]{creds.username}[/bold] provisioned.[/dim]"
         )
@@ -560,8 +561,13 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
         )
         return
 
-    creds = auth.current_credentials()
-    username = (creds or {}).get("email", "harumi-user")
+    username = load_git_username()
+    if not username:
+        console.print(
+            "[yellow]No Gitea username on file — skipping remote setup.[/yellow]\n"
+            "Run [bold]harumi login[/bold] again to re-provision your Gitea credentials."
+        )
+        return
 
     ensure_remote(
         clone_url=repo.clone_url,
@@ -703,8 +709,12 @@ def import_project(
         )
         return
 
-    creds = auth.current_credentials()
-    username = (creds or {}).get("email", "harumi-user")
+    username = load_git_username()
+    if not username:
+        _fail(
+            "No Gitea username on file. Run [bold]harumi login[/bold] again to "
+            "re-provision your Gitea credentials, then retry."
+        )
 
     console.print("Pushing project files...")
     push_folder(
@@ -913,8 +923,12 @@ def run(
                     "No Gitea token found. Run [bold]harumi login[/bold] to provision one."
                 )
 
-            creds = auth.current_credentials()
-            username = (creds or {}).get("email", "harumi-user")
+            username = load_git_username()
+            if not username:
+                _fail(
+                    "No Gitea username on file. Run [bold]harumi login[/bold] again to "
+                    "re-provision your Gitea credentials."
+                )
 
             status_parts = []
             if dirty:
