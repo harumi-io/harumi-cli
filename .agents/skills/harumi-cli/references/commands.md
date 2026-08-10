@@ -12,6 +12,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [notebooks](#notebooks)
 - [projects](#projects)
 - [init](#init)
+- [import](#import)
 - [run](#run)
 - [runs](#runs)
 - [outputs](#outputs)
@@ -141,6 +142,34 @@ harumi init --project PROJECT_ID [--api-url URL] [--git-url URL] [--org ORG]
 After `harumi init`, `harumi run`, `harumi runs`, `harumi repo`, `harumi outputs`, `harumi datasources`, `harumi schedules`, and `harumi secrets` all work without any `--project` flag.
 
 **Note:** `.harumi/config.json` is searched upward from cwd, so these commands work from subdirectories.
+
+## `import`
+
+```
+harumi import [PATH] [--project-name NAME] [--from-git URL] [--bind/--no-bind]
+              [--api-url URL] [--git-url URL] [--org ORG]
+```
+
+Turns a downloaded/unzipped project export (e.g. from the web app's "Download
+project" button) into a brand-new git-based Harumi project. `PATH` defaults to
+the current directory and **must be a directory** — unzip the export first
+(`import` fails with `Not a directory: <path>` on a `.zip`).
+
+| Flag | Meaning |
+|---|---|
+| `PATH` | Folder to import (positional). Default: current directory. |
+| `--project-name` | Name for the new project. Default: the folder's name. |
+| `--from-git` | Also clone this git URL (e.g. the project's old GitHub repo) flat into the folder — `.git` stripped, files copied alongside the exported ones — before importing. On a filename collision the exported file wins; the CLI warns and lists the first few colliding paths. |
+| `--bind / --no-bind` | Bind the folder to the new project afterward, like `harumi init`. Default: `--bind`. |
+
+Sequence:
+
+1. `POST /projects` to create the project (`name` = `--project-name` or the folder name).
+2. If `--from-git` is set, shallow-clones that URL into a temp dir and copies its tree (minus `.git`) flat into the folder first.
+3. If the backend didn't provision a Gitea repo for the project (`project.repo is None`), prints a warning and stops — nothing is pushed, no binding happens.
+4. Otherwise, requires a Gitea token from `harumi login` (prints a warning and stops if missing — never fails hard), then commits and pushes the **entire folder** as one commit ("Import project") to the new repo's default branch.
+5. If the folder contains a `HARUMI_IMPORT.md` (part of the export, with follow-ups like re-adding datasource credentials or the old GitHub URL), prints a pointer to it.
+6. Unless `--no-bind`, binds the folder the same way `harumi init` does.
 
 ## `run`
 
