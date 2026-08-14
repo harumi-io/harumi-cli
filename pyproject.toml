@@ -74,3 +74,9 @@ packages = ["src/harumi"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# test_cli.py imports scripts/emit_cli_surface.py (a repo-root script, not a
+# packaged module) to diff the live CLI against the committed cli-surface.json
+# contract. Only pytest's own import (via `pytest`, not `python -m pytest`)
+# needs this — the console-script entrypoint doesn't put the repo root on
+# sys.path on its own.
+pythonpath = ["."]
