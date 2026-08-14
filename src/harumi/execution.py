@@ -1,8 +1,9 @@
-"""Execution helpers: polling runs and downloading committed output artifacts.
+"""Execution helpers: polling runs and downloading run output artifacts.
 
 A run is queued via `Client.execute_project` (git-ref based). This module
 handles the lifecycle *after* queuing: polling a run until it reaches a
-terminal status, and downloading its Gitea-committed output as a zip.
+terminal status, reading its structured output, and downloading its output
+artifacts as a zip.
 
 The former `run_interactive` / `run_job` / S3-upload path has been removed
 as part of the git-first pivot. If you need those, check git history.
@@ -12,7 +13,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from harumi.errors import HarumiError
 from harumi.models import ProjectRun
@@ -69,28 +70,44 @@ def wait_for_run(
         time.sleep(poll_interval)
 
 
+def get_run_output(api: "ApiClient", project_id: str, run_id: str) -> dict[str, Any]:
+    """The run's parsed structured output (`GET .../runs/{run_id}/output`).
+
+    Reads from S3 (current runs) or Gitea (runs recorded before the S3
+    migration) — the API resolves that transparently. Raises `HarumiError` on
+    a 404 (no run, no output pointer, or no `output.json`), so callers don't
+    need to special-case the status code themselves.
+    """
+    from harumi.errors import ApiError
+
+    try:
+        response = api.request("GET", f"/projects/{project_id}/runs/{run_id}/output")
+    except ApiError as exc:
+        if exc.status_code == 404:
+            raise HarumiError(f"Run {run_id!r} has no output to read.") from exc
+        raise
+    return response.json()
+
+
 def download_run_output(
     api: "ApiClient", project_id: str, run: ProjectRun, dest_dir: Path
 ) -> Path:
-    """Download a run's committed output as a zip into `dest_dir`.
+    """Download every artifact a run wrote to `[output].dir` as one zip into `dest_dir`.
 
-    `run.output_url` points at a Gitea location as `"<branch>:<dir>"` — the
-    worker's best-effort commit of the run's output folder. There is no
-    dedicated "download output" endpoint for runs, so this reuses the repo
-    archive endpoint against that branch/dir.
+    Proxied through the API (`GET .../runs/{run_id}/output/archive`), which
+    reads from S3 (current runs) or Gitea (runs recorded before the S3
+    migration) transparently.
     """
-    if not run.output_url or ":" not in run.output_url:
-        raise HarumiError(f"Run {run.id!r} has no committed output to download.")
+    if not run.output_url:
+        raise HarumiError(f"Run {run.id!r} has no output to download.")
 
-    ref, _, path = run.output_url.partition(":")
     dest_dir = Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / f"run_{run.id}_output.zip"
 
     with api.stream(
         "GET",
-        f"/projects/{project_id}/repo/archive",
-        params={"path": path, "ref": ref},
+        f"/projects/{project_id}/runs/{run.id}/output/archive",
         timeout=300.0,
     ) as response:
         with open(dest_path, "wb") as f:
