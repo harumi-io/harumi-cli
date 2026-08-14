@@ -14,6 +14,7 @@
     harumi runs list|get|cancel [--project <id>]
     harumi outputs --project <id> [--latest] [--download <output_id>]
     harumi config set-org <ORG_ID>
+    harumi skill install|path
     harumi projects create|list|get|rename|delete
     harumi repo ls|cat|put|rm|mv|download|branches|branch|promote|dir
     harumi dashboard widgets|validate [--project <id>]
@@ -96,6 +97,7 @@ from rich.console import Console
 from rich.table import Table
 
 from harumi import __version__, auth
+from harumi import skills as skills_mod
 from harumi.client import Client
 from harumi.config import (
     ENVIRONMENTS,
@@ -488,6 +490,52 @@ def config_set_org(org_id: str) -> None:
     config = Config.load()
     config.save_org_id(org_id)
     console.print(f"Organization set to [bold]{org_id}[/bold].")
+
+
+# ---------------------------------------------------------------------------
+# harumi skill — seed the bundled agent skills onto this machine
+# ---------------------------------------------------------------------------
+
+skill_app = typer.Typer(help="Install the bundled harumi-cli agent skills (Cursor, Claude Code, etc.).")
+app.add_typer(skill_app, name="skill")
+
+
+@skill_app.command("install")
+def skill_install(
+    agent: Optional[list[str]] = typer.Option(
+        None,
+        "--agent",
+        "-a",
+        help=f"Target agent(s): {', '.join(skills_mod.AGENT_KEYS)}. Default: auto-detect.",
+    ),
+    project: bool = typer.Option(
+        False, "--project", help=f"Write to ./{skills_mod.PROJECT_SKILLS_DIR} instead of a global agent directory."
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print what would be written without writing it."),
+    force: bool = typer.Option(False, "--force", help="Overwrite a destination even if it doesn't look like a skill."),
+) -> None:
+    """Copy the harumi-cli and harumi-cli-setup skills onto this machine.
+
+    With no flags, auto-detects installed agents (Cursor/Claude Code/Codex)
+    by their config directory and writes to each one's global skills folder.
+    """
+    try:
+        written = skills_mod.install(agent_keys=agent, project=project, dry_run=dry_run, force=force)
+    except (FileNotFoundError, FileExistsError, ValueError) as exc:
+        _fail(str(exc))
+        return
+    verb = "Would write" if dry_run else "Wrote"
+    for path in written:
+        console.print(f"[dim]{verb}:[/dim] {path}")
+    if not dry_run:
+        console.print(f"[bold green]Installed[/bold green] {len(written)} skill director{'y' if len(written) == 1 else 'ies'}.")
+
+
+@skill_app.command("path")
+def skill_path() -> None:
+    """Print the local directory containing the bundled skills."""
+    for skill_dir in skills_mod.bundled_skill_dirs():
+        console.print(str(skill_dir))
 
 
 # ---------------------------------------------------------------------------

@@ -1,22 +1,124 @@
 name: Release
 
-# Builds and publishes the `harumi` package to PyPI whenever a GitHub Release
-# is published. Uses PyPI Trusted Publishing (OIDC) — no API token is stored
-# in this repo. See https://docs.pypi.org/trusted-publishers/ for the one-time
-# PyPI-side setup (pending publisher for harumi-io/harumi-cli, workflow
-# release.yml, environment pypi).
+# Tags, releases, and publishes the `harumi` package to PyPI, then mirrors
+# the canonical `.agents/skills/` docs into harumi-io/harumi-skills (the
+# repo that npx-skills/Claude-Code-marketplace/Cursor-plugin installs pull
+# from) so that repo never drifts from what actually shipped.
+#
+# Normal path: bump `__version__` in src/harumi/__init__.py and merge to main.
+# The `resolve` job below turns that bump into a vX.Y.Z tag + GitHub Release,
+# then build/publish run in the same workflow run.
+#
+# Escape hatch: publishing a GitHub Release by hand (UI or `gh release create`)
+# also triggers build/publish, skipping the tagging step.
+#
+# Uses PyPI Trusted Publishing (OIDC) — no API token is stored in this repo.
+# See https://docs.pypi.org/trusted-publishers/ for the one-time PyPI-side
+# setup (publisher for harumi-io/harumi-cli, workflow release.yml, env pypi).
+#
+# Everything lives in this one file on purpose: PyPI's trusted publishing does
+# NOT support reusable workflows, so the `publish` job must stay in a top-level
+# workflow whose filename matches the configured publisher. Splitting the
+# tagging half into its own workflow that `uses:` this one would rely on
+# behaviour PyPI documents as unsupported and plans to remove.
+# See https://github.com/pypa/gh-action-pypi-publish#trusted-publishing
 on:
+  push:
+    branches: [main]
+    # A release is intended exactly when the version string changes.
+    paths: ['src/harumi/__init__.py']
   release:
     types: [published]
 
+concurrency:
+  # Never let two releases race: a duplicate PyPI upload is unrecoverable
+  # because a version number can never be reused.
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  resolve:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the tag and the GitHub Release
+    outputs:
+      publish: ${{ steps.decide.outputs.publish }}
+      tag: ${{ steps.decide.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Anchored to the start of a line so it cannot match the `"__version__"`
+      # entry in `__all__`.
+      - name: Read version from source
+        id: read
+        run: |
+          version=$(python - <<'PY'
+          import pathlib, re, sys
+
+          text = pathlib.Path("src/harumi/__init__.py").read_text()
+          match = re.search(r'^__version__ = "([^"]+)"$', text, re.M)
+          if match is None:
+              sys.exit("could not find __version__ in src/harumi/__init__.py")
+          print(match.group(1))
+          PY
+          )
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-]?[0-9a-zA-Z.]+)?$'; then
+            echo "::error::refusing to release malformed version '$version'"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Source version: $version"
+
+      # On a push, only release when this exact tag does not exist yet. That
+      # makes the workflow idempotent: re-runs, and merges that touch
+      # __init__.py without changing the version, become no-ops instead of
+      # failing on a duplicate tag or re-uploading to PyPI.
+      - name: Decide whether to release
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.read.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "Release event for ${{ github.event.release.tag_name }} — publishing."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists — nothing to release."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --generate-notes
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build distribution
+    needs: resolve
+    if: needs.resolve.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Build the tagged commit, not a branch tip that may have moved on.
+          ref: ${{ needs.resolve.outputs.tag }}
 
       - uses: actions/setup-python@v5
         with:
@@ -54,3 +156,59 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  mirror-skills:
+    name: Mirror skills to harumi-skills
+    needs: [resolve, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout harumi-cli (source of truth)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
+          path: harumi-cli
+
+      - name: Checkout harumi-skills
+        uses: actions/checkout@v4
+        with:
+          repository: harumi-io/harumi-skills
+          # Fine-grained PAT with contents:write on harumi-io/harumi-skills —
+          # GITHUB_TOKEN is scoped to this repo only and can't push there.
+          token: ${{ secrets.SKILLS_REPO_TOKEN }}
+          path: harumi-skills
+
+      - name: Sync skill content
+        run: |
+          rm -rf harumi-skills/skills
+          cp -R harumi-cli/.agents/skills harumi-skills/skills
+
+      # Claude Code only pulls a plugin update when its manifest `version`
+      # changes, so the bump itself is load-bearing, not cosmetic.
+      - name: Bump manifest versions to the released CLI version
+        env:
+          VERSION: ${{ needs.resolve.outputs.tag }}
+        run: |
+          version="${VERSION#v}"
+          cd harumi-skills
+          for f in .claude-plugin/plugin.json .cursor-plugin/plugin.json; do
+            jq --arg v "$version" '.version = $v' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+          done
+          jq --arg v "$version" '.plugins[0].version = $v' .claude-plugin/marketplace.json > .claude-plugin/marketplace.json.tmp
+          mv .claude-plugin/marketplace.json.tmp .claude-plugin/marketplace.json
+
+      - name: Commit and push
+        env:
+          VERSION: ${{ needs.resolve.outputs.tag }}
+        run: |
+          cd harumi-skills
+          git config user.name "harumi-cli release bot"
+          git config user.email "devops@harumi.io"
+          if git diff --quiet; then
+            echo "No skill changes for $VERSION — nothing to mirror."
+            exit 0
+          fi
+          git add -A
+          git commit -m "Sync skills from harumi-cli $VERSION"
+          git push origin main

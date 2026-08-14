@@ -17,11 +17,8 @@ The staging endpoints (`api.dev.harumi.io`, `git.dev.harumi.io`) are internal AL
 
 ## Preflight
 
-1. Check CLI is installed: `harumi --version`. Install with `pip install harumi` (or `pip install -e .` from this repo for an unreleased fix).
-2. Check the user is authenticated. Any command raises `Not logged in. Run harumi login first.` if not. **Never try to automate the OTP flow** — it emails a one-time code and needs interactive input. Ask the user to run it:
-   - `harumi login` for an existing account.
-   - `harumi login --signup` for a brand-new email (plain login 422s with "Signups not allowed for otp" on new emails).
-3. `harumi login` also provisions a per-user Gitea token via `POST /api/git/credentials`. The token is stored in `~/.harumi/credentials.json`.
+1. Check CLI is installed: `harumi --version`. Not installed, not on PATH, or `Not logged in. Run harumi login first.` on any command? Switch to the **`harumi-cli-setup`** skill — it covers install method selection, environment selection, the interactive OTP login (never automate this), and diagnosing a broken install. Come back here once `harumi whoami` succeeds.
+2. `harumi login` also provisions a per-user Gitea token via `POST /api/git/credentials`, stored in `~/.harumi/environments/<env>/credentials.json`.
 
 ## The always-bound-repo invariant
 
