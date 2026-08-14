@@ -28,7 +28,18 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.27",
-    "typer>=0.12",
+    # 0.16 is the floor, not 0.12. Typer <0.16 declares an unbounded
+    # `click>=8.0.0`, so a fresh install pairs it with modern click (>=8.2) and
+    # the CLI dies at startup — every command, `harumi --version` included:
+    #   * <0.13 rejects boolean-pair flags (`--bind/--no-bind`) with
+    #     "Secondary flag is not valid for non-boolean flag".
+    #   * 0.13-0.15.3 then break on `--help` because click's
+    #     Parameter.make_metavar() gained a required `ctx` argument.
+    # (0.15.4 happens to work only because it pins click<8.2 — too fragile to
+    # rely on.) 0.16+ is compatible with current click, and still supports the
+    # Python 3.9 floor above. Guarded by
+    # tests/test_cli.py::test_every_command_builds.
+    "typer>=0.16",
     "rich>=13.7",
     "pydantic>=2.6",
 ]
