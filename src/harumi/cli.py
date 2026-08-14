@@ -5,6 +5,7 @@
     harumi whoami
     harumi profile show|set
     harumi specs
+    harumi templates
     harumi notebooks [--project <id>]
     harumi init --project <id> [--api-url <url>] [--git-url <url>]
     harumi import [path] [--from-git <url>] [--project-name <name>]
@@ -14,7 +15,9 @@
     harumi outputs --project <id> [--latest] [--download <output_id>]
     harumi config set-org <ORG_ID>
     harumi projects create|list|get|rename|delete
-    harumi repo ls|cat|put|rm|mv|download|branches|branch|promote
+    harumi repo ls|cat|put|rm|mv|download|branches|branch|promote|dir
+    harumi dashboard widgets|validate [--project <id>]
+    harumi share status|enable|disable|rotate|set-password|rm-password [--project <id>]
     harumi datasources list|get|add|update|remove|test|query [--project <id>]
     harumi schedules list|get|add|update|remove [--project <id>]
     harumi secrets list|set|rm [--project <id>]
@@ -44,6 +47,22 @@ accepted as a flag — and are stored server-side in AWS SSM. `datasources
 query` runs a SELECT/WITH-only, row-capped proxy query so users can validate
 SQL before wiring it into solver code.
 
+Dashboards & widgets
+---------------------
+Each project's dashboard renders from a repo-committed `dashboard.toml`,
+bound by dot-path keys to `output/output.json` (the file a run writes).
+`harumi dashboard widgets` prints the current widget-type reference;
+`harumi dashboard validate` checks a `dashboard.toml` against that contract
+and, given a run's output, flags dot-paths that won't resolve — the
+platform silently drops a bad widget instead of erroring, so validating
+before `repo put dashboard.toml` is the only way to catch a typo up front.
+
+Sharing
+-------
+`harumi share` manages a project's public, unauthenticated dashboard link
+(optionally password-protected). `rotate`/`set-password` invalidate
+previously issued viewer sessions.
+
 Schedules
 ---------
 `harumi schedules` manages project-scoped cron schedules for git-ref runs.
@@ -67,6 +86,7 @@ from __future__ import annotations
 
 import base64
 import functools
+import json
 import os
 from pathlib import Path
 from typing import Optional
@@ -88,6 +108,11 @@ from harumi.config import (
     resolve_environment,
     save_environment,
     save_git_token,
+)
+from harumi.dashboard import (
+    WIDGET_SCHEMAS,
+    DashboardTomlError,
+    validate_dashboard_toml,
 )
 from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
 from harumi.git import (
@@ -486,6 +511,25 @@ def specs(
             spec.size.memory,
             "yes" if spec.subscription_required else "no",
         )
+    console.print(table)
+
+
+@app.command()
+@_handle_errors
+def templates(
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """List project templates. Pass a template's id as `projects create --template-id`."""
+    client = _get_client(api_url=api_url, org=org)
+    items = client.list_templates()
+    if not items:
+        console.print("No templates found.")
+        return
+
+    table = Table("id", "slug", "name", "description")
+    for t in items:
+        table.add_row(t.id, t.slug, t.name, t.description)
     console.print(table)
 
 
@@ -1405,6 +1449,261 @@ def repo_promote(
     if result.conflict:
         _fail(result.message or f"Version {name!r} could not be merged (conflicts).")
     console.print(f"[bold green]Promoted[/bold green] [bold]{name}[/bold] into live.")
+
+
+@repo_app.command("dir")
+@_handle_errors
+def repo_dir(
+    path: str = typer.Argument("", help="Folder within the repo (default: repo root)."),
+    ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to browse (defaults to the default branch)."),
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """One folder level of the repo (GitHub-style browser). Use `repo ls` for a flat, whole-repo listing."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    listing = client.list_repo_dir(project_id, path=path, ref=ref)
+    if not listing.entries:
+        console.print(f"No entries at {path or '/'!r} on {listing.ref!r}.")
+        return
+
+    table = Table("name", "type", "size", "last_commit")
+    for e in sorted(listing.entries, key=lambda e: (e.type != "dir", e.name)):
+        last = e.last_commit.message[:60] if e.last_commit else ""
+        table.add_row(e.name, e.type, str(e.size or ""), last)
+    console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# harumi dashboard
+# ---------------------------------------------------------------------------
+
+dashboard_app = typer.Typer(help="Reference and validate the project's dashboard.toml widgets.")
+app.add_typer(dashboard_app, name="dashboard")
+
+
+@dashboard_app.command("widgets")
+@_handle_errors
+def dashboard_widgets(
+    type_: Optional[str] = typer.Option(None, "--type", help="Only show this widget type."),
+) -> None:
+    """Print every dashboard.toml widget type and its required/optional keys."""
+    types = [type_] if type_ else list(WIDGET_SCHEMAS)
+    for t in types:
+        schema = WIDGET_SCHEMAS.get(t)
+        if schema is None:
+            _fail(f'Unknown widget type "{t}". Known types: {", ".join(WIDGET_SCHEMAS)}')
+
+        table = Table("key", "required", "kind", "values", title=f"[bold]{t}[/bold]")
+        for field in schema:
+            table.add_row(
+                field.toml_key,
+                "yes" if field.required else "",
+                field.kind,
+                ", ".join(field.values) if field.values else "",
+            )
+        console.print(table)
+
+
+@dashboard_app.command("validate")
+@_handle_errors
+def dashboard_validate(
+    path: Optional[Path] = typer.Argument(None, help="Local dashboard.toml to validate (default: ./dashboard.toml)."),
+    ref: Optional[str] = typer.Option(None, "--ref", help="Validate the repo's copy on this branch/commit instead of a local file."),
+    against: Optional[Path] = typer.Option(None, "--against", help="Check widget dot-paths against this local output.json."),
+    run_id: Optional[str] = typer.Option(None, "--run", help="Check widget dot-paths against this run's output.json."),
+    latest: bool = typer.Option(False, "--latest", help="Check widget dot-paths against the most recent run's output.json."),
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Validate a dashboard.toml against the widget contract.
+
+    Reports every widget the platform would drop (unknown type, missing
+    required key) plus — when --against/--run/--latest is given — dot-paths
+    that won't resolve against that output.json (the platform can't check
+    this ahead of time; it just renders the widget empty).
+    """
+    if sum(bool(x) for x in (against, run_id, latest)) > 1:
+        _fail("Pass at most one of --against, --run, --latest.")
+
+    project_id = None
+    client = None
+    if run_id or latest or ref:
+        project_id = _resolve_project(project)
+        client = _get_client(api_url=api_url, org=org)
+
+    if path is not None:
+        raw = path.read_text()
+    elif ref:
+        assert client is not None and project_id is not None
+        file_content = client.get_repo_file(project_id, "dashboard.toml", ref=ref)
+        raw = base64.b64decode(file_content.content).decode("utf-8") if file_content.content else ""
+    else:
+        default_path = Path("dashboard.toml")
+        if not default_path.is_file():
+            _fail("No dashboard.toml found. Pass a path, or --ref to check the repo's copy.")
+        raw = default_path.read_text()
+
+    output: Optional[dict] = None
+    if against:
+        if not against.is_file():
+            _fail(f"{against} not found.")
+        try:
+            output = json.loads(against.read_text())
+        except json.JSONDecodeError as exc:
+            _fail(f"{against} is not valid JSON: {exc}")
+    elif run_id or latest:
+        assert client is not None and project_id is not None
+        run = client.get_run(project_id, run_id) if run_id else client.get_latest_run(project_id)
+        if run is None:
+            _fail("Project has no runs yet.")
+        if not run.output_url or ":" not in run.output_url:
+            _fail(f"Run {run.id!r} has no committed output to check against.")
+        run_ref, _, run_dir = run.output_url.partition(":")
+        output_path = f"{run_dir}/output.json" if run_dir else "output.json"
+        try:
+            file_content = client.get_repo_file(project_id, output_path, ref=run_ref)
+        except ApiError as exc:
+            if exc.status_code == 404:
+                _fail(f"Run {run.id!r} has no {output_path} committed.")
+            raise
+        raw_output = base64.b64decode(file_content.content).decode("utf-8") if file_content.content else "{}"
+        try:
+            output = json.loads(raw_output)
+        except json.JSONDecodeError as exc:
+            _fail(f"{output_path} is not valid JSON: {exc}")
+
+    try:
+        widgets, issues = validate_dashboard_toml(raw, output)
+    except DashboardTomlError as exc:
+        _fail(f"dashboard.toml is not valid TOML: {exc}")
+        return
+
+    if widgets:
+        table = Table("id", "type", "title")
+        for w in widgets:
+            table.add_row(w["id"], w["type"], w["title"])
+        console.print(table)
+    else:
+        console.print("No widgets would render.")
+
+    if not issues:
+        console.print("[bold green]OK[/bold green] — every widget is valid" + (" and every dot-path resolves." if output is not None else "."))
+        return
+
+    for issue in issues:
+        style = "red" if issue.dropped else "yellow"
+        prefix = "dropped" if issue.dropped else "empty"
+        console.print(f"[bold {style}]{prefix}[/bold {style}] {issue.message}")
+    raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# harumi share
+# ---------------------------------------------------------------------------
+
+share_app = typer.Typer(help="Manage the project's public, unauthenticated dashboard link.")
+app.add_typer(share_app, name="share")
+
+
+def _print_share_status(project_id: str, status) -> None:
+    if not status.share_enabled:
+        console.print("Sharing is [bold]off[/bold] for this project.")
+        return
+    url = f"{active_platform_url()}/share/{status.share_token}"
+    console.print(f"Sharing is [bold green]on[/bold green]: {url}")
+    console.print(f"Password protected: {'yes' if status.password_set else 'no'}")
+
+
+@share_app.command("status")
+@_handle_errors
+def share_status(
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Show whether this project's dashboard is publicly shared, and its link."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+    _print_share_status(project_id, client.get_share_status(project_id))
+
+
+@share_app.command("enable")
+@_handle_errors
+def share_enable(
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Turn on the project's public dashboard link (mints a token on first use)."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+    _print_share_status(project_id, client.enable_share(project_id))
+
+
+@share_app.command("disable")
+@_handle_errors
+def share_disable(
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Turn off the project's public dashboard link. The old token stops working immediately."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+    client.disable_share(project_id)
+    console.print("[bold red]Disabled[/bold red] the public dashboard link.")
+
+
+@share_app.command("rotate")
+@_handle_errors
+def share_rotate(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Invalidate the current share link and mint a new one."""
+    project_id = _resolve_project(project)
+
+    if not yes and not typer.confirm("Rotate the share link? The current link will stop working immediately."):
+        console.print("Aborted.")
+        return
+
+    client = _get_client(api_url=api_url, org=org)
+    _print_share_status(project_id, client.rotate_share(project_id))
+
+
+@share_app.command("set-password")
+@_handle_errors
+def share_set_password(
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Set or change the share link's password (min 8 characters, prompted, hidden input)."""
+    project_id = _resolve_project(project)
+    password = typer.prompt("Enter share link password (hidden, min 8 characters)", hide_input=True)
+    client = _get_client(api_url=api_url, org=org)
+    client.set_share_password(project_id, password)
+    console.print("[bold green]Set[/bold green] the share link password. Previously unlocked viewers must re-enter it.")
+
+
+@share_app.command("rm-password")
+@_handle_errors
+def share_rm_password(
+    project: Optional[str] = typer.Option(None, "--project", "-p"),
+    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    org: Optional[str] = typer.Option(None, "--org"),
+) -> None:
+    """Remove the share link's password. The link becomes freely viewable."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+    client.remove_share_password(project_id)
+    console.print("[bold red]Removed[/bold red] the share link password.")
 
 
 # ---------------------------------------------------------------------------

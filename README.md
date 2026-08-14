@@ -40,11 +40,17 @@ harumi run --watch --output-dir ./out
 # 6. Inspect runs later
 harumi runs list
 harumi runs get <RUN_ID>
+
+# 7. Check the project's dashboard.toml renders the widgets you expect
+harumi dashboard validate --latest
 ```
 
 ## Everything else the CLI can do
 
-- `harumi repo` — browse, read, write, delete, move, and download files in the project's Gitea repo; create/delete/promote branches (versions).
+- `harumi repo` — browse, read, write, delete, move, and download files in the project's Gitea repo; create/delete/promote branches (versions); `repo dir` for a GitHub-style folder-at-a-time browse.
+- `harumi dashboard` — look up the `dashboard.toml` widget reference (`widgets`) and validate a project's dashboard, including its `output.json` dot-paths, before pushing (`validate`).
+- `harumi share` — turn the project's public, unauthenticated dashboard link on/off, rotate it, and password-protect it.
+- `harumi templates` — list project templates to pass as `projects create --template-id`.
 - `harumi datasources` — CRUD project database connections, test them, and run read-only SQL queries against them.
 - `harumi schedules` — CRUD cron schedules that trigger git-ref runs.
 - `harumi secrets` — CRUD project-scoped environment variables.

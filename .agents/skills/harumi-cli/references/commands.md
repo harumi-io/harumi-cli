@@ -9,6 +9,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [profile](#profile)
 - [config set-org](#config-set-org)
 - [specs](#specs)
+- [templates](#templates)
 - [notebooks](#notebooks)
 - [projects](#projects)
 - [init](#init)
@@ -17,6 +18,8 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [runs](#runs)
 - [outputs](#outputs)
 - [repo](#repo)
+- [dashboard](#dashboard)
+- [share](#share)
 - [datasources](#datasources)
 - [schedules](#schedules)
 - [secrets](#secrets)
@@ -101,6 +104,14 @@ harumi specs [--api-url URL] [--org ORG]
 ```
 
 Lists kernel specs (`name`, `display_name`, `cpu`, `memory`, `subscription_required`) from `GET /sandbox/specs`. `name` is what you pass to `run --kernel`.
+
+## `templates`
+
+```
+harumi templates [--api-url URL] [--org ORG]
+```
+
+Lists project templates (`id`, `slug`, `name`, `description`) from `GET /templates`. Pass a template's `id` as `projects create --template-id`.
 
 ## `notebooks`
 
@@ -228,6 +239,7 @@ Deprecated alias kept for backwards compatibility — prefer `harumi runs` for n
 
 ```
 harumi repo ls [--ref REF] [--project ID] [--api-url URL] [--org ORG]
+harumi repo dir [PATH] [--ref REF] [--project ID] [--api-url URL] [--org ORG]
 harumi repo cat PATH [--ref REF] [--output FILE] [--project ID]
 harumi repo put LOCAL_PATH REPO_PATH [-m MSG] [--branch B] [--project ID]
 harumi repo rm PATH [-m MSG] [--branch B] [--yes] [--project ID]
@@ -242,6 +254,7 @@ harumi repo promote NAME [--title T] [--delete-after] [--project ID]
 Real endpoints on harumi-api's git router. All writes go through the batch `POST /projects/{id}/repo/changes` endpoint, so every `put`/`rm`/`mv` is exactly one commit.
 
 - **`ls`**: `GET /projects/{id}/repo/files[?ref=]` → flat, recursive file list.
+- **`dir`**: `GET /projects/{id}/repo/dir?path=&ref=` → one folder level (GitHub-style repo browser: immediate children only, each with its last commit, plus the branch's latest commit/total commit count). Use `ls` instead for a flat, whole-repo listing.
 - **`cat`**: `GET /projects/{id}/repo/file-content?path=...[&ref=]`, base64-decodes `content`. Prints to stdout, or writes bytes to `--output` (required for binary files — the CLI refuses to print non-UTF-8 content without `--output`).
 - **`put`**: probes `get_repo_file` first to decide `create` vs `update`, then sends one `repo/changes` operation with base64-encoded file content.
 - **`rm`**: sends a `delete` operation for the path (file or folder — deletes everything under a folder prefix). Prompts for confirmation unless `--yes`.
@@ -251,6 +264,42 @@ Real endpoints on harumi-api's git router. All writes go through the batch `POST
 - **`branch-create`**: `POST /projects/{id}/repo/branches` with `{name, from_branch?}`.
 - **`branch-rm`**: `DELETE /projects/{id}/repo/branches/{name}`. Refuses (server-side) to delete the live branch.
 - **`promote`**: `POST /projects/{id}/repo/branches/{name}/promote` with `{title?, delete_after}`; merges the version into the live branch. On a merge conflict the response's `conflict=true` and the CLI surfaces `message` as an error instead of a fake success.
+
+`--project` on every subcommand overrides the `.harumi` binding.
+
+## `dashboard`
+
+```
+harumi dashboard widgets [--type TYPE]
+harumi dashboard validate [PATH] [--ref REF] [--against FILE | --run RUN_ID | --latest] [--project ID]
+```
+
+No backend endpoint — `dashboard.toml` is a plain file in the project's Gitea repo (read/write it with `repo cat`/`repo put` like any other file). This command group only helps you get its contents right. Full per-type reference: [dashboard.md](dashboard.md).
+
+- **`widgets`**: prints the current widget-type contract (required/optional keys, enum values) for all 5 types, or one with `--type`. Sourced from `harumi.dashboard.WIDGET_SCHEMAS`, a hand-maintained mirror of harumi-platform's `schema.ts` (see the `ponytail:` comment in that module) — always current with this CLI version, but can drift from the platform between CLI releases if a new widget type ships there first.
+- **`validate`**: parses a `dashboard.toml` (`PATH`, defaulting to `./dashboard.toml`; or `--ref BRANCH` to check the repo's copy via `GET /repo/file-content`) the same way the platform's `parseDashboardConfig` does, and reports every widget that would be **dropped** (unknown `type`, missing/invalid required key — e.g. a `valueKey` typo for `value_key`). Exits 1 if any widget is dropped.
+  - `--against FILE`: additionally resolves every widget's dot-path keys (`value_key`, `rows_key`, `data_key`, `tasks_key`, etc.) against a local `output.json` and reports any that don't resolve (widget renders empty on the platform, not an error there).
+  - `--run RUN_ID` / `--latest`: same dot-path check, but fetches `output.json` from that run's committed output (`run.output_url` as `"<branch>:<dir>"`, same resolution `harumi outputs --download` uses) via `GET /repo/file-content` instead of a local file.
+  - At most one of `--against`/`--run`/`--latest` may be passed.
+
+## `share`
+
+```
+harumi share status [--project ID]
+harumi share enable [--project ID]
+harumi share disable [--project ID]
+harumi share rotate [--yes] [--project ID]
+harumi share set-password [--project ID]
+harumi share rm-password [--project ID]
+```
+
+Manages `/projects/{id}/share*` — a project's public, unauthenticated dashboard link (read-only `dashboard.toml` + a chosen run's `output.json`, no login required to view).
+
+- **`status`** / **`enable`**: `GET`/`POST /projects/{id}/share` → `ProjectShareStatus {share_enabled, share_token, password_set}`. When enabled, the CLI prints the viewer URL as `{platform_url}/share/{token}` — the API itself never returns a full URL since it doesn't know its own public origin.
+- **`disable`**: `DELETE /projects/{id}/share`. The old token stops working immediately (not just hidden).
+- **`rotate`**: `POST /projects/{id}/share/rotate` — invalidates the current token and mints a new one. Prompts for confirmation unless `--yes`.
+- **`set-password`**: prompts for a password (hidden input, server-enforced 8–200 chars), then `PUT /projects/{id}/share/password`. Changing the password invalidates every previously issued unlock session — viewers must re-enter it.
+- **`rm-password`**: `DELETE /projects/{id}/share/password`. The link becomes freely viewable (no password prompt).
 
 `--project` on every subcommand overrides the `.harumi` binding.
 
@@ -399,6 +448,8 @@ Within the active environment, URL/org overrides (highest first): **CLI flags > 
 | `No fields to update.` | An `update`/`set` command called with no flags | Pass at least one field flag |
 | `harumi-api returned HTTP 400: Invalid cron expression: ...` | `schedules add/update --cron` failed server-side `croniter` validation | Fix the cron string (5 fields: minute hour day month weekday) |
 | `{path!r} is not valid UTF-8 text.` | `repo cat` on a binary file without `--output` | Re-run with `--output <local_path>` |
+| A widget is missing from the dashboard, no error shown | The platform silently drops a widget with an unknown `type` or a missing/renamed required key (e.g. `valueKey` instead of `value_key`) | `harumi dashboard validate` on the file before pushing it |
+| A widget renders but stays empty | Its `*_key` dot-path doesn't match anything in the run's `output.json` | `harumi dashboard validate --latest` (or `--against <output.json>`) to see exactly which key and what's available instead |
 
 ## Python library (`Client`) alternative
 
@@ -448,6 +499,17 @@ client.create_secret(binding.project_id, "API_KEY", "s3cr3t")
 
 # Organizations
 orgs = client.list_organizations()
+
+# Templates
+templates = client.list_templates()
+
+# Dashboard widget contract + validation
+from harumi.dashboard import WIDGET_SCHEMAS, validate_dashboard_toml
+widgets, issues = validate_dashboard_toml(open("dashboard.toml").read())
+
+# Public share link
+status = client.enable_share(binding.project_id)
+print(status.share_token)
 
 # Create a project
 project = client.create_project("New Project")  # project.repo is None if unprovisioned
