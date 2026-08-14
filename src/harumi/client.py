@@ -31,15 +31,18 @@ from harumi.models import (
     Project,
     ProjectExecuteResponse,
     ProjectRun,
+    ProjectShareStatus,
     ProjectWithRepo,
     PromoteResult,
     QueryResult,
     RepoChangesResult,
+    RepoDirListing,
     RepoFileContent,
     RepoFileEntry,
     RepoInfo,
     Schedule,
     Secret,
+    TemplateSummary,
     UserProfile,
 )
 
@@ -233,6 +236,11 @@ class Client:
         response = self.api.request("GET", "/sandbox/specs")
         return [KernelSpec.model_validate(s) for s in response.json()]
 
+    def list_templates(self) -> list[TemplateSummary]:
+        """List project templates (pass a `.id` as `--template-id` to `create_project`)."""
+        response = self.api.request("GET", "/templates")
+        return [TemplateSummary.model_validate(t) for t in response.json().get("templates", [])]
+
     # -- Project creation -------------------------------------------------
     # POST /projects creates the project row AND (best-effort, synchronously)
     # provisions its Gitea repo server-side — but the response body is a bare
@@ -317,6 +325,19 @@ class Client:
             "GET", f"/projects/{project_id}/repo/files", params=params
         )
         return [RepoFileEntry.model_validate(f) for f in response.json()]
+
+    def list_repo_dir(
+        self, project_id: str, path: str = "", ref: Optional[str] = None
+    ) -> RepoDirListing:
+        """One folder level of the repo (GitHub-style repo browser) — use
+        `list_repo_files` instead for a flat, whole-repo listing."""
+        params: dict[str, Any] = {"path": path}
+        if ref:
+            params["ref"] = ref
+        response = self.api.request(
+            "GET", f"/projects/{project_id}/repo/dir", params=params
+        )
+        return RepoDirListing.model_validate(response.json())
 
     def get_repo_file(
         self, project_id: str, path: str, ref: Optional[str] = None
@@ -583,3 +604,33 @@ class Client:
         self.api.request(
             "DELETE", f"/users/organizations/{organization_id}/users/{user_id}"
         )
+
+    # -- Project share links ------------------------------------------------
+    # /projects/{id}/share — the project's public dashboard link. `password`
+    # in the request bodies is never echoed back (see ProjectShareStatus).
+
+    def get_share_status(self, project_id: str) -> ProjectShareStatus:
+        response = self.api.request("GET", f"/projects/{project_id}/share")
+        return ProjectShareStatus.model_validate(response.json())
+
+    def enable_share(self, project_id: str) -> ProjectShareStatus:
+        response = self.api.request("POST", f"/projects/{project_id}/share")
+        return ProjectShareStatus.model_validate(response.json())
+
+    def disable_share(self, project_id: str) -> ProjectShareStatus:
+        response = self.api.request("DELETE", f"/projects/{project_id}/share")
+        return ProjectShareStatus.model_validate(response.json())
+
+    def rotate_share(self, project_id: str) -> ProjectShareStatus:
+        response = self.api.request("POST", f"/projects/{project_id}/share/rotate")
+        return ProjectShareStatus.model_validate(response.json())
+
+    def set_share_password(self, project_id: str, password: str) -> ProjectShareStatus:
+        response = self.api.request(
+            "PUT", f"/projects/{project_id}/share/password", json={"password": password}
+        )
+        return ProjectShareStatus.model_validate(response.json())
+
+    def remove_share_password(self, project_id: str) -> ProjectShareStatus:
+        response = self.api.request("DELETE", f"/projects/{project_id}/share/password")
+        return ProjectShareStatus.model_validate(response.json())
