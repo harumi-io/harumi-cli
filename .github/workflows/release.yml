@@ -139,6 +139,21 @@ jobs:
           name: dist
           path: dist/
 
+      # Emitted from the *installed* build (the sdist/wheel just verified
+      # above), not the checked-out source tree, so the artifact matches what
+      # `pip install harumi` actually gives consumers of this release.
+      - name: Emit CLI surface
+        run: |
+          python -m pip install dist/*.whl
+          python scripts/emit_cli_surface.py > cli-surface.json
+          python scripts/check_emit_cli_surface.py
+
+      - name: Upload CLI surface artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-surface
+          path: cli-surface.json
+
   publish:
     name: Publish to PyPI
     needs: build
@@ -156,6 +171,29 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-cli-surface:
+    name: Attach CLI surface to release
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach a release asset
+    steps:
+      - name: Download CLI surface artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-surface
+          path: .
+
+      # harumi-docs' scheduled drift check reads this from the release
+      # instead of installing the package, so it stays in sync even if the
+      # PyPI upload above is ever delayed or retried separately.
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.resolve.outputs.tag }}" cli-surface.json \
+            --repo "${{ github.repository }}" --clobber
 
   mirror-skills:
     name: Mirror skills to harumi-skills

@@ -337,8 +337,8 @@ def logout() -> None:
 @app.command()
 @_handle_errors
 def whoami(
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Show the currently logged-in user."""
     client = _get_client(api_url=api_url, org=org)
@@ -438,8 +438,8 @@ app.add_typer(profile_app, name="profile")
 @profile_app.command("show")
 @_handle_errors
 def profile_show(
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Show your account profile."""
     client = _get_client(api_url=api_url, org=org)
@@ -453,11 +453,11 @@ def profile_show(
 @profile_app.command("set")
 @_handle_errors
 def profile_set(
-    first_name: Optional[str] = typer.Option(None, "--first-name"),
-    last_name: Optional[str] = typer.Option(None, "--last-name"),
-    bio: Optional[str] = typer.Option(None, "--bio"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    first_name: Optional[str] = typer.Option(None, "--first-name", help="New first name."),
+    last_name: Optional[str] = typer.Option(None, "--last-name", help="New last name."),
+    bio: Optional[str] = typer.Option(None, "--bio", help="New bio text."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Update your account profile. Only provided fields are changed."""
     body: dict = {}
@@ -485,7 +485,7 @@ app.add_typer(config_app, name="config")
 
 
 @config_app.command("set-org")
-def config_set_org(org_id: str) -> None:
+def config_set_org(org_id: str = typer.Argument(..., help="Organization id to persist as X-Organization.")) -> None:
     """Persist the organization id sent as X-Organization on every request."""
     config = Config.load()
     config.save_org_id(org_id)
@@ -545,8 +545,8 @@ def skill_path() -> None:
 @app.command()
 @_handle_errors
 def specs(
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """List available kernel specs (sizes/images) for running code."""
     client = _get_client(api_url=api_url, org=org)
@@ -565,8 +565,8 @@ def specs(
 @app.command()
 @_handle_errors
 def templates(
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """List project templates. Pass a template's id as `projects create --template-id`."""
     client = _get_client(api_url=api_url, org=org)
@@ -585,8 +585,8 @@ def templates(
 @_handle_errors
 def notebooks(
     project: Optional[str] = typer.Option(None, "--project", help="Only list notebooks for this project."),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """List projects and their notebooks."""
     client = _get_client(api_url=api_url, org=org)
@@ -679,9 +679,9 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
 @_handle_errors
 def init(
     project: str = typer.Option(..., "--project", "-p", help="Harumi project id to bind this directory to."),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    git_url: Optional[str] = typer.Option(None, "--git-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Bind the current directory to a Harumi project and configure the git remote.
 
@@ -760,9 +760,9 @@ def import_project(
     bind: bool = typer.Option(
         True, "--bind/--no-bind", help="Bind the folder to the new project (like `harumi init`)."
     ),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    git_url: Optional[str] = typer.Option(None, "--git-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Turn a downloaded project folder into a new git-based Harumi project.
 
@@ -853,9 +853,9 @@ def projects_create(
     bind: bool = typer.Option(
         True, "--bind/--no-bind", help="Bind the current directory to the new project (like `harumi init`)."
     ),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    git_url: Optional[str] = typer.Option(None, "--git-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Create a new Harumi project and its Gitea repo, then bind this directory to it."""
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
@@ -880,8 +880,8 @@ def projects_create(
 @projects_app.command("list")
 @_handle_errors
 def projects_list(
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """List your projects."""
     client = _get_client(api_url=api_url, org=org)
@@ -900,8 +900,8 @@ def projects_list(
 @_handle_errors
 def projects_get(
     project_id: str = typer.Argument(..., help="Project id."),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Show details for one project."""
     client = _get_client(api_url=api_url, org=org)
@@ -917,8 +917,8 @@ def projects_get(
 def projects_rename(
     project_id: str = typer.Argument(..., help="Project id."),
     name: str = typer.Argument(..., help="New project name."),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Rename a project."""
     client = _get_client(api_url=api_url, org=org)
@@ -931,8 +931,8 @@ def projects_rename(
 def projects_delete(
     project_id: str = typer.Argument(..., help="Project id."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Delete a project. This cannot be undone."""
     client = _get_client(api_url=api_url, org=org)
@@ -965,9 +965,9 @@ def run(
     output_dir: Optional[Path] = typer.Option(
         None, "--output-dir", "-o", help="Download output artifacts here (requires --watch)."
     ),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    git_url: Optional[str] = typer.Option(None, "--git-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Run the project via its Harumi Git repo.
 
@@ -1109,9 +1109,9 @@ app.add_typer(runs_app, name="runs")
 @runs_app.command("list")
 @_handle_errors
 def runs_list(
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """List runs for a project, newest first."""
     project_id = _resolve_project(project)
@@ -1139,9 +1139,9 @@ def runs_list(
 @_handle_errors
 def runs_get(
     run_id: str = typer.Argument(..., help="Run id."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Show details (including captured stdout/stderr) for one run."""
     project_id = _resolve_project(project)
@@ -1180,9 +1180,9 @@ def runs_get(
 @_handle_errors
 def runs_cancel(
     run_id: str = typer.Argument(..., help="Run id."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Cancel an in-flight run."""
     project_id = _resolve_project(project)
@@ -1202,9 +1202,9 @@ def outputs(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id (uses .harumi binding if omitted)."),
     latest: bool = typer.Option(False, "--latest", help="Show only the most recent run."),
     download: Optional[str] = typer.Option(None, "--download", help="Download this run id's committed output."),
-    output_dir: Path = typer.Option(Path("."), "--output-dir", "-o"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    output_dir: Path = typer.Option(Path("."), "--output-dir", "-o", help="Directory to download into. Default: current directory."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """List or download run outputs for a project.
 
@@ -1256,9 +1256,9 @@ app.add_typer(repo_app, name="repo")
 @_handle_errors
 def repo_ls(
     ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to list (defaults to the default branch)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """List all files in the repo (flat, recursive)."""
     project_id = _resolve_project(project)
@@ -1281,9 +1281,9 @@ def repo_cat(
     path: str = typer.Argument(..., help="File path within the repo."),
     ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to read from."),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write to this local path instead of stdout."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Print (or save) a file's content."""
     project_id = _resolve_project(project)
@@ -1311,9 +1311,9 @@ def repo_put(
     repo_path: str = typer.Argument(..., help="Destination path within the repo."),
     message: Optional[str] = typer.Option(None, "--message", "-m", help="Commit message."),
     branch: Optional[str] = typer.Option(None, "--branch", help="Target branch (defaults to the default branch)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Create or update a file in the repo (create if absent, else update) as one commit."""
     project_id = _resolve_project(project)
@@ -1353,9 +1353,9 @@ def repo_rm(
     message: Optional[str] = typer.Option(None, "--message", "-m", help="Commit message."),
     branch: Optional[str] = typer.Option(None, "--branch", help="Target branch (defaults to the default branch)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Delete a file, or every file under a folder, as one commit."""
     project_id = _resolve_project(project)
@@ -1381,9 +1381,9 @@ def repo_mv(
     to_path: str = typer.Argument(..., help="Destination path within the repo."),
     message: Optional[str] = typer.Option(None, "--message", "-m", help="Commit message."),
     branch: Optional[str] = typer.Option(None, "--branch", help="Target branch (defaults to the default branch)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Rename/move a file, or every file under a folder, as one commit."""
     project_id = _resolve_project(project)
@@ -1407,9 +1407,9 @@ def repo_download(
     output: Path = typer.Option(..., "--output", "-o", help="Local zip path to write."),
     path: str = typer.Option("", "--path", help="Folder within the repo to download (default: whole repo)."),
     ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to download from."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Download the repo (or a folder within it) as a zip."""
     project_id = _resolve_project(project)
@@ -1422,9 +1422,9 @@ def repo_download(
 @repo_app.command("branches")
 @_handle_errors
 def repo_branches(
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """List versions (git branches). The live branch is flagged."""
     project_id = _resolve_project(project)
@@ -1446,9 +1446,9 @@ def repo_branches(
 def repo_branch_create(
     name: str = typer.Argument(..., help="New branch (version) name."),
     from_branch: Optional[str] = typer.Option(None, "--from", help="Base branch (defaults to the live branch)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Create a new version (git branch)."""
     project_id = _resolve_project(project)
@@ -1463,9 +1463,9 @@ def repo_branch_create(
 def repo_branch_rm(
     name: str = typer.Argument(..., help="Branch (version) name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Delete a version (git branch). Never the live branch."""
     project_id = _resolve_project(project)
@@ -1485,9 +1485,9 @@ def repo_promote(
     name: str = typer.Argument(..., help="Version (branch) to promote into live."),
     title: Optional[str] = typer.Option(None, "--title", help="PR/merge title."),
     delete_after: bool = typer.Option(False, "--delete-after", help="Delete the version branch after a successful promote."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Promote a version into the live branch via a merge commit."""
     project_id = _resolve_project(project)
@@ -1504,9 +1504,9 @@ def repo_promote(
 def repo_dir(
     path: str = typer.Argument("", help="Folder within the repo (default: repo root)."),
     ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to browse (defaults to the default branch)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """One folder level of the repo (GitHub-style browser). Use `repo ls` for a flat, whole-repo listing."""
     project_id = _resolve_project(project)
@@ -1563,9 +1563,9 @@ def dashboard_validate(
     against: Optional[Path] = typer.Option(None, "--against", help="Check widget dot-paths against this local output.json."),
     run_id: Optional[str] = typer.Option(None, "--run", help="Check widget dot-paths against this run's output.json."),
     latest: bool = typer.Option(False, "--latest", help="Check widget dot-paths against the most recent run's output.json."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Validate a dashboard.toml against the widget contract.
 
@@ -1658,9 +1658,9 @@ def _print_share_status(project_id: str, status) -> None:
 @share_app.command("status")
 @_handle_errors
 def share_status(
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Show whether this project's dashboard is publicly shared, and its link."""
     project_id = _resolve_project(project)
@@ -1671,9 +1671,9 @@ def share_status(
 @share_app.command("enable")
 @_handle_errors
 def share_enable(
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Turn on the project's public dashboard link (mints a token on first use)."""
     project_id = _resolve_project(project)
@@ -1684,9 +1684,9 @@ def share_enable(
 @share_app.command("disable")
 @_handle_errors
 def share_disable(
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Turn off the project's public dashboard link. The old token stops working immediately."""
     project_id = _resolve_project(project)
@@ -1699,9 +1699,9 @@ def share_disable(
 @_handle_errors
 def share_rotate(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Invalidate the current share link and mint a new one."""
     project_id = _resolve_project(project)
@@ -1717,9 +1717,9 @@ def share_rotate(
 @share_app.command("set-password")
 @_handle_errors
 def share_set_password(
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Set or change the share link's password (min 8 characters, prompted, hidden input)."""
     project_id = _resolve_project(project)
@@ -1732,9 +1732,9 @@ def share_set_password(
 @share_app.command("rm-password")
 @_handle_errors
 def share_rm_password(
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Remove the share link's password. The link becomes freely viewable."""
     project_id = _resolve_project(project)
@@ -1758,9 +1758,9 @@ def _prompt_credentials(current: str = "credentials") -> str:
 @datasources_app.command("list")
 @_handle_errors
 def datasources_list(
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """List datasources for a project."""
     project_id = _resolve_project(project)
@@ -1781,9 +1781,9 @@ def datasources_list(
 @_handle_errors
 def datasources_get(
     name: str = typer.Argument(..., help="Datasource name."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Show details for one datasource (credentials are never returned)."""
     project_id = _resolve_project(project)
@@ -1801,17 +1801,17 @@ def datasources_get(
 def datasources_add(
     name: str = typer.Argument(..., help="Datasource name (unique per project)."),
     type: str = typer.Option(..., "--type", help="postgresql | mysql | sqlserver | oracle"),
-    host: Optional[str] = typer.Option(None, "--host"),
-    port: Optional[int] = typer.Option(None, "--port"),
-    database: Optional[str] = typer.Option(None, "--database"),
-    username: Optional[str] = typer.Option(None, "--username"),
+    host: Optional[str] = typer.Option(None, "--host", help="Database host."),
+    port: Optional[int] = typer.Option(None, "--port", help="Database port."),
+    database: Optional[str] = typer.Option(None, "--database", help="Database name."),
+    username: Optional[str] = typer.Option(None, "--username", help="Database username."),
     use_proxy: bool = typer.Option(False, "--use-proxy", help="Route traffic via the mTLS proxy."),
-    proxy_host: Optional[str] = typer.Option(None, "--proxy-host"),
-    proxy_port: Optional[int] = typer.Option(None, "--proxy-port"),
-    proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name"),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    proxy_host: Optional[str] = typer.Option(None, "--proxy-host", help="Proxy target host. Used when --use-proxy is set."),
+    proxy_port: Optional[int] = typer.Option(None, "--proxy-port", help="Proxy target port. Used when --use-proxy is set."),
+    proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name", help="Proxy TLS server name. Used when --use-proxy is set."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Create a new datasource. Credentials are prompted interactively (never a flag)."""
     project_id = _resolve_project(project)
@@ -1844,19 +1844,19 @@ def datasources_add(
 def datasources_update(
     name: str = typer.Argument(..., help="Datasource name."),
     new_name: Optional[str] = typer.Option(None, "--name", help="Rename the datasource."),
-    type: Optional[str] = typer.Option(None, "--type"),
-    host: Optional[str] = typer.Option(None, "--host"),
-    port: Optional[int] = typer.Option(None, "--port"),
-    database: Optional[str] = typer.Option(None, "--database"),
-    username: Optional[str] = typer.Option(None, "--username"),
+    type: Optional[str] = typer.Option(None, "--type", help="postgresql | mysql | sqlserver | oracle"),
+    host: Optional[str] = typer.Option(None, "--host", help="Database host."),
+    port: Optional[int] = typer.Option(None, "--port", help="Database port."),
+    database: Optional[str] = typer.Option(None, "--database", help="Database name."),
+    username: Optional[str] = typer.Option(None, "--username", help="Database username."),
     set_credentials: bool = typer.Option(False, "--set-credentials", help="Prompt to replace the stored credentials."),
-    use_proxy: Optional[bool] = typer.Option(None, "--use-proxy/--no-use-proxy"),
-    proxy_host: Optional[str] = typer.Option(None, "--proxy-host"),
-    proxy_port: Optional[int] = typer.Option(None, "--proxy-port"),
-    proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name"),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    use_proxy: Optional[bool] = typer.Option(None, "--use-proxy/--no-use-proxy", help="Route traffic via the mTLS proxy."),
+    proxy_host: Optional[str] = typer.Option(None, "--proxy-host", help="Proxy target host. Used when --use-proxy is set."),
+    proxy_port: Optional[int] = typer.Option(None, "--proxy-port", help="Proxy target port. Used when --use-proxy is set."),
+    proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name", help="Proxy TLS server name. Used when --use-proxy is set."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Partially update a datasource. Only provided fields are changed."""
     project_id = _resolve_project(project)
@@ -1898,9 +1898,9 @@ def datasources_update(
 def datasources_remove(
     name: str = typer.Argument(..., help="Datasource name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Delete a datasource (removes the DB row and its stored credentials)."""
     project_id = _resolve_project(project)
@@ -1918,16 +1918,16 @@ def datasources_remove(
 @_handle_errors
 def datasources_test(
     type: str = typer.Option(..., "--type", help="postgresql | mysql | sqlserver | oracle"),
-    host: str = typer.Option(..., "--host"),
-    port: int = typer.Option(..., "--port"),
-    database: str = typer.Option(..., "--database"),
-    username: str = typer.Option(..., "--username"),
-    use_proxy: bool = typer.Option(False, "--use-proxy"),
-    proxy_host: Optional[str] = typer.Option(None, "--proxy-host"),
-    proxy_port: Optional[int] = typer.Option(None, "--proxy-port"),
-    proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    host: str = typer.Option(..., "--host", help="Database host."),
+    port: int = typer.Option(..., "--port", help="Database port."),
+    database: str = typer.Option(..., "--database", help="Database name."),
+    username: str = typer.Option(..., "--username", help="Database username."),
+    use_proxy: bool = typer.Option(False, "--use-proxy", help="Route traffic via the mTLS proxy."),
+    proxy_host: Optional[str] = typer.Option(None, "--proxy-host", help="Proxy target host. Used when --use-proxy is set."),
+    proxy_port: Optional[int] = typer.Option(None, "--proxy-port", help="Proxy target port. Used when --use-proxy is set."),
+    proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name", help="Proxy TLS server name. Used when --use-proxy is set."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Test a connection without persisting it. Credentials are prompted interactively."""
     client = _get_client(api_url=api_url, org=org)
@@ -1962,9 +1962,9 @@ def datasources_query(
     sql: str = typer.Option(..., "--sql", help="SELECT/WITH-only SQL to run."),
     limit: int = typer.Option(10000, "--limit", help="Max rows to return (server-capped at 100000)."),
     csv: Optional[Path] = typer.Option(None, "--csv", help="Write results to this CSV path instead of printing a table."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Run a read-only query against a datasource (SELECT/WITH-only, row-capped server-side)."""
     project_id = _resolve_project(project)
@@ -2005,9 +2005,9 @@ app.add_typer(schedules_app, name="schedules")
 @schedules_app.command("list")
 @_handle_errors
 def schedules_list(
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """List cron schedules for a project."""
     project_id = _resolve_project(project)
@@ -2035,9 +2035,9 @@ def schedules_list(
 @_handle_errors
 def schedules_get(
     schedule_id: str = typer.Argument(..., help="Schedule id."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Show details for one schedule."""
     project_id = _resolve_project(project)
@@ -2071,11 +2071,11 @@ def schedules_add(
     git_commit: Optional[str] = typer.Option(None, "--git-commit", help="Pin to a specific commit instead of the branch tip."),
     command: Optional[str] = typer.Option(None, "--command", help="Override the harumi.toml command."),
     kernel: Optional[str] = typer.Option(None, "--kernel", help="Override the kernel spec."),
-    output_format: Optional[str] = typer.Option(None, "--output-format"),
+    output_format: Optional[str] = typer.Option(None, "--output-format", help="Output format for scheduled runs."),
     email_to: Optional[str] = typer.Option(None, "--email-to", help="only-me | team | everyone | comma-separated emails."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Create a new cron schedule for a project.
 
@@ -2114,17 +2114,17 @@ def schedules_add(
 @_handle_errors
 def schedules_update(
     schedule_id: str = typer.Argument(..., help="Schedule id."),
-    cron: Optional[str] = typer.Option(None, "--cron"),
+    cron: Optional[str] = typer.Option(None, "--cron", help='Raw 5-field cron expression, interpreted in UTC (e.g. "0 9 * * *").'),
     start_at: Optional[str] = typer.Option(None, "--start-at", help="ISO-8601 datetime."),
-    git_branch: Optional[str] = typer.Option(None, "--git-branch"),
-    git_commit: Optional[str] = typer.Option(None, "--git-commit"),
-    command: Optional[str] = typer.Option(None, "--command"),
-    kernel: Optional[str] = typer.Option(None, "--kernel"),
-    output_format: Optional[str] = typer.Option(None, "--output-format"),
-    email_to: Optional[str] = typer.Option(None, "--email-to"),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    git_branch: Optional[str] = typer.Option(None, "--git-branch", help="Branch to run on each fire."),
+    git_commit: Optional[str] = typer.Option(None, "--git-commit", help="Pin to a specific commit instead of the branch tip."),
+    command: Optional[str] = typer.Option(None, "--command", help="Override the harumi.toml command."),
+    kernel: Optional[str] = typer.Option(None, "--kernel", help="Override the kernel spec."),
+    output_format: Optional[str] = typer.Option(None, "--output-format", help="Output format for scheduled runs."),
+    email_to: Optional[str] = typer.Option(None, "--email-to", help="only-me | team | everyone | comma-separated emails."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Partially update a cron schedule. Only provided fields are changed."""
     project_id = _resolve_project(project)
@@ -2160,9 +2160,9 @@ def schedules_update(
 def schedules_remove(
     schedule_id: str = typer.Argument(..., help="Schedule id."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Delete a cron schedule. This is the only way to stop it firing — there is no pause/enable flag."""
     project_id = _resolve_project(project)
@@ -2187,9 +2187,9 @@ app.add_typer(secrets_app, name="secrets")
 @secrets_app.command("list")
 @_handle_errors
 def secrets_list(
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """List secret names for a project. Values are never printed by `list`."""
     project_id = _resolve_project(project)
@@ -2210,9 +2210,9 @@ def secrets_list(
 @_handle_errors
 def secrets_set(
     name: str = typer.Argument(..., help="Secret (env var) name."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Create or overwrite a secret. The value is prompted interactively (never a flag)."""
     project_id = _resolve_project(project)
@@ -2228,9 +2228,9 @@ def secrets_set(
 def secrets_rm(
     name: str = typer.Argument(..., help="Secret name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
-    project: Optional[str] = typer.Option(None, "--project", "-p"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
-    org: Optional[str] = typer.Option(None, "--org"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Delete a secret."""
     project_id = _resolve_project(project)
@@ -2255,7 +2255,7 @@ app.add_typer(org_app, name="org")
 @org_app.command("list")
 @_handle_errors
 def org_list(
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """List organizations you belong to."""
     client = _get_client(api_url=api_url)
@@ -2274,7 +2274,7 @@ def org_list(
 @_handle_errors
 def org_create(
     business_name: str = typer.Argument(..., help="Organization name."),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """Create a new organization."""
     client = _get_client(api_url=api_url)
@@ -2287,7 +2287,7 @@ def org_create(
 def org_rename(
     organization_id: str = typer.Argument(..., help="Organization id."),
     business_name: str = typer.Argument(..., help="New organization name."),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """Rename an organization."""
     client = _get_client(api_url=api_url)
@@ -2300,7 +2300,7 @@ def org_rename(
 def org_delete(
     organization_id: str = typer.Argument(..., help="Organization id."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """Delete an organization. This cannot be undone."""
     if not yes and not typer.confirm(f"Delete organization '{organization_id}'? This cannot be undone."):
@@ -2316,7 +2316,7 @@ def org_delete(
 @_handle_errors
 def org_members(
     organization_id: str = typer.Argument(..., help="Organization id."),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """List an organization's members."""
     client = _get_client(api_url=api_url)
@@ -2337,7 +2337,7 @@ def org_invite(
     organization_id: str = typer.Argument(..., help="Organization id."),
     email: str = typer.Option(..., "--email", help="Email of the person to invite."),
     role: str = typer.Option("member", "--role", help="owner | admin | member | viewer"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """Invite a member to an organization."""
     client = _get_client(api_url=api_url)
@@ -2351,7 +2351,7 @@ def org_role(
     organization_id: str = typer.Argument(..., help="Organization id."),
     user_id: str = typer.Argument(..., help="User id."),
     role: str = typer.Option(..., "--role", help="owner | admin | member | viewer"),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """Change a member's role."""
     client = _get_client(api_url=api_url)
@@ -2365,7 +2365,7 @@ def org_remove(
     organization_id: str = typer.Argument(..., help="Organization id."),
     user_id: str = typer.Argument(..., help="User id."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
-    api_url: Optional[str] = typer.Option(None, "--api-url"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """Remove a member from an organization."""
     if not yes and not typer.confirm(f"Remove user '{user_id}' from the organization?"):

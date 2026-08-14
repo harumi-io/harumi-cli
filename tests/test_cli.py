@@ -21,13 +21,20 @@ runner = CliRunner()
 
 
 def test_every_command_builds():
-    """Guards the dependency floor.
+    """Guards the dependency floor, and pins the command tree to the
+    committed cli-surface.json contract.
 
     Typer builds each command's click Options at import time, so a typer/click
     pairing that rejects an Option signature takes down the entire CLI —
     `harumi --version` included — with a TypeError before any command body
     runs. `compileall` cannot see it. This walks the whole tree so the failure
     surfaces here instead of on a user's machine.
+
+    The contract comparison catches the other failure mode: a command added,
+    removed, renamed, or re-flagged without regenerating cli-surface.json —
+    which is the file harumi-docs' CI reads to check commands.mdx for drift.
+    An unregenerated contract would let that check silently pass on stale
+    data.
     """
     from typer.main import get_command
 
@@ -48,10 +55,27 @@ def test_every_command_builds():
 
     # Sanity floor: the tree should not silently shrink to nothing. Not an
     # exact count (new commands land in other branches/PRs) — just enough
-    # margin below the actual count (56 as of this commit) to catch a large
+    # margin below the actual count (68 as of this commit) to catch a large
     # accidental deletion of the command tree, e.g. a bad merge or a
     # sub-Typer losing its `add_typer` registration.
     assert len(names) > 50
+
+    import json
+    from pathlib import Path
+
+    from scripts.emit_cli_surface import build_surface
+
+    contract_path = Path(__file__).parent.parent / "cli-surface.json"
+    committed = json.loads(contract_path.read_text())
+    current = build_surface()
+    # cli_version is expected to differ on every release; the command tree is
+    # what this test protects.
+    committed_commands = committed["commands"]
+    current_commands = current["commands"]
+    assert current_commands == committed_commands, (
+        "cli-surface.json is stale — regenerate it with:\n"
+        "    python scripts/emit_cli_surface.py > cli-surface.json"
+    )
 
 
 
