@@ -152,6 +152,45 @@ class RepoFileEntry(BaseModel):
     size: Optional[int] = None
 
 
+class RepoCommitInfo(BaseModel):
+    """A single Gitea commit, trimmed to what the repo browser renders."""
+
+    model_config = ConfigDict(extra="allow")
+
+    sha: str
+    message: str = ""
+    author_name: Optional[str] = None
+    author_login: Optional[str] = None
+    committed_at: Optional[datetime] = None
+
+
+class RepoDirEntry(BaseModel):
+    """One row from GET /projects/{id}/repo/dir: a file or folder, with its
+    most recent commit."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    path: str
+    type: str
+    sha: Optional[str] = None
+    size: Optional[int] = None
+    last_commit: Optional[RepoCommitInfo] = None
+
+
+class RepoDirListing(BaseModel):
+    """Response from GET /projects/{id}/repo/dir — one folder level (GitHub-
+    style repo browser); use `list_repo_files` instead for a flat listing."""
+
+    model_config = ConfigDict(extra="allow")
+
+    path: str
+    ref: str
+    latest_commit: Optional[RepoCommitInfo] = None
+    total_commits: Optional[int] = None
+    entries: list[RepoDirEntry] = Field(default_factory=list)
+
+
 class RepoFileContent(BaseModel):
     """Response from GET /projects/{id}/repo/file-content. `content` is base64."""
 
@@ -377,3 +416,45 @@ class OrganizationMember(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     pending: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Templates <-> harumi-api/src/api/templates/schemas.py — live, read-only.
+# ---------------------------------------------------------------------------
+
+class TemplateSummary(BaseModel):
+    """One entry from GET /templates. Pass its `id` as `--template-id` to
+    `harumi projects create`."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    slug: str
+    name: str
+    description: str
+    is_public: bool = True
+
+
+class TemplateList(BaseModel):
+    """Response from GET /templates."""
+
+    model_config = ConfigDict(extra="allow")
+
+    templates: list[TemplateSummary] = Field(default_factory=list)
+    total_count: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Project share links <-> harumi-api/src/api/projects/schemas.py — live.
+# ---------------------------------------------------------------------------
+
+class ProjectShareStatus(BaseModel):
+    """Response from GET/POST/DELETE /projects/{id}/share and .../rotate,
+    .../share/password. `share_token` is only present while sharing is
+    enabled; `password_set` never carries the password itself."""
+
+    model_config = ConfigDict(extra="allow")
+
+    share_enabled: bool
+    share_token: Optional[str] = None
+    password_set: bool = False

@@ -1,6 +1,6 @@
 ---
 name: harumi-cli
-description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to select the backend environment (production vs internal staging), create/manage projects, import a downloaded project export as a new project, browse and edit the project's git repo, inspect and cancel runs, manage datasources, schedules, secrets, organizations, and your profile. Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi init`, `harumi import`, `harumi run`, `harumi runs`, `harumi repo`, `harumi env`, `harumi projects`, `harumi datasources`, `harumi schedules`, `harumi secrets`, `harumi org`, `harumi profile`, asks about switching between production and staging, creating a new Harumi project, importing/uploading a downloaded project zip to the CLI, Harumi kernel specs, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, managing environment variables/secrets, organization members, or needs to fetch/download results or files from a Harumi run/repo.
+description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to select the backend environment (production vs internal staging), create/manage projects, import a downloaded project export as a new project, browse and edit the project's git repo, inspect and cancel runs, manage the project's dashboard widgets and public share link, manage datasources, schedules, secrets, organizations, and your profile. Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi init`, `harumi import`, `harumi run`, `harumi runs`, `harumi repo`, `harumi dashboard`, `harumi share`, `harumi templates`, `harumi env`, `harumi projects`, `harumi datasources`, `harumi schedules`, `harumi secrets`, `harumi org`, `harumi profile`, asks about switching between production and staging, creating a new Harumi project, importing/uploading a downloaded project zip to the CLI, Harumi kernel specs, project templates, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, managing environment variables/secrets, organization members, dashboard widgets (metric/table/line-chart/bar-chart/gantt-chart), `dashboard.toml`, `output.json`, what components/widgets the platform dashboard can render, sharing/publishing a project's dashboard publicly, or needs to fetch/download results or files from a Harumi run/repo.
 ---
 
 # Harumi CLI
@@ -47,7 +47,7 @@ Find project IDs with: `harumi projects list` (or `harumi notebooks` for the leg
 harumi projects create "My Project" [--customer-id ID] [--template-id ID]
 ```
 
-Calls `POST /projects`, then fetches its repo and binds the current directory the same way `harumi init` does (pass `--no-bind` to skip that). If the backend hasn't provisioned a Gitea repo for the project, the CLI still creates the bare project and prints a warning instead of failing.
+Calls `POST /projects`, then fetches its repo and binds the current directory the same way `harumi init` does (pass `--no-bind` to skip that). If the backend hasn't provisioned a Gitea repo for the project, the CLI still creates the bare project and prints a warning instead of failing. Run `harumi templates` to list available `--template-id` values.
 
 **Importing a downloaded project export (e.g. from the web app's "Download project" button) as a new project:**
 
@@ -104,6 +104,7 @@ harumi runs cancel <RUN_ID>               # cancel an in-flight run
 
 ```bash
 harumi repo ls [--ref BRANCH]                          # list every file (flat, recursive)
+harumi repo dir [PATH] [--ref BRANCH]                  # one folder level (GitHub-style browser)
 harumi repo cat <path> [--ref BRANCH] [--output FILE]  # print or save a file's content
 harumi repo put <local_file> <repo_path> [-m MSG] [--branch B]   # create/update as one commit
 harumi repo rm <path> [-m MSG] [--branch B]            # delete a file or folder, one commit
@@ -116,6 +117,35 @@ harumi repo promote <name> [--title T] [--delete-after]  # merge a version into 
 ```
 
 All `repo` subcommands accept `--project` to override the `.harumi` binding.
+
+## Dashboards & widgets
+
+Each project's dashboard renders from a repo-committed `dashboard.toml` (read/written like any other file via `harumi repo cat`/`repo put`), bound by dot-path keys to `output/output.json` — the file a run writes. Five widget types exist: `metric`, `table`, `line-chart`, `bar-chart`, `gantt-chart`. Full per-type key reference, TOML examples, and matching `output.json` shapes: [references/dashboard.md](references/dashboard.md).
+
+```bash
+harumi dashboard widgets [--type metric]              # print the widget-type reference (always current)
+harumi dashboard validate [PATH] [--ref BRANCH]        # validate a dashboard.toml against the contract
+                          [--against FILE | --run ID | --latest]  # + check dot-paths against real output.json
+```
+
+**Critical:** the platform's parser never errors on a bad widget — an unknown `type`, a missing required key, or a renamed key (e.g. `valueKey` instead of `value_key`) makes it **silently drop that widget** from the dashboard, and a widget whose dot-path doesn't resolve just renders empty. Always run `harumi dashboard validate` (with `--latest` if a run already exists) before `harumi repo put dashboard.toml`, and after any edit made on the user's behalf — it's the only point in the toolchain that fails loudly instead of shipping a dashboard that's quietly missing a widget.
+
+A project with no `dashboard.toml` still renders a generic default dashboard rather than erroring. `harumi projects create` seeds a starter `dashboard.toml` server-side; `harumi import` does not (it overwrites the scaffold), so an imported project has none until one is committed.
+
+## Share the dashboard publicly
+
+`harumi share` manages a project's public, unauthenticated dashboard link — a read-only view of `dashboard.toml` + a chosen run's `output.json`, with no login required.
+
+```bash
+harumi share status                      # enabled? link? password set?
+harumi share enable                      # turn on (mints a token on first use)
+harumi share disable                     # turn off — the old link stops working immediately
+harumi share rotate                      # invalidate the current link, mint a new one
+harumi share set-password                # prompts for a password (hidden, min 8 chars)
+harumi share rm-password                 # remove it — link becomes freely viewable
+```
+
+Rotating the link or changing its password invalidates every previously unlocked viewer session — they must re-enter the (new) password. All `share` subcommands accept `--project` to override the `.harumi` binding.
 
 ## Manage datasources
 

@@ -19,13 +19,16 @@ from harumi.models import (
     Project,
     ProjectExecuteResponse,
     ProjectRun,
+    ProjectShareStatus,
     ProjectWithRepo,
+    RepoDirListing,
     RepoInfo,
     Schedule,
     Secret,
+    TemplateSummary,
 )
 
-__version__ = "0.3.2"
+__version__ = "0.4.0"
 
 __all__ = [
     "Client",
@@ -36,9 +39,12 @@ __all__ = [
     "Project",
     "ProjectExecuteResponse",
     "ProjectRun",
+    "ProjectShareStatus",
     "ProjectWithRepo",
+    "RepoDirListing",
     "RepoInfo",
     "Schedule",
     "Secret",
+    "TemplateSummary",
     "__version__",
 ]
