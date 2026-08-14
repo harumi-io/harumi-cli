@@ -12,7 +12,7 @@ import pytest
 
 from harumi.client import ApiClient, Client
 from harumi.config import Config
-from harumi.errors import ApiError, NotAuthenticatedError
+from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
 
 
 @pytest.fixture(autouse=True)
@@ -479,6 +479,31 @@ def test_client_get_run_surfaces_stdout_and_error():
     assert run.error == "boom"
     assert run.succeeded is False
     assert run.finished is True
+
+
+def test_client_get_run_output_reads_parsed_json():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1/runs/run-1/output"
+        return httpx.Response(200, json={"makespan": 42})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    output = client.get_run_output("proj-1", "run-1")
+
+    assert output == {"makespan": 42}
+
+
+def test_client_get_run_output_raises_harumi_error_on_404():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "No output.json for this run"})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+
+    with pytest.raises(HarumiError):
+        client.get_run_output("proj-1", "run-1")
 
 
 def test_client_cancel_run_posts_to_cancel_endpoint():

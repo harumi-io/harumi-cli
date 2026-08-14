@@ -431,6 +431,11 @@ class Client:
 
         return get_run(self.api, project_id, run_id)
 
+    def get_run_output(self, project_id: str, run_id: str) -> dict[str, Any]:
+        from harumi.execution import get_run_output
+
+        return get_run_output(self.api, project_id, run_id)
+
     def cancel_run(self, project_id: str, run_id: str) -> ProjectRun:
         from harumi.execution import cancel_run
 
