@@ -233,7 +233,7 @@ Deprecated alias kept for backwards compatibility — prefer `harumi runs` for n
 - `--project` optional if run from a bound directory.
 - No extra flags: table of all runs (`id`, `status`, `started`, `ended`, `git_branch`).
 - `--latest`: only the most recently started run.
-- `--download <run_id> [--output-dir DIR]`: downloads the run's committed output via the repo archive endpoint.
+- `--download <run_id> [--output-dir DIR]`: downloads the run's output artifacts as a zip via `GET /projects/{id}/runs/{run_id}/output/archive` (proxied by the API from S3 for current runs, or Gitea for pre-migration runs — transparently to the caller).
 
 ## `repo`
 
@@ -279,7 +279,7 @@ No backend endpoint — `dashboard.toml` is a plain file in the project's Gitea 
 - **`widgets`**: prints the current widget-type contract (required/optional keys, enum values) for all 5 types, or one with `--type`. Sourced from `harumi.dashboard.WIDGET_SCHEMAS`, a hand-maintained mirror of harumi-platform's `schema.ts` (see the `ponytail:` comment in that module) — always current with this CLI version, but can drift from the platform between CLI releases if a new widget type ships there first.
 - **`validate`**: parses a `dashboard.toml` (`PATH`, defaulting to `./dashboard.toml`; or `--ref BRANCH` to check the repo's copy via `GET /repo/file-content`) the same way the platform's `parseDashboardConfig` does, and reports every widget that would be **dropped** (unknown `type`, missing/invalid required key — e.g. a `valueKey` typo for `value_key`). Exits 1 if any widget is dropped.
   - `--against FILE`: additionally resolves every widget's dot-path keys (`value_key`, `rows_key`, `data_key`, `tasks_key`, etc.) against a local `output.json` and reports any that don't resolve (widget renders empty on the platform, not an error there).
-  - `--run RUN_ID` / `--latest`: same dot-path check, but fetches `output.json` from that run's committed output (`run.output_url` as `"<branch>:<dir>"`, same resolution `harumi outputs --download` uses) via `GET /repo/file-content` instead of a local file.
+  - `--run RUN_ID` / `--latest`: same dot-path check, but fetches the run's structured output from `GET /projects/{id}/runs/{run_id}/output` (S3-backed for current runs, Gitea for pre-migration runs — resolved transparently by the API) instead of a local file.
   - At most one of `--against`/`--run`/`--latest` may be passed.
 
 ## `share`
