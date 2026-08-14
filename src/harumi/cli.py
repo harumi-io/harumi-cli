@@ -1560,21 +1560,10 @@ def dashboard_validate(
         run = client.get_run(project_id, run_id) if run_id else client.get_latest_run(project_id)
         if run is None:
             _fail("Project has no runs yet.")
-        if not run.output_url or ":" not in run.output_url:
-            _fail(f"Run {run.id!r} has no committed output to check against.")
-        run_ref, _, run_dir = run.output_url.partition(":")
-        output_path = f"{run_dir}/output.json" if run_dir else "output.json"
         try:
-            file_content = client.get_repo_file(project_id, output_path, ref=run_ref)
-        except ApiError as exc:
-            if exc.status_code == 404:
-                _fail(f"Run {run.id!r} has no {output_path} committed.")
-            raise
-        raw_output = base64.b64decode(file_content.content).decode("utf-8") if file_content.content else "{}"
-        try:
-            output = json.loads(raw_output)
-        except json.JSONDecodeError as exc:
-            _fail(f"{output_path} is not valid JSON: {exc}")
+            output = client.get_run_output(project_id, run.id)
+        except HarumiError:
+            _fail(f"Run {run.id!r} has no output.json to check against.")
 
     try:
         widgets, issues = validate_dashboard_toml(raw, output)
