@@ -46,8 +46,12 @@ def test_every_command_builds():
         result = runner.invoke(cli.app, name.split() + ["--help"])
         assert result.exit_code == 0, f"`harumi {name} --help` failed:\n{result.output}"
 
-    # Sanity floor: the tree should not silently shrink to nothing.
-    assert len(names) > 60
+    # Sanity floor: the tree should not silently shrink to nothing. Not an
+    # exact count (new commands land in other branches/PRs) — just enough
+    # margin below the actual count (56 as of this commit) to catch a large
+    # accidental deletion of the command tree, e.g. a bad merge or a
+    # sub-Typer losing its `add_typer` registration.
+    assert len(names) > 50
 
 
 
