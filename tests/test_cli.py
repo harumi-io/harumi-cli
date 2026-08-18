@@ -78,25 +78,40 @@ def test_every_command_builds():
     )
 
 
-def test_cli_surface_normalizes_click81_string_type_name():
-    """Click 8.1 (Python 3.9) reports STRING as 'text'; 8.2+ reports 'str'.
-    The committed contract uses 'str', so the emitter must collapse them
-    or compat (3.9) fails test_every_command_builds on a label, not a flag.
+def test_cli_surface_normalizes_click_builtin_type_names():
+    """Typer >=0.27's vendored click names STRING/INT 'str'/'int'; every real
+    click release (8.1-8.4, which is what Python 3.9's typer 0.23.x uses) names
+    them 'text'/'integer'. The committed contract uses the vendored spelling,
+    so the emitter must collapse both or compat (3.9) fails
+    test_every_command_builds on a label rather than a real flag change.
+
+    `integer` is the case that actually broke CI: the original normalizer only
+    handled `text`, so the 7 int-typed params (e.g. `--port`) mismatched.
     """
     from types import SimpleNamespace
 
     from scripts.emit_cli_surface import _param_info
 
-    param = SimpleNamespace(
-        opts=["--x"],
-        type=SimpleNamespace(name="text"),
-        required=False,
-        default=None,
-        help=None,
-    )
-    assert _param_info(param)["type"] == "str"
-    param.type.name = "int"
-    assert _param_info(param)["type"] == "int"
+    def type_of(name):
+        return _param_info(
+            SimpleNamespace(
+                opts=["--x"],
+                type=SimpleNamespace(name=name),
+                required=False,
+                default=None,
+                help=None,
+            )
+        )["type"]
+
+    # Real click spellings collapse onto the vendored ones...
+    assert type_of("text") == "str"
+    assert type_of("integer") == "int"
+    # ...the vendored spellings pass through unchanged (idempotent)...
+    assert type_of("str") == "str"
+    assert type_of("int") == "int"
+    # ...and labels that agree across both flavours are left alone.
+    for shared in ("boolean", "path", "float", "uuid"):
+        assert type_of(shared) == shared
 
 
 

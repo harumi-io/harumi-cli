@@ -28,6 +28,18 @@ from typer.main import get_command
 import harumi.cli as cli
 from harumi import __version__
 
+# Typer >=0.27 vendors its own click (`typer._click`) which renamed the builtin
+# param types to Python spellings: STRING is "str" and INT is "int". Every
+# release of real click — 8.1.8 through 8.4.2 — still calls them "text" and
+# "integer". Python 3.9 pins typer to 0.23.x (the last line supporting it),
+# which uses real click, so the same CLI emits different type labels depending
+# on the interpreter. Collapse both spellings onto the vendored one so the
+# committed contract compares equal on every supported Python.
+#
+# Only the labels that actually differ are listed: "boolean", "path", "float"
+# and "uuid" are already identical across both click flavours.
+_TYPE_ALIASES = {"text": "str", "integer": "int"}
+
 
 def _leaves(command: Any, path: list[str]):
     """Yields (path, command) for every leaf (non-group) command.
@@ -45,13 +57,9 @@ def _leaves(command: Any, path: list[str]):
 
 
 def _param_info(param: Any) -> dict:
-    # Click 8.1 (Python 3.9) names STRING "text"; Click 8.2+ names it "str".
-    # Same type, different label — pin to "str" so the committed contract
-    # matches on every supported Python.
-    type_name = param.type.name
     return {
         "opts": list(param.opts),
-        "type": "str" if type_name == "text" else type_name,
+        "type": _TYPE_ALIASES.get(param.type.name, param.type.name),
         "required": bool(param.required),
         "default": param.default if isinstance(param.default, (str, int, float, bool, type(None))) else None,
         "help": param.help or None,
