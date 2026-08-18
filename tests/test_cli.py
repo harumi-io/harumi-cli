@@ -78,6 +78,27 @@ def test_every_command_builds():
     )
 
 
+def test_cli_surface_normalizes_click81_string_type_name():
+    """Click 8.1 (Python 3.9) reports STRING as 'text'; 8.2+ reports 'str'.
+    The committed contract uses 'str', so the emitter must collapse them
+    or compat (3.9) fails test_every_command_builds on a label, not a flag.
+    """
+    from types import SimpleNamespace
+
+    from scripts.emit_cli_surface import _param_info
+
+    param = SimpleNamespace(
+        opts=["--x"],
+        type=SimpleNamespace(name="text"),
+        required=False,
+        default=None,
+        help=None,
+    )
+    assert _param_info(param)["type"] == "str"
+    param.type.name = "int"
+    assert _param_info(param)["type"] == "int"
+
+
 
 @pytest.fixture(autouse=True)
 def isolated_harumi_home(tmp_path, monkeypatch):

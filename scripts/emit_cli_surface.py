@@ -45,9 +45,13 @@ def _leaves(command: Any, path: list[str]):
 
 
 def _param_info(param: Any) -> dict:
+    # Click 8.1 (Python 3.9) names STRING "text"; Click 8.2+ names it "str".
+    # Same type, different label — pin to "str" so the committed contract
+    # matches on every supported Python.
+    type_name = param.type.name
     return {
         "opts": list(param.opts),
-        "type": param.type.name,
+        "type": "str" if type_name == "text" else type_name,
         "required": bool(param.required),
         "default": param.default if isinstance(param.default, (str, int, float, bool, type(None))) else None,
         "help": param.help or None,
