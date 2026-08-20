@@ -50,13 +50,15 @@ SQL before wiring it into solver code.
 
 Dashboards & widgets
 ---------------------
-Each project's dashboard renders from a repo-committed `dashboard.toml`,
-bound by dot-path keys to `output/output.json` (the file a run writes).
+A project renders one dashboard per repo-committed spec — every
+`dashboard/*.toml` plus the legacy root `dashboard.toml` — each bound by
+dot-path keys to `output/output.json` (the file a run writes), and each an
+entry in the platform's dashboard picker.
 `harumi dashboard widgets` prints the current widget-type reference;
-`harumi dashboard validate` checks a `dashboard.toml` against that contract
+`harumi dashboard validate` checks every spec against that contract
 and, given a run's output, flags dot-paths that won't resolve — the
 platform silently drops a bad widget instead of erroring, so validating
-before `repo put dashboard.toml` is the only way to catch a typo up front.
+before `repo put` is the only way to catch a typo up front.
 
 Sharing
 -------
@@ -114,6 +116,8 @@ from harumi.config import (
 from harumi.dashboard import (
     WIDGET_SCHEMAS,
     DashboardTomlError,
+    local_dashboard_paths,
+    pick_dashboard_paths,
     validate_dashboard_toml,
 )
 from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
@@ -1528,7 +1532,7 @@ def repo_dir(
 # harumi dashboard
 # ---------------------------------------------------------------------------
 
-dashboard_app = typer.Typer(help="Reference and validate the project's dashboard.toml widgets.")
+dashboard_app = typer.Typer(help="Reference and validate the project's dashboard spec widgets.")
 app.add_typer(dashboard_app, name="dashboard")
 
 
@@ -1537,7 +1541,7 @@ app.add_typer(dashboard_app, name="dashboard")
 def dashboard_widgets(
     type_: Optional[str] = typer.Option(None, "--type", help="Only show this widget type."),
 ) -> None:
-    """Print every dashboard.toml widget type and its required/optional keys."""
+    """Print every dashboard widget type and its required/optional keys."""
     types = [type_] if type_ else list(WIDGET_SCHEMAS)
     for t in types:
         schema = WIDGET_SCHEMAS.get(t)
@@ -1558,8 +1562,8 @@ def dashboard_widgets(
 @dashboard_app.command("validate")
 @_handle_errors
 def dashboard_validate(
-    path: Optional[Path] = typer.Argument(None, help="Local dashboard.toml to validate (default: ./dashboard.toml)."),
-    ref: Optional[str] = typer.Option(None, "--ref", help="Validate the repo's copy on this branch/commit instead of a local file."),
+    path: Optional[Path] = typer.Argument(None, help="A single dashboard spec to validate (default: every ./dashboard/*.toml, else ./dashboard.toml)."),
+    ref: Optional[str] = typer.Option(None, "--ref", help="Validate the repo's specs on this branch/commit instead of local files."),
     against: Optional[Path] = typer.Option(None, "--against", help="Check widget dot-paths against this local output.json."),
     run_id: Optional[str] = typer.Option(None, "--run", help="Check widget dot-paths against this run's output.json."),
     latest: bool = typer.Option(False, "--latest", help="Check widget dot-paths against the most recent run's output.json."),
@@ -1567,7 +1571,11 @@ def dashboard_validate(
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Validate a dashboard.toml against the widget contract.
+    """Validate the project's dashboard specs against the widget contract.
+
+    A project can have several dashboards — every `dashboard/*.toml` plus the
+    legacy root `dashboard.toml` — and each becomes an entry in the platform's
+    dashboard picker, so all of them are validated unless PATH names one.
 
     Reports every widget the platform would drop (unknown type, missing
     required key) plus — when --against/--run/--latest is given — dot-paths
@@ -1583,17 +1591,33 @@ def dashboard_validate(
         project_id = _resolve_project(project)
         client = _get_client(api_url=api_url, org=org)
 
+    # name -> raw TOML, in picker order.
+    specs: list[tuple[str, str]] = []
     if path is not None:
-        raw = path.read_text()
+        specs.append((str(path), path.read_text()))
     elif ref:
         assert client is not None and project_id is not None
-        file_content = client.get_repo_file(project_id, "dashboard.toml", ref=ref)
-        raw = base64.b64decode(file_content.content).decode("utf-8") if file_content.content else ""
+        found = pick_dashboard_paths(f.path for f in client.list_repo_files(project_id, ref=ref))
+        if not found:
+            _fail(f"No dashboard specs (dashboard/*.toml or dashboard.toml) on {ref!r}.")
+        for repo_path in found:
+            file_content = client.get_repo_file(project_id, repo_path, ref=ref)
+            specs.append(
+                (
+                    repo_path,
+                    base64.b64decode(file_content.content).decode("utf-8")
+                    if file_content.content
+                    else "",
+                )
+            )
     else:
-        default_path = Path("dashboard.toml")
-        if not default_path.is_file():
-            _fail("No dashboard.toml found. Pass a path, or --ref to check the repo's copy.")
-        raw = default_path.read_text()
+        found = local_dashboard_paths(Path("."))
+        if not found:
+            _fail(
+                "No dashboard specs found. Add dashboard/<name>.toml (or dashboard.toml), "
+                "pass a path, or use --ref to check the repo's copies."
+            )
+        specs.extend((local_path, Path(local_path).read_text()) for local_path in found)
 
     output: Optional[dict] = None
     if against:
@@ -1613,29 +1637,37 @@ def dashboard_validate(
         except HarumiError:
             _fail(f"Run {run.id!r} has no output.json to check against.")
 
-    try:
-        widgets, issues = validate_dashboard_toml(raw, output)
-    except DashboardTomlError as exc:
-        _fail(f"dashboard.toml is not valid TOML: {exc}")
-        return
+    failed = False
+    for name, raw in specs:
+        if len(specs) > 1:
+            console.print(f"[bold]{name}[/bold]")
+        try:
+            widgets, issues = validate_dashboard_toml(raw, output)
+        except DashboardTomlError as exc:
+            console.print(f"[bold red]invalid[/bold red] {name} is not valid TOML: {exc}")
+            failed = True
+            continue
 
-    if widgets:
-        table = Table("id", "type", "title")
-        for w in widgets:
-            table.add_row(w["id"], w["type"], w["title"])
-        console.print(table)
-    else:
-        console.print("No widgets would render.")
+        if widgets:
+            table = Table("id", "type", "title")
+            for w in widgets:
+                table.add_row(w["id"], w["type"], w["title"])
+            console.print(table)
+        else:
+            console.print("No widgets would render.")
 
-    if not issues:
-        console.print("[bold green]OK[/bold green] — every widget is valid" + (" and every dot-path resolves." if output is not None else "."))
-        return
+        if not issues:
+            console.print("[bold green]OK[/bold green] — every widget is valid" + (" and every dot-path resolves." if output is not None else "."))
+            continue
 
-    for issue in issues:
-        style = "red" if issue.dropped else "yellow"
-        prefix = "dropped" if issue.dropped else "empty"
-        console.print(f"[bold {style}]{prefix}[/bold {style}] {issue.message}")
-    raise typer.Exit(code=1)
+        for issue in issues:
+            style = "red" if issue.dropped else "yellow"
+            prefix = "dropped" if issue.dropped else "empty"
+            console.print(f"[bold {style}]{prefix}[/bold {style}] {issue.message}")
+        failed = True
+
+    if failed:
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------

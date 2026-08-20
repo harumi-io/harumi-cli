@@ -1,14 +1,34 @@
 # Dashboards & widgets
 
-Each Harumi project's dashboard renders from a repo-committed `dashboard.toml`, bound by dot-path keys to `output/output.json` — the file a run writes (see `[output]` in `harumi.toml`). There is no dedicated backend endpoint for this: `dashboard.toml` is just a file in the project's Gitea repo, read with `harumi repo cat dashboard.toml` / written with `harumi repo put`, same as any other file.
+A Harumi project renders **one dashboard per repo-committed spec**, each bound by dot-path keys to `output/output.json` — the file a run writes (see `[output]` in `harumi.toml`). There is no dedicated backend endpoint for this: a dashboard spec is just a file in the project's Gitea repo, read with `harumi repo cat` / written with `harumi repo put`, same as any other file.
 
-A project with no `dashboard.toml` still renders — the platform falls back to a generic default dashboard. `harumi projects create` gets a starter `dashboard.toml` seeded server-side; `harumi import` does **not** (it overwrites the scaffold), so an imported project has no dashboard until one is committed.
+## Where dashboards live
+
+| Path | Role |
+|---|---|
+| `dashboard/<name>.toml` | One dashboard each. Any number of them; alphabetical by filename. |
+| `dashboard.toml` (repo root) | The original single-dashboard layout. Still supported, and shown **last**. |
+
+When a project has more than one spec, the platform shows a **dashboard picker** dropdown above the run picker on both the project page and the public share link; a project with exactly one spec shows no picker and looks exactly as it did before the folder existed. Nested files (`dashboard/archive/old.toml`) are ignored, so a subfolder is how you keep a draft out of the picker.
+
+Each dashboard's picker label comes from an optional top-level `title`, falling back to a prettified filename (`dashboard/machine-schedule.toml` → `Machine schedule`):
+
+```toml
+title = "Machine schedule"
+
+[[widgets]]
+# ...
+```
+
+A project with **no** spec at all still renders — the platform falls back to a generic default dashboard. `harumi projects create` gets a starter root `dashboard.toml` seeded server-side; `harumi import` does **not** (it overwrites the scaffold), so an imported project has no dashboard until one is committed.
+
+To add a second dashboard to a project that has the root file, leave it alone and commit `dashboard/<name>.toml` — or move it (`harumi repo mv dashboard.toml dashboard/<name>.toml`) if you'd rather have every dashboard in one folder.
 
 ## The failure mode this exists to catch
 
 The platform's parser (`parseDashboardConfig` in harumi-platform) is deliberately forgiving: a widget with an unknown `type`, a missing required key, or a renamed key (e.g. `valueKey` instead of `value_key`) is **silently dropped** — the dashboard renders everything else and the bad widget just doesn't appear, with no error surfaced to whoever edited the file. A widget whose dot-path doesn't resolve against a real run's `output.json` renders, but empty.
 
-Always run `harumi dashboard validate` before `harumi repo put dashboard.toml` (or before telling the user a `dashboard.toml` edit is done) — it's the only place in the toolchain that fails loudly.
+Always run `harumi dashboard validate` before `harumi repo put` (or before telling the user a dashboard edit is done) — it's the only place in the toolchain that fails loudly.
 
 ## The five widget types
 
@@ -100,7 +120,11 @@ Semantics worth knowing:
 
 ## Layout
 
+Both keys below are per-dashboard, at the top level of each spec:
+
 ```toml
+title = "Cost breakdown"   # picker label; optional
+
 [layout]
 columns = 2
 ```
@@ -110,12 +134,13 @@ columns = 2
 ## Validating
 
 ```bash
-harumi dashboard widgets                        # the reference table above, always current
-harumi dashboard validate                        # ./dashboard.toml
-harumi dashboard validate --ref feature/solver-v2  # the repo's copy on a branch
+harumi dashboard widgets                           # the reference table above, always current
+harumi dashboard validate                          # every ./dashboard/*.toml, else ./dashboard.toml
+harumi dashboard validate ./dashboard/costs.toml   # just one spec
+harumi dashboard validate --ref feature/solver-v2  # the repo's specs on a branch
 harumi dashboard validate --against ./output.json  # + check dot-paths against a local file
 harumi dashboard validate --latest                 # + check dot-paths against the latest run's output.json
 harumi dashboard validate --run <RUN_ID>           # + a specific run
 ```
 
-Exits non-zero if any widget would be dropped, or (when checking dot-paths) any widget would render empty.
+With no `PATH` it validates **every** spec it finds (locally, or in the repo with `--ref`), printing each filename as a heading, and exits non-zero if any spec would drop a widget, isn't valid TOML, or (when checking dot-paths) would render a widget empty.
