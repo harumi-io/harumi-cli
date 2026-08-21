@@ -871,5 +871,139 @@ def test_run_requires_a_git_token_before_pushing_a_scratch_branch(api, git, boun
     assert api.requests == []
 
 
+# ---------------------------------------------------------------------------
+# harumi dashboard validate
+#
+# A project renders one dashboard per spec — every `dashboard/*.toml` plus the
+# legacy root `dashboard.toml` — so validate has to cover all of them, not just
+# the root file it originally hardcoded.
+# ---------------------------------------------------------------------------
+
+VALID_SPEC = """
+[[widgets]]
+type = "metric"
+id = "objective"
+title = "Objective"
+value_key = "objective"
+"""
+
+# `valueKey` instead of `value_key` — the typo the platform silently drops.
+BROKEN_SPEC = """
+[[widgets]]
+type = "metric"
+id = "revenue"
+title = "Revenue"
+valueKey = "totals.revenue"
+"""
+
+
+def _b64(text: str) -> str:
+    import base64
+
+    return base64.b64encode(text.encode()).decode()
+
+
+def test_dashboard_validate_checks_every_local_folder_spec(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dashboard").mkdir()
+    (tmp_path / "dashboard" / "costs.toml").write_text(VALID_SPEC)
+    (tmp_path / "dashboard" / "schedule.toml").write_text(VALID_SPEC)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate"])
+
+    assert result.exit_code == 0, result.output
+    assert "dashboard/costs.toml" in result.output
+    assert "dashboard/schedule.toml" in result.output
+
+
+def test_dashboard_validate_fails_when_any_spec_drops_a_widget(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dashboard").mkdir()
+    (tmp_path / "dashboard" / "ok.toml").write_text(VALID_SPEC)
+    (tmp_path / "dashboard" / "broken.toml").write_text(BROKEN_SPEC)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate"])
+
+    assert result.exit_code == 1
+    assert "dropped" in result.output
+    # The good spec is still reported, so a viewer sees which one is at fault.
+    assert "dashboard/ok.toml" in result.output
+
+
+def test_dashboard_validate_still_finds_the_legacy_root_file(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dashboard.toml").write_text(VALID_SPEC)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate"])
+
+    assert result.exit_code == 0, result.output
+    assert "objective" in result.output
+
+
+def test_dashboard_validate_reports_when_nothing_is_committed(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate"])
+
+    assert result.exit_code == 1
+    assert "No dashboard specs found." in result.output
+
+
+def test_dashboard_validate_ref_lists_the_repo_then_reads_each_spec(api):
+    api.route(
+        "GET",
+        "/api/projects/proj-1/repo/files",
+        [
+            {"name": "main.py", "path": "main.py", "type": "file"},
+            {"name": "schedule.toml", "path": "dashboard/schedule.toml", "type": "file"},
+            {"name": "dashboard.toml", "path": "dashboard.toml", "type": "file"},
+        ],
+    )
+    api.route(
+        "GET",
+        "/api/projects/proj-1/repo/file-content",
+        {"path": "x", "sha": "abc", "encoding": "base64", "content": _b64(VALID_SPEC)},
+    )
+
+    result = runner.invoke(
+        cli.app, ["dashboard", "validate", "--ref", "main", "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "dashboard/schedule.toml" in result.output
+    assert "dashboard.toml" in result.output
+    # One listing plus one read per spec — never a guessed path.
+    assert api.paths().count("/api/projects/proj-1/repo/file-content") == 2
+
+
+def test_dashboard_validate_ref_reports_a_repo_with_no_specs(api):
+    api.route(
+        "GET",
+        "/api/projects/proj-1/repo/files",
+        [{"name": "main.py", "path": "main.py", "type": "file"}],
+    )
+
+    result = runner.invoke(
+        cli.app, ["dashboard", "validate", "--ref", "main", "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 1
+    assert "No dashboard specs" in result.output
+
+
+def test_dashboard_validate_explicit_path_checks_only_that_file(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dashboard").mkdir()
+    (tmp_path / "dashboard" / "broken.toml").write_text(BROKEN_SPEC)
+    only = tmp_path / "one.toml"
+    only.write_text(VALID_SPEC)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate", str(only)])
+
+    assert result.exit_code == 0, result.output
+    assert "dropped" not in result.output
+
+
+
 
 

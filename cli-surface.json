@@ -18,7 +18,7 @@
     },
     {
       "path": "dashboard validate",
-      "help": "Validate a dashboard.toml against the widget contract.",
+      "help": "Validate the project's dashboard specs against the widget contract.",
       "params": [
         {
           "opts": [
@@ -27,7 +27,7 @@
           "type": "path",
           "required": false,
           "default": null,
-          "help": "Local dashboard.toml to validate (default: ./dashboard.toml)."
+          "help": "A single dashboard spec to validate (default: every ./dashboard/*.toml, else ./dashboard.toml)."
         },
         {
           "opts": [
@@ -36,7 +36,7 @@
           "type": "str",
           "required": false,
           "default": null,
-          "help": "Validate the repo's copy on this branch/commit instead of a local file."
+          "help": "Validate the repo's specs on this branch/commit instead of local files."
         },
         {
           "opts": [
@@ -97,7 +97,7 @@
     },
     {
       "path": "dashboard widgets",
-      "help": "Print every dashboard.toml widget type and its required/optional keys.",
+      "help": "Print every dashboard widget type and its required/optional keys.",
       "params": [
         {
           "opts": [

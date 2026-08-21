@@ -274,10 +274,13 @@ harumi dashboard widgets [--type TYPE]
 harumi dashboard validate [PATH] [--ref REF] [--against FILE | --run RUN_ID | --latest] [--project ID]
 ```
 
-No backend endpoint — `dashboard.toml` is a plain file in the project's Gitea repo (read/write it with `repo cat`/`repo put` like any other file). This command group only helps you get its contents right. Full per-type reference: [dashboard.md](dashboard.md).
+No backend endpoint — a dashboard spec is a plain file in the project's Gitea repo (read/write it with `repo cat`/`repo put` like any other file). A project can have several: every `dashboard/<name>.toml` (alphabetical) plus the legacy root `dashboard.toml` (last), each an entry in the platform's dashboard picker. This command group only helps you get their contents right. Full per-type reference and folder layout: [dashboard.md](dashboard.md).
 
 - **`widgets`**: prints the current widget-type contract (required/optional keys, enum values) for all 5 types, or one with `--type`. Sourced from `harumi.dashboard.WIDGET_SCHEMAS`, a hand-maintained mirror of harumi-platform's `schema.ts` (see the `ponytail:` comment in that module) — always current with this CLI version, but can drift from the platform between CLI releases if a new widget type ships there first.
-- **`validate`**: parses a `dashboard.toml` (`PATH`, defaulting to `./dashboard.toml`; or `--ref BRANCH` to check the repo's copy via `GET /repo/file-content`) the same way the platform's `parseDashboardConfig` does, and reports every widget that would be **dropped** (unknown `type`, missing/invalid required key — e.g. a `valueKey` typo for `value_key`). Exits 1 if any widget is dropped.
+- **`validate`**: parses each dashboard spec the same way the platform's `parseDashboardConfig` does, and reports every widget that would be **dropped** (unknown `type`, missing/invalid required key — e.g. a `valueKey` typo for `value_key`). Exits 1 if any spec drops a widget or isn't valid TOML.
+  - With no `PATH`: every `./dashboard/*.toml`, else `./dashboard.toml`. Each filename is printed as a heading when there's more than one.
+  - `PATH`: just that one file, wherever it lives.
+  - `--ref BRANCH`: the repo's copies instead of local files — lists the tree via `GET /repo/files`, then reads each spec via `GET /repo/file-content`. Never guesses a filename.
   - `--against FILE`: additionally resolves every widget's dot-path keys (`value_key`, `rows_key`, `data_key`, `tasks_key`, etc.) against a local `output.json` and reports any that don't resolve (widget renders empty on the platform, not an error there).
   - `--run RUN_ID` / `--latest`: same dot-path check, but fetches the run's structured output from `GET /projects/{id}/runs/{run_id}/output` (S3-backed for current runs, Gitea for pre-migration runs — resolved transparently by the API) instead of a local file.
   - At most one of `--against`/`--run`/`--latest` may be passed.
@@ -293,7 +296,7 @@ harumi share set-password [--project ID]
 harumi share rm-password [--project ID]
 ```
 
-Manages `/projects/{id}/share*` — a project's public, unauthenticated dashboard link (read-only `dashboard.toml` + a chosen run's `output.json`, no login required to view).
+Manages `/projects/{id}/share*` — a project's public, unauthenticated dashboard link (read-only view of the project's dashboard specs, with the same picker when there are several, + a chosen run's `output.json`; no login required to view).
 
 - **`status`** / **`enable`**: `GET`/`POST /projects/{id}/share` → `ProjectShareStatus {share_enabled, share_token, password_set}`. When enabled, the CLI prints the viewer URL as `{platform_url}/share/{token}` — the API itself never returns a full URL since it doesn't know its own public origin.
 - **`disable`**: `DELETE /projects/{id}/share`. The old token stops working immediately (not just hidden).
@@ -503,9 +506,17 @@ orgs = client.list_organizations()
 # Templates
 templates = client.list_templates()
 
-# Dashboard widget contract + validation
-from harumi.dashboard import WIDGET_SCHEMAS, validate_dashboard_toml
-widgets, issues = validate_dashboard_toml(open("dashboard.toml").read())
+# Dashboard spec discovery, widget contract + validation
+from harumi.dashboard import (
+    WIDGET_SCHEMAS,
+    local_dashboard_paths,
+    pick_dashboard_paths,
+    validate_dashboard_toml,
+)
+for path in local_dashboard_paths(Path(".")):  # dashboard/*.toml, then dashboard.toml
+    widgets, issues = validate_dashboard_toml(Path(path).read_text())
+# ...or the repo's copies:
+paths = pick_dashboard_paths(f.path for f in client.list_repo_files(project_id, ref="main"))
 
 # Public share link
 status = client.enable_share(binding.project_id)
