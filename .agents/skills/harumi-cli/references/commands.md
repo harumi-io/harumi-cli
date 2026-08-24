@@ -288,23 +288,36 @@ No backend endpoint — a dashboard spec is a plain file in the project's Gitea 
 ## `share`
 
 ```
-harumi share status [--project ID]
-harumi share enable [--project ID]
-harumi share disable [--project ID]
-harumi share rotate [--yes] [--project ID]
-harumi share set-password [--project ID]
-harumi share rm-password [--project ID]
+harumi share list [--project ID]
+harumi share get LINK_ID [--project ID]
+harumi share add [--label TEXT] [--chat/--no-chat] [--run-history/--no-run-history]
+                  [--run-control/--no-run-control] [--io-control/--no-io-control] [--project ID]
+harumi share update LINK_ID [--label TEXT] [--enable/--disable] [--chat/--no-chat]
+                     [--run-history/--no-run-history] [--run-control/--no-run-control]
+                     [--io-control/--no-io-control] [--project ID]
+harumi share remove LINK_ID [--yes] [--project ID]
+harumi share rotate LINK_ID [--yes] [--project ID]
+harumi share set-password LINK_ID [--project ID]
+harumi share rm-password LINK_ID [--project ID]
 ```
 
-Manages `/projects/{id}/share*` — a project's public, unauthenticated dashboard link (read-only view of the project's dashboard specs, with the same picker when there are several, + a chosen run's `output.json`; no login required to view).
+Manages `/projects/{id}/share-links*` — a project's public, unauthenticated dashboard links (read-only view of the project's dashboard specs, with the same picker when there are several, + a chosen run's `output.json`; no login required to view). A project can have several links, each independently revocable, each with its own permissions and optional password.
 
-- **`status`** / **`enable`**: `GET`/`POST /projects/{id}/share` → `ProjectShareStatus {share_enabled, share_token, password_set}`. When enabled, the CLI prints the viewer URL as `{platform_url}/share/{token}` — the API itself never returns a full URL since it doesn't know its own public origin.
-- **`disable`**: `DELETE /projects/{id}/share`. The old token stops working immediately (not just hidden).
-- **`rotate`**: `POST /projects/{id}/share/rotate` — invalidates the current token and mints a new one. Prompts for confirmation unless `--yes`.
-- **`set-password`**: prompts for a password (hidden input, server-enforced 8–200 chars), then `PUT /projects/{id}/share/password`. Changing the password invalidates every previously issued unlock session — viewers must re-enter it.
-- **`rm-password`**: `DELETE /projects/{id}/share/password`. The link becomes freely viewable (no password prompt).
+- **`list`**: `GET /projects/{id}/share-links` → `ProjectShareLinkList {links: [ProjectShareLink]}`. Prints a table with each link's id, label, `enabled`, its enabled permissions, and whether it's password protected.
+- **`get`**: same list call, filtered to one link — prints its full viewer URL (built client-side as `{platform_url}/share/{token}`, since the API doesn't know its own public origin) and every permission flag.
+- **`add`**: `POST /projects/{id}/share-links` → `ProjectShareLink`. Every permission flag (`--chat`, `--run-history`, `--run-control`, `--io-control`) defaults to off, so creating a link never silently grants more than a bare read-only, latest-run-only dashboard view.
+  - `--chat`: read-only assistant for signed-in visitors.
+  - `--run-history`: browse past runs instead of only ever the latest.
+  - `--run-control`: signed-in visitors can run now, override the kernel, and manage schedules.
+  - `--io-control`: control/edit inputs and outputs.
+- **`update`**: `PATCH /projects/{id}/share-links/{link_id}`. Only the flags you pass are changed; `--enable`/`--disable` toggles the link without touching its permissions.
+- **`remove`**: `DELETE /projects/{id}/share-links/{link_id}`. The old URL stops working immediately. Prompts for confirmation unless `--yes`.
+- **`rotate`**: `POST /projects/{id}/share-links/{link_id}/rotate` — invalidates the current token and mints a new one; permission flags are unchanged. Prompts for confirmation unless `--yes`.
+- **`set-password`**: prompts for a password (hidden input, server-enforced 8–200 chars), then `PUT /projects/{id}/share-links/{link_id}/password`. Changing the password invalidates every previously issued unlock session for that link — viewers must re-enter it.
+- **`rm-password`**: `DELETE /projects/{id}/share-links/{link_id}/password`. That link becomes freely viewable (no password prompt).
 
 `--project` on every subcommand overrides the `.harumi` binding.
+
 
 ## `datasources`
 

@@ -18,7 +18,7 @@
     harumi projects create|list|get|rename|delete
     harumi repo ls|cat|put|rm|mv|download|branches|branch|promote|dir
     harumi dashboard widgets|validate [--project <id>]
-    harumi share status|enable|disable|rotate|set-password|rm-password [--project <id>]
+    harumi share list|get|add|update|remove|rotate|set-password|rm-password [--project <id>]
     harumi datasources list|get|add|update|remove|test|query [--project <id>]
     harumi schedules list|get|add|update|remove [--project <id>]
     harumi secrets list|set|rm [--project <id>]
@@ -62,9 +62,14 @@ before `repo put` is the only way to catch a typo up front.
 
 Sharing
 -------
-`harumi share` manages a project's public, unauthenticated dashboard link
-(optionally password-protected). `rotate`/`set-password` invalidate
-previously issued viewer sessions.
+`harumi share` manages a project's public, unauthenticated dashboard links —
+a project can have several, each independently revocable and optionally
+password-protected. Every permission (assistant, run history, run control,
+inputs/outputs) defaults to off on `add`, so creating a link never silently
+grants more than a bare read-only, latest-run-only dashboard view.
+`run-control` capabilities additionally require the viewer to be signed in.
+`rotate`/`set-password` invalidate previously issued viewer sessions for
+that link only.
 
 Schedules
 ---------
@@ -133,6 +138,7 @@ from harumi.git import (
     push_scratch,
     repo_root,
 )
+from harumi.models import ProjectShareLink
 
 app = typer.Typer(
     name="harumi",
@@ -1674,109 +1680,236 @@ def dashboard_validate(
 # harumi share
 # ---------------------------------------------------------------------------
 
-share_app = typer.Typer(help="Manage the project's public, unauthenticated dashboard link.")
+share_app = typer.Typer(
+    help="Manage a project's public, unauthenticated dashboard links (a project can have several)."
+)
 app.add_typer(share_app, name="share")
 
 
-def _print_share_status(project_id: str, status) -> None:
-    if not status.share_enabled:
-        console.print("Sharing is [bold]off[/bold] for this project.")
+def _share_link_url(link: ProjectShareLink) -> str:
+    return f"{active_platform_url()}/share/{link.token}"
+
+
+def _print_share_link(link: ProjectShareLink) -> None:
+    state = "[bold green]enabled[/bold green]" if link.enabled else "[bold]disabled[/bold]"
+    console.print(f"Link [bold]{link.id}[/bold] ({link.label or 'untitled'}) is {state}.")
+    console.print(f"URL: {_share_link_url(link)}")
+    console.print(f"Password protected: {'yes' if link.password_set else 'no'}")
+    console.print(
+        "Permissions: "
+        f"assistant={'on' if link.chat_enabled else 'off'}, "
+        f"run history={'on' if link.run_history_enabled else 'off'}, "
+        f"run control={'on' if link.run_control_enabled else 'off'}, "
+        f"inputs/outputs={'on' if link.io_control_enabled else 'off'}"
+    )
+
+
+@share_app.command("list")
+@_handle_errors
+def share_list(
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """List a project's public dashboard links. Use `share get` for a link's full URL and permissions."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    links = client.list_share_links(project_id)
+    if not links:
+        console.print("No share links found.")
         return
-    url = f"{active_platform_url()}/share/{status.share_token}"
-    console.print(f"Sharing is [bold green]on[/bold green]: {url}")
-    console.print(f"Password protected: {'yes' if status.password_set else 'no'}")
+
+    table = Table("id", "label", "enabled", "permissions", "password", "token")
+    for link in links:
+        permissions = ", ".join(
+            name
+            for name, on in (
+                ("chat", link.chat_enabled),
+                ("run_history", link.run_history_enabled),
+                ("run_control", link.run_control_enabled),
+                ("io_control", link.io_control_enabled),
+            )
+            if on
+        )
+        table.add_row(
+            link.id,
+            link.label or "",
+            "yes" if link.enabled else "no",
+            permissions or "-",
+            "yes" if link.password_set else "no",
+            link.token,
+        )
+    console.print(table)
 
 
-@share_app.command("status")
+@share_app.command("get")
 @_handle_errors
-def share_status(
+def share_get(
+    link_id: str = typer.Argument(..., help="Share link id."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Show whether this project's dashboard is publicly shared, and its link."""
+    """Show one share link's full URL and permissions."""
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
-    _print_share_status(project_id, client.get_share_status(project_id))
+
+    links = client.list_share_links(project_id)
+    link = next((sl for sl in links if sl.id == link_id), None)
+    if link is None:
+        _fail(f"No share link '{link_id}' found on this project.")
+
+    _print_share_link(link)
 
 
-@share_app.command("enable")
+@share_app.command("add")
 @_handle_errors
-def share_enable(
+def share_add(
+    label: Optional[str] = typer.Option(None, "--label", help="Optional name to tell links apart, e.g. 'Client dashboard'."),
+    chat: bool = typer.Option(False, "--chat/--no-chat", help="Let signed-in visitors ask the read-only assistant about this project."),
+    run_history: bool = typer.Option(False, "--run-history/--no-run-history", help="Let visitors browse past runs, not just the latest one."),
+    run_control: bool = typer.Option(False, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
+    io_control: bool = typer.Option(False, "--io-control/--no-io-control", help="Let visitors control/edit this project's inputs and outputs."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Turn on the project's public dashboard link (mints a token on first use)."""
+    """Create a new public dashboard link. Every permission defaults to off."""
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
-    _print_share_status(project_id, client.enable_share(project_id))
+
+    body: dict = {
+        "chat_enabled": chat,
+        "run_history_enabled": run_history,
+        "run_control_enabled": run_control,
+        "io_control_enabled": io_control,
+    }
+    if label:
+        body["label"] = label
+
+    link = client.create_share_link(project_id, body)
+    console.print("[bold green]Created[/bold green] share link.")
+    _print_share_link(link)
 
 
-@share_app.command("disable")
+@share_app.command("update")
 @_handle_errors
-def share_disable(
+def share_update(
+    link_id: str = typer.Argument(..., help="Share link id."),
+    label: Optional[str] = typer.Option(None, "--label", help="Rename the link."),
+    enabled: Optional[bool] = typer.Option(None, "--enable/--disable", help="Turn the link on or off. The old URL stops working immediately when disabled."),
+    chat: Optional[bool] = typer.Option(None, "--chat/--no-chat", help="Let signed-in visitors ask the read-only assistant about this project."),
+    run_history: Optional[bool] = typer.Option(None, "--run-history/--no-run-history", help="Let visitors browse past runs, not just the latest one."),
+    run_control: Optional[bool] = typer.Option(None, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
+    io_control: Optional[bool] = typer.Option(None, "--io-control/--no-io-control", help="Let visitors control/edit this project's inputs and outputs."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Turn off the project's public dashboard link. The old token stops working immediately."""
+    """Partially update a share link. Only provided fields are changed."""
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
-    client.disable_share(project_id)
-    console.print("[bold red]Disabled[/bold red] the public dashboard link.")
+
+    body: dict = {}
+    if label is not None:
+        body["label"] = label
+    if enabled is not None:
+        body["enabled"] = enabled
+    if chat is not None:
+        body["chat_enabled"] = chat
+    if run_history is not None:
+        body["run_history_enabled"] = run_history
+    if run_control is not None:
+        body["run_control_enabled"] = run_control
+    if io_control is not None:
+        body["io_control_enabled"] = io_control
+
+    if not body:
+        _fail("No fields to update. Pass at least one flag (e.g. --label, --chat).")
+
+    link = client.update_share_link(project_id, link_id, body)
+    console.print("[bold green]Updated[/bold green] share link.")
+    _print_share_link(link)
 
 
-@share_app.command("rotate")
+@share_app.command("remove")
 @_handle_errors
-def share_rotate(
+def share_remove(
+    link_id: str = typer.Argument(..., help="Share link id."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Invalidate the current share link and mint a new one."""
+    """Permanently delete a share link. The old URL stops working immediately."""
     project_id = _resolve_project(project)
 
-    if not yes and not typer.confirm("Rotate the share link? The current link will stop working immediately."):
+    if not yes and not typer.confirm(f"Delete share link '{link_id}'? This cannot be undone."):
         console.print("Aborted.")
         return
 
     client = _get_client(api_url=api_url, org=org)
-    _print_share_status(project_id, client.rotate_share(project_id))
+    client.delete_share_link(project_id, link_id)
+    console.print(f"[bold red]Deleted[/bold red] share link [bold]{link_id}[/bold].")
+
+
+@share_app.command("rotate")
+@_handle_errors
+def share_rotate(
+    link_id: str = typer.Argument(..., help="Share link id."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Invalidate a share link's current token and mint a new one. Its flags are unchanged."""
+    project_id = _resolve_project(project)
+
+    if not yes and not typer.confirm("Rotate this share link? The current URL will stop working immediately."):
+        console.print("Aborted.")
+        return
+
+    client = _get_client(api_url=api_url, org=org)
+    link = client.rotate_share_link(project_id, link_id)
+    console.print("[bold green]Rotated[/bold green] share link.")
+    _print_share_link(link)
 
 
 @share_app.command("set-password")
 @_handle_errors
 def share_set_password(
+    link_id: str = typer.Argument(..., help="Share link id."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Set or change the share link's password (min 8 characters, prompted, hidden input)."""
+    """Set or change a share link's password (min 8 characters, prompted, hidden input)."""
     project_id = _resolve_project(project)
     password = typer.prompt("Enter share link password (hidden, min 8 characters)", hide_input=True)
     client = _get_client(api_url=api_url, org=org)
-    client.set_share_password(project_id, password)
+    client.set_share_link_password(project_id, link_id, password)
     console.print("[bold green]Set[/bold green] the share link password. Previously unlocked viewers must re-enter it.")
 
 
 @share_app.command("rm-password")
 @_handle_errors
 def share_rm_password(
+    link_id: str = typer.Argument(..., help="Share link id."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Remove the share link's password. The link becomes freely viewable."""
+    """Remove a share link's password. It becomes freely viewable."""
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
-    client.remove_share_password(project_id)
+    client.remove_share_link_password(project_id, link_id)
     console.print("[bold red]Removed[/bold red] the share link password.")
 
 
 # ---------------------------------------------------------------------------
 # harumi datasources
+
 # ---------------------------------------------------------------------------
 
 datasources_app = typer.Typer(help="Manage project datasources (database connections).")
