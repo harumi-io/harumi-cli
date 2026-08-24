@@ -1,5 +1,5 @@
 {
-  "cli_version": "0.4.1",
+  "cli_version": "0.4.2",
   "commands": [
     {
       "path": "config set-org",
@@ -2841,8 +2841,130 @@
       ]
     },
     {
-      "path": "share disable",
-      "help": "Turn off the project's public dashboard link.",
+      "path": "share add",
+      "help": "Create a new public dashboard link.",
+      "params": [
+        {
+          "opts": [
+            "--label"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Optional name to tell links apart, e.g. 'Client dashboard'."
+        },
+        {
+          "opts": [
+            "--chat"
+          ],
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "help": "Let signed-in visitors ask the read-only assistant about this project."
+        },
+        {
+          "opts": [
+            "--run-history"
+          ],
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "help": "Let visitors browse past runs, not just the latest one."
+        },
+        {
+          "opts": [
+            "--run-control"
+          ],
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "help": "Let signed-in visitors run now, override the kernel, and manage schedules."
+        },
+        {
+          "opts": [
+            "--io-control"
+          ],
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "help": "Let visitors control/edit this project's inputs and outputs."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "share get",
+      "help": "Show one share link's full URL and permissions.",
+      "params": [
+        {
+          "opts": [
+            "link_id"
+          ],
+          "type": "str",
+          "required": true,
+          "default": null,
+          "help": "Share link id."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "share list",
+      "help": "List a project's public dashboard links.",
       "params": [
         {
           "opts": [
@@ -2875,9 +2997,28 @@
       ]
     },
     {
-      "path": "share enable",
-      "help": "Turn on the project's public dashboard link (mints a token on first use).",
+      "path": "share remove",
+      "help": "Permanently delete a share link.",
       "params": [
+        {
+          "opts": [
+            "link_id"
+          ],
+          "type": "str",
+          "required": true,
+          "default": null,
+          "help": "Share link id."
+        },
+        {
+          "opts": [
+            "--yes",
+            "-y"
+          ],
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "help": "Skip the confirmation prompt."
+        },
         {
           "opts": [
             "--project",
@@ -2910,8 +3051,17 @@
     },
     {
       "path": "share rm-password",
-      "help": "Remove the share link's password.",
+      "help": "Remove a share link's password.",
       "params": [
+        {
+          "opts": [
+            "link_id"
+          ],
+          "type": "str",
+          "required": true,
+          "default": null,
+          "help": "Share link id."
+        },
         {
           "opts": [
             "--project",
@@ -2944,8 +3094,17 @@
     },
     {
       "path": "share rotate",
-      "help": "Invalidate the current share link and mint a new one.",
+      "help": "Invalidate a share link's current token and mint a new one.",
       "params": [
+        {
+          "opts": [
+            "link_id"
+          ],
+          "type": "str",
+          "required": true,
+          "default": null,
+          "help": "Share link id."
+        },
         {
           "opts": [
             "--yes",
@@ -2988,8 +3147,17 @@
     },
     {
       "path": "share set-password",
-      "help": "Set or change the share link's password (min 8 characters, prompted, hidden input).",
+      "help": "Set or change a share link's password (min 8 characters, prompted, hidden input).",
       "params": [
+        {
+          "opts": [
+            "link_id"
+          ],
+          "type": "str",
+          "required": true,
+          "default": null,
+          "help": "Share link id."
+        },
         {
           "opts": [
             "--project",
@@ -3021,9 +3189,72 @@
       ]
     },
     {
-      "path": "share status",
-      "help": "Show whether this project's dashboard is publicly shared, and its link.",
+      "path": "share update",
+      "help": "Partially update a share link.",
       "params": [
+        {
+          "opts": [
+            "link_id"
+          ],
+          "type": "str",
+          "required": true,
+          "default": null,
+          "help": "Share link id."
+        },
+        {
+          "opts": [
+            "--label"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Rename the link."
+        },
+        {
+          "opts": [
+            "--enable"
+          ],
+          "type": "boolean",
+          "required": false,
+          "default": null,
+          "help": "Turn the link on or off. The old URL stops working immediately when disabled."
+        },
+        {
+          "opts": [
+            "--chat"
+          ],
+          "type": "boolean",
+          "required": false,
+          "default": null,
+          "help": "Let signed-in visitors ask the read-only assistant about this project."
+        },
+        {
+          "opts": [
+            "--run-history"
+          ],
+          "type": "boolean",
+          "required": false,
+          "default": null,
+          "help": "Let visitors browse past runs, not just the latest one."
+        },
+        {
+          "opts": [
+            "--run-control"
+          ],
+          "type": "boolean",
+          "required": false,
+          "default": null,
+          "help": "Let signed-in visitors run now, override the kernel, and manage schedules."
+        },
+        {
+          "opts": [
+            "--io-control"
+          ],
+          "type": "boolean",
+          "required": false,
+          "default": null,
+          "help": "Let visitors control/edit this project's inputs and outputs."
+        },
         {
           "opts": [
             "--project",

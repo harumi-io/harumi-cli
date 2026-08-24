@@ -448,13 +448,32 @@ class TemplateList(BaseModel):
 # Project share links <-> harumi-api/src/api/projects/schemas.py — live.
 # ---------------------------------------------------------------------------
 
-class ProjectShareStatus(BaseModel):
-    """Response from GET/POST/DELETE /projects/{id}/share and .../rotate,
-    .../share/password. `share_token` is only present while sharing is
-    enabled; `password_set` never carries the password itself."""
+class ProjectShareLink(BaseModel):
+    """One of a project's public dashboard share links (`GET/POST
+    /projects/{id}/share-links`, `PATCH/DELETE .../share-links/{link_id}`,
+    `.../rotate`, `.../password`). `password_set` never carries the password
+    or its hash — just whether a viewer will be asked for one. The four
+    permission flags all default to false: creating a link never silently
+    grants more than a bare read-only, latest-run-only dashboard view."""
 
     model_config = ConfigDict(extra="allow")
 
-    share_enabled: bool
-    share_token: Optional[str] = None
+    id: str
+    project_id: str
+    token: str
+    label: Optional[str] = None
+    enabled: bool = True
+    chat_enabled: bool = False
+    run_history_enabled: bool = False
+    run_control_enabled: bool = False
+    io_control_enabled: bool = False
     password_set: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class ProjectShareLinkList(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    links: list[ProjectShareLink] = Field(default_factory=list)
+

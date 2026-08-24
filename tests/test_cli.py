@@ -576,6 +576,186 @@ def test_schedules_get_surfaces_a_404_as_a_clean_error(api):
 
 
 # ---------------------------------------------------------------------------
+# harumi share
+# ---------------------------------------------------------------------------
+
+SHARE_LINK = {
+    "id": "link-1",
+    "project_id": "proj-1",
+    "token": "tok-abc123",
+    "label": "Client dashboard",
+    "enabled": True,
+    "chat_enabled": False,
+    "run_history_enabled": False,
+    "run_control_enabled": False,
+    "io_control_enabled": False,
+    "password_set": False,
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+}
+
+
+def test_share_list_renders_the_links_and_their_flags(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})
+
+    result = runner.invoke(cli.app, ["share", "list", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "link-1" in result.output
+    assert "tok-abc123" in result.output
+
+
+def test_share_list_reports_empty(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": []})
+
+    result = runner.invoke(cli.app, ["share", "list", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "No share links found." in result.output
+
+
+def test_share_get_shows_the_link_url_and_permissions(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})
+
+    result = runner.invoke(cli.app, ["share", "get", "link-1", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "tok-abc123" in result.output
+    assert "Client dashboard" in result.output
+
+
+def test_share_get_unknown_link_id_fails_cleanly(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})
+
+    result = runner.invoke(cli.app, ["share", "get", "nope", "--project", "proj-1"])
+
+    assert result.exit_code == 1
+    assert "No share link" in result.output
+
+
+def test_share_add_defaults_every_flag_to_false(api):
+    api.route("POST", "/api/projects/proj-1/share-links", SHARE_LINK, status=201)
+
+    result = runner.invoke(cli.app, ["share", "add", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("POST", "/api/projects/proj-1/share-links")
+    assert body == {
+        "chat_enabled": False,
+        "run_history_enabled": False,
+        "run_control_enabled": False,
+        "io_control_enabled": False,
+    }
+
+
+def test_share_add_forwards_label_and_permission_flags(api):
+    api.route("POST", "/api/projects/proj-1/share-links", SHARE_LINK, status=201)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "share", "add",
+            "--label", "Internal",
+            "--chat",
+            "--run-history",
+            "--run-control",
+            "--project", "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("POST", "/api/projects/proj-1/share-links")
+    assert body["label"] == "Internal"
+    assert body["chat_enabled"] is True
+    assert body["run_history_enabled"] is True
+    assert body["run_control_enabled"] is True
+    assert body["io_control_enabled"] is False
+
+
+def test_share_update_only_sends_provided_fields(api):
+    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
+
+    result = runner.invoke(
+        cli.app,
+        ["share", "update", "link-1", "--run-control", "--project", "proj-1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
+    assert body == {"run_control_enabled": True}
+
+
+def test_share_update_with_no_flags_fails_without_a_request(api):
+    result = runner.invoke(cli.app, ["share", "update", "link-1", "--project", "proj-1"])
+
+    assert result.exit_code == 1
+    assert "No fields to update" in result.output
+    assert api.requests == []
+
+
+def test_share_remove_aborts_without_confirmation(api):
+    result = runner.invoke(
+        cli.app, ["share", "remove", "link-1", "--project", "proj-1"], input="n\n"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Aborted." in result.output
+    assert api.requests == []
+
+
+def test_share_remove_deletes_when_confirmed(api):
+    api.route("DELETE", "/api/projects/proj-1/share-links/link-1", None, status=204)
+
+    result = runner.invoke(
+        cli.app, ["share", "remove", "link-1", "--project", "proj-1", "--yes"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Deleted" in result.output
+    assert api.paths() == ["/api/projects/proj-1/share-links/link-1"]
+
+
+def test_share_rotate_mints_a_new_token(api):
+    rotated = {**SHARE_LINK, "token": "tok-new456"}
+    api.route("POST", "/api/projects/proj-1/share-links/link-1/rotate", rotated)
+
+    result = runner.invoke(
+        cli.app, ["share", "rotate", "link-1", "--project", "proj-1", "--yes"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "tok-new456" in result.output
+
+
+def test_share_set_password_prompts_and_never_echoes_it(api):
+    api.route(
+        "PUT", "/api/projects/proj-1/share-links/link-1/password", {**SHARE_LINK, "password_set": True}
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["share", "set-password", "link-1", "--project", "proj-1"],
+        input="correcthorse\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "correcthorse" not in result.output
+    body = api.body_for("PUT", "/api/projects/proj-1/share-links/link-1/password")
+    assert body == {"password": "correcthorse"}
+
+
+def test_share_rm_password_removes_it(api):
+    api.route("DELETE", "/api/projects/proj-1/share-links/link-1/password", SHARE_LINK)
+
+    result = runner.invoke(
+        cli.app, ["share", "rm-password", "link-1", "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Removed" in result.output
+
+
+# ---------------------------------------------------------------------------
 # harumi datasources
 # ---------------------------------------------------------------------------
 
