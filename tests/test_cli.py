@@ -21,13 +21,20 @@ runner = CliRunner()
 
 
 def test_every_command_builds():
-    """Guards the dependency floor.
+    """Guards the dependency floor, and pins the command tree to the
+    committed cli-surface.json contract.
 
     Typer builds each command's click Options at import time, so a typer/click
     pairing that rejects an Option signature takes down the entire CLI —
     `harumi --version` included — with a TypeError before any command body
     runs. `compileall` cannot see it. This walks the whole tree so the failure
     surfaces here instead of on a user's machine.
+
+    The contract comparison catches the other failure mode: a command added,
+    removed, renamed, or re-flagged without regenerating cli-surface.json —
+    which is the file harumi-docs' CI reads to check commands.mdx for drift.
+    An unregenerated contract would let that check silently pass on stale
+    data.
     """
     from typer.main import get_command
 
@@ -48,10 +55,63 @@ def test_every_command_builds():
 
     # Sanity floor: the tree should not silently shrink to nothing. Not an
     # exact count (new commands land in other branches/PRs) — just enough
-    # margin below the actual count (56 as of this commit) to catch a large
+    # margin below the actual count (68 as of this commit) to catch a large
     # accidental deletion of the command tree, e.g. a bad merge or a
     # sub-Typer losing its `add_typer` registration.
     assert len(names) > 50
+
+    import json
+    from pathlib import Path
+
+    from scripts.emit_cli_surface import build_surface
+
+    contract_path = Path(__file__).parent.parent / "cli-surface.json"
+    committed = json.loads(contract_path.read_text())
+    current = build_surface()
+    # cli_version is expected to differ on every release; the command tree is
+    # what this test protects.
+    committed_commands = committed["commands"]
+    current_commands = current["commands"]
+    assert current_commands == committed_commands, (
+        "cli-surface.json is stale — regenerate it with:\n"
+        "    python scripts/emit_cli_surface.py > cli-surface.json"
+    )
+
+
+def test_cli_surface_normalizes_click_builtin_type_names():
+    """Typer >=0.27's vendored click names STRING/INT 'str'/'int'; every real
+    click release (8.1-8.4, which is what Python 3.9's typer 0.23.x uses) names
+    them 'text'/'integer'. The committed contract uses the vendored spelling,
+    so the emitter must collapse both or compat (3.9) fails
+    test_every_command_builds on a label rather than a real flag change.
+
+    `integer` is the case that actually broke CI: the original normalizer only
+    handled `text`, so the 7 int-typed params (e.g. `--port`) mismatched.
+    """
+    from types import SimpleNamespace
+
+    from scripts.emit_cli_surface import _param_info
+
+    def type_of(name):
+        return _param_info(
+            SimpleNamespace(
+                opts=["--x"],
+                type=SimpleNamespace(name=name),
+                required=False,
+                default=None,
+                help=None,
+            )
+        )["type"]
+
+    # Real click spellings collapse onto the vendored ones...
+    assert type_of("text") == "str"
+    assert type_of("integer") == "int"
+    # ...the vendored spellings pass through unchanged (idempotent)...
+    assert type_of("str") == "str"
+    assert type_of("int") == "int"
+    # ...and labels that agree across both flavours are left alone.
+    for shared in ("boolean", "path", "float", "uuid"):
+        assert type_of(shared) == shared
 
 
 
@@ -470,7 +530,7 @@ def test_schedules_add_forwards_optional_overrides(api):
             "--git-branch", "dev",
             "--command", "python solve.py",
             "--kernel", "or_python_large",
-            "--email-to", "team",
+            "--email-to", "everyone",
             "--project", "proj-1",
         ],
     )
@@ -481,7 +541,7 @@ def test_schedules_add_forwards_optional_overrides(api):
     assert body["git_branch"] == "dev"
     assert body["command"] == "python solve.py"
     assert body["kernel_spec"] == "or_python_large"
-    assert body["email_to"] == "team"
+    assert body["email_to"] == "everyone"
 
 
 def test_schedules_remove_aborts_without_confirmation(api):
@@ -513,6 +573,186 @@ def test_schedules_get_surfaces_a_404_as_a_clean_error(api):
 
     assert result.exit_code == 1
     assert "Error" in result.output
+
+
+# ---------------------------------------------------------------------------
+# harumi share
+# ---------------------------------------------------------------------------
+
+SHARE_LINK = {
+    "id": "link-1",
+    "project_id": "proj-1",
+    "token": "tok-abc123",
+    "label": "Client dashboard",
+    "enabled": True,
+    "chat_enabled": False,
+    "run_history_enabled": False,
+    "run_control_enabled": False,
+    "io_control_enabled": False,
+    "password_set": False,
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+}
+
+
+def test_share_list_renders_the_links_and_their_flags(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})
+
+    result = runner.invoke(cli.app, ["share", "list", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "link-1" in result.output
+    assert "tok-abc123" in result.output
+
+
+def test_share_list_reports_empty(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": []})
+
+    result = runner.invoke(cli.app, ["share", "list", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "No share links found." in result.output
+
+
+def test_share_get_shows_the_link_url_and_permissions(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})
+
+    result = runner.invoke(cli.app, ["share", "get", "link-1", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "tok-abc123" in result.output
+    assert "Client dashboard" in result.output
+
+
+def test_share_get_unknown_link_id_fails_cleanly(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})
+
+    result = runner.invoke(cli.app, ["share", "get", "nope", "--project", "proj-1"])
+
+    assert result.exit_code == 1
+    assert "No share link" in result.output
+
+
+def test_share_add_defaults_every_flag_to_false(api):
+    api.route("POST", "/api/projects/proj-1/share-links", SHARE_LINK, status=201)
+
+    result = runner.invoke(cli.app, ["share", "add", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("POST", "/api/projects/proj-1/share-links")
+    assert body == {
+        "chat_enabled": False,
+        "run_history_enabled": False,
+        "run_control_enabled": False,
+        "io_control_enabled": False,
+    }
+
+
+def test_share_add_forwards_label_and_permission_flags(api):
+    api.route("POST", "/api/projects/proj-1/share-links", SHARE_LINK, status=201)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "share", "add",
+            "--label", "Internal",
+            "--chat",
+            "--run-history",
+            "--run-control",
+            "--project", "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("POST", "/api/projects/proj-1/share-links")
+    assert body["label"] == "Internal"
+    assert body["chat_enabled"] is True
+    assert body["run_history_enabled"] is True
+    assert body["run_control_enabled"] is True
+    assert body["io_control_enabled"] is False
+
+
+def test_share_update_only_sends_provided_fields(api):
+    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
+
+    result = runner.invoke(
+        cli.app,
+        ["share", "update", "link-1", "--run-control", "--project", "proj-1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
+    assert body == {"run_control_enabled": True}
+
+
+def test_share_update_with_no_flags_fails_without_a_request(api):
+    result = runner.invoke(cli.app, ["share", "update", "link-1", "--project", "proj-1"])
+
+    assert result.exit_code == 1
+    assert "No fields to update" in result.output
+    assert api.requests == []
+
+
+def test_share_remove_aborts_without_confirmation(api):
+    result = runner.invoke(
+        cli.app, ["share", "remove", "link-1", "--project", "proj-1"], input="n\n"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Aborted." in result.output
+    assert api.requests == []
+
+
+def test_share_remove_deletes_when_confirmed(api):
+    api.route("DELETE", "/api/projects/proj-1/share-links/link-1", None, status=204)
+
+    result = runner.invoke(
+        cli.app, ["share", "remove", "link-1", "--project", "proj-1", "--yes"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Deleted" in result.output
+    assert api.paths() == ["/api/projects/proj-1/share-links/link-1"]
+
+
+def test_share_rotate_mints_a_new_token(api):
+    rotated = {**SHARE_LINK, "token": "tok-new456"}
+    api.route("POST", "/api/projects/proj-1/share-links/link-1/rotate", rotated)
+
+    result = runner.invoke(
+        cli.app, ["share", "rotate", "link-1", "--project", "proj-1", "--yes"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "tok-new456" in result.output
+
+
+def test_share_set_password_prompts_and_never_echoes_it(api):
+    api.route(
+        "PUT", "/api/projects/proj-1/share-links/link-1/password", {**SHARE_LINK, "password_set": True}
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["share", "set-password", "link-1", "--project", "proj-1"],
+        input="correcthorse\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "correcthorse" not in result.output
+    body = api.body_for("PUT", "/api/projects/proj-1/share-links/link-1/password")
+    assert body == {"password": "correcthorse"}
+
+
+def test_share_rm_password_removes_it(api):
+    api.route("DELETE", "/api/projects/proj-1/share-links/link-1/password", SHARE_LINK)
+
+    result = runner.invoke(
+        cli.app, ["share", "rm-password", "link-1", "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Removed" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -809,6 +1049,140 @@ def test_run_requires_a_git_token_before_pushing_a_scratch_branch(api, git, boun
     assert result.exit_code == 1
     assert "harumi login" in result.output
     assert api.requests == []
+
+
+# ---------------------------------------------------------------------------
+# harumi dashboard validate
+#
+# A project renders one dashboard per spec — every `dashboard/*.toml` plus the
+# legacy root `dashboard.toml` — so validate has to cover all of them, not just
+# the root file it originally hardcoded.
+# ---------------------------------------------------------------------------
+
+VALID_SPEC = """
+[[widgets]]
+type = "metric"
+id = "objective"
+title = "Objective"
+value_key = "objective"
+"""
+
+# `valueKey` instead of `value_key` — the typo the platform silently drops.
+BROKEN_SPEC = """
+[[widgets]]
+type = "metric"
+id = "revenue"
+title = "Revenue"
+valueKey = "totals.revenue"
+"""
+
+
+def _b64(text: str) -> str:
+    import base64
+
+    return base64.b64encode(text.encode()).decode()
+
+
+def test_dashboard_validate_checks_every_local_folder_spec(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dashboard").mkdir()
+    (tmp_path / "dashboard" / "costs.toml").write_text(VALID_SPEC)
+    (tmp_path / "dashboard" / "schedule.toml").write_text(VALID_SPEC)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate"])
+
+    assert result.exit_code == 0, result.output
+    assert "dashboard/costs.toml" in result.output
+    assert "dashboard/schedule.toml" in result.output
+
+
+def test_dashboard_validate_fails_when_any_spec_drops_a_widget(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dashboard").mkdir()
+    (tmp_path / "dashboard" / "ok.toml").write_text(VALID_SPEC)
+    (tmp_path / "dashboard" / "broken.toml").write_text(BROKEN_SPEC)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate"])
+
+    assert result.exit_code == 1
+    assert "dropped" in result.output
+    # The good spec is still reported, so a viewer sees which one is at fault.
+    assert "dashboard/ok.toml" in result.output
+
+
+def test_dashboard_validate_still_finds_the_legacy_root_file(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dashboard.toml").write_text(VALID_SPEC)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate"])
+
+    assert result.exit_code == 0, result.output
+    assert "objective" in result.output
+
+
+def test_dashboard_validate_reports_when_nothing_is_committed(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate"])
+
+    assert result.exit_code == 1
+    assert "No dashboard specs found." in result.output
+
+
+def test_dashboard_validate_ref_lists_the_repo_then_reads_each_spec(api):
+    api.route(
+        "GET",
+        "/api/projects/proj-1/repo/files",
+        [
+            {"name": "main.py", "path": "main.py", "type": "file"},
+            {"name": "schedule.toml", "path": "dashboard/schedule.toml", "type": "file"},
+            {"name": "dashboard.toml", "path": "dashboard.toml", "type": "file"},
+        ],
+    )
+    api.route(
+        "GET",
+        "/api/projects/proj-1/repo/file-content",
+        {"path": "x", "sha": "abc", "encoding": "base64", "content": _b64(VALID_SPEC)},
+    )
+
+    result = runner.invoke(
+        cli.app, ["dashboard", "validate", "--ref", "main", "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "dashboard/schedule.toml" in result.output
+    assert "dashboard.toml" in result.output
+    # One listing plus one read per spec — never a guessed path.
+    assert api.paths().count("/api/projects/proj-1/repo/file-content") == 2
+
+
+def test_dashboard_validate_ref_reports_a_repo_with_no_specs(api):
+    api.route(
+        "GET",
+        "/api/projects/proj-1/repo/files",
+        [{"name": "main.py", "path": "main.py", "type": "file"}],
+    )
+
+    result = runner.invoke(
+        cli.app, ["dashboard", "validate", "--ref", "main", "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 1
+    assert "No dashboard specs" in result.output
+
+
+def test_dashboard_validate_explicit_path_checks_only_that_file(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dashboard").mkdir()
+    (tmp_path / "dashboard" / "broken.toml").write_text(BROKEN_SPEC)
+    only = tmp_path / "one.toml"
+    only.write_text(VALID_SPEC)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate", str(only)])
+
+    assert result.exit_code == 0, result.output
+    assert "dropped" not in result.output
+
 
 
 

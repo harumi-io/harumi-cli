@@ -31,7 +31,7 @@ from harumi.models import (
     Project,
     ProjectExecuteResponse,
     ProjectRun,
-    ProjectShareStatus,
+    ProjectShareLink,
     ProjectWithRepo,
     PromoteResult,
     QueryResult,
@@ -610,32 +610,60 @@ class Client:
             "DELETE", f"/users/organizations/{organization_id}/users/{user_id}"
         )
 
-    # -- Project share links ------------------------------------------------
-    # /projects/{id}/share — the project's public dashboard link. `password`
-    # in the request bodies is never echoed back (see ProjectShareStatus).
+    # -- Project share links -------------------------------------------------
+    # /projects/{id}/share-links — a project's public dashboard links (many
+    # per project). `password` in the request bodies is never echoed back
+    # (see ProjectShareLink.password_set).
 
-    def get_share_status(self, project_id: str) -> ProjectShareStatus:
-        response = self.api.request("GET", f"/projects/{project_id}/share")
-        return ProjectShareStatus.model_validate(response.json())
+    def list_share_links(self, project_id: str) -> list[ProjectShareLink]:
+        response = self.api.request("GET", f"/projects/{project_id}/share-links")
+        return [
+            ProjectShareLink.model_validate(link)
+            for link in response.json().get("links", [])
+        ]
 
-    def enable_share(self, project_id: str) -> ProjectShareStatus:
-        response = self.api.request("POST", f"/projects/{project_id}/share")
-        return ProjectShareStatus.model_validate(response.json())
-
-    def disable_share(self, project_id: str) -> ProjectShareStatus:
-        response = self.api.request("DELETE", f"/projects/{project_id}/share")
-        return ProjectShareStatus.model_validate(response.json())
-
-    def rotate_share(self, project_id: str) -> ProjectShareStatus:
-        response = self.api.request("POST", f"/projects/{project_id}/share/rotate")
-        return ProjectShareStatus.model_validate(response.json())
-
-    def set_share_password(self, project_id: str, password: str) -> ProjectShareStatus:
+    def create_share_link(
+        self, project_id: str, body: dict[str, Any]
+    ) -> ProjectShareLink:
         response = self.api.request(
-            "PUT", f"/projects/{project_id}/share/password", json={"password": password}
+            "POST", f"/projects/{project_id}/share-links", json=body
         )
-        return ProjectShareStatus.model_validate(response.json())
+        return ProjectShareLink.model_validate(response.json())
 
-    def remove_share_password(self, project_id: str) -> ProjectShareStatus:
-        response = self.api.request("DELETE", f"/projects/{project_id}/share/password")
-        return ProjectShareStatus.model_validate(response.json())
+    def update_share_link(
+        self, project_id: str, link_id: str, body: dict[str, Any]
+    ) -> ProjectShareLink:
+        response = self.api.request(
+            "PATCH", f"/projects/{project_id}/share-links/{link_id}", json=body
+        )
+        return ProjectShareLink.model_validate(response.json())
+
+    def delete_share_link(self, project_id: str, link_id: str) -> None:
+        self.api.request(
+            "DELETE", f"/projects/{project_id}/share-links/{link_id}"
+        )
+
+    def rotate_share_link(self, project_id: str, link_id: str) -> ProjectShareLink:
+        response = self.api.request(
+            "POST", f"/projects/{project_id}/share-links/{link_id}/rotate"
+        )
+        return ProjectShareLink.model_validate(response.json())
+
+    def set_share_link_password(
+        self, project_id: str, link_id: str, password: str
+    ) -> ProjectShareLink:
+        response = self.api.request(
+            "PUT",
+            f"/projects/{project_id}/share-links/{link_id}/password",
+            json={"password": password},
+        )
+        return ProjectShareLink.model_validate(response.json())
+
+    def remove_share_link_password(
+        self, project_id: str, link_id: str
+    ) -> ProjectShareLink:
+        response = self.api.request(
+            "DELETE", f"/projects/{project_id}/share-links/{link_id}/password"
+        )
+        return ProjectShareLink.model_validate(response.json())
+

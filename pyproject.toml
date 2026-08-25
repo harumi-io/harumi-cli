@@ -65,6 +65,18 @@ path = "src/harumi/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/harumi"]
 
+[tool.hatch.build.targets.wheel.force-include]
+# Bundles the canonical skill docs (source of truth: .agents/skills/) into the
+# wheel so `harumi skill install` can seed them onto a machine without a repo
+# clone. See src/harumi/skills.py.
+".agents/skills" = "harumi/_skills"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# test_cli.py imports scripts/emit_cli_surface.py (a repo-root script, not a
+# packaged module) to diff the live CLI against the committed cli-surface.json
+# contract. Only pytest's own import (via `pytest`, not `python -m pytest`)
+# needs this — the console-script entrypoint doesn't put the repo root on
+# sys.path on its own.
+pythonpath = ["."]

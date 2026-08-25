@@ -1,5 +1,5 @@
-"""Tests for harumi.dashboard: the drift-pinned widget contract plus the
-`dashboard.toml` validator.
+"""Tests for harumi.dashboard: the drift-pinned widget contract, dashboard
+spec discovery, and the spec validator.
 """
 
 from __future__ import annotations
@@ -10,7 +10,9 @@ from harumi.dashboard import (
     WIDGET_SCHEMAS,
     DashboardTomlError,
     describe_missing_key,
+    local_dashboard_paths,
     parse_widget_entry,
+    pick_dashboard_paths,
     resolve_path,
     validate_dashboard_toml,
 )
@@ -194,3 +196,66 @@ value_key = "objective"
         widgets, issues = validate_dashboard_toml(raw, output={"objective": 42})
         assert len(widgets) == 1
         assert issues == []
+
+    def test_top_level_title_and_layout_are_accepted_and_ignored(self):
+        """`title` is the dashboard's picker label when a project has several
+        specs — the validator only cares about widgets, so it must not treat
+        either non-widget table as a problem."""
+        raw = """
+title = "Machine schedule"
+
+[layout]
+columns = 3
+
+[[widgets]]
+type = "metric"
+id = "objective"
+title = "Objective"
+value_key = "objective"
+"""
+        widgets, issues = validate_dashboard_toml(raw)
+        assert len(widgets) == 1
+        assert issues == []
+
+
+class TestPickDashboardPaths:
+    def test_folder_specs_first_alphabetically_then_the_legacy_root(self):
+        assert pick_dashboard_paths(
+            [
+                "main.py",
+                "dashboard/schedule.toml",
+                "dashboard.toml",
+                "dashboard/costs.toml",
+            ]
+        ) == ["dashboard/costs.toml", "dashboard/schedule.toml", "dashboard.toml"]
+
+    def test_ignores_non_toml_nested_and_unrelated_paths(self):
+        assert pick_dashboard_paths(
+            [
+                "dashboard/README.md",
+                "dashboard/archive/old.toml",
+                "dashboards/other.toml",
+                "harumi.toml",
+            ]
+        ) == []
+
+    def test_root_only_project_is_unchanged(self):
+        assert pick_dashboard_paths(["dashboard.toml", "main.py"]) == ["dashboard.toml"]
+
+
+class TestLocalDashboardPaths:
+    def test_finds_folder_specs_then_the_root_file(self, tmp_path):
+        (tmp_path / "dashboard").mkdir()
+        (tmp_path / "dashboard" / "schedule.toml").write_text("")
+        (tmp_path / "dashboard" / "costs.toml").write_text("")
+        (tmp_path / "dashboard" / "notes.md").write_text("")
+        (tmp_path / "dashboard.toml").write_text("")
+
+        assert local_dashboard_paths(tmp_path) == [
+            "dashboard/costs.toml",
+            "dashboard/schedule.toml",
+            "dashboard.toml",
+        ]
+
+    def test_empty_when_nothing_is_committed(self, tmp_path):
+        assert local_dashboard_paths(tmp_path) == []

@@ -1,4 +1,4 @@
-"""The `dashboard.toml` widget contract — a mirror of `WIDGET_SCHEMAS` in
+"""The dashboard spec widget contract — a mirror of `WIDGET_SCHEMAS` in
 harumi-platform's `packages/ui/src/dashboard/schema.ts`.
 
 # ponytail: this is a hand-maintained mirror of `WIDGET_SCHEMAS` — harumi-cli
@@ -28,7 +28,8 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -191,17 +192,59 @@ def describe_missing_key(data: Dict[str, Any], path: str) -> str:
 
 
 class DashboardTomlError(ValueError):
-    """Raised when `dashboard.toml` itself isn't valid TOML."""
+    """Raised when a dashboard spec isn't valid TOML."""
+
+
+DASHBOARD_DIR = "dashboard"
+ROOT_DASHBOARD_PATH = "dashboard.toml"
+
+
+def is_dashboard_path(path: str) -> bool:
+    """Whether `path` is a dashboard spec the platform would render:
+    `dashboard/<name>.toml` (one level deep) or the legacy root `dashboard.toml`."""
+    if path == ROOT_DASHBOARD_PATH:
+        return True
+    prefix = f"{DASHBOARD_DIR}/"
+    if not (path.startswith(prefix) and path.endswith(".toml")):
+        return False
+    return "/" not in path[len(prefix) :]
+
+
+def pick_dashboard_paths(paths: Iterable[str]) -> List[str]:
+    """The dashboard specs in a flat repo listing, in the order the platform's
+    picker shows them: `dashboard/*.toml` (alphabetical) then the legacy root
+    `dashboard.toml`. Mirrors `pickDashboardPaths` in harumi-platform's
+    `apps/web/src/lib/dashboard-files.ts`."""
+    all_paths = list(paths)
+    in_dir = sorted(p for p in all_paths if p != ROOT_DASHBOARD_PATH and is_dashboard_path(p))
+    if ROOT_DASHBOARD_PATH in all_paths:
+        in_dir.append(ROOT_DASHBOARD_PATH)
+    return in_dir
+
+
+def local_dashboard_paths(root: Path) -> List[str]:
+    """The same discovery against a working copy — `<root>/dashboard/*.toml`
+    then `<root>/dashboard.toml`. Returns repo-relative paths (posix), so the
+    result is directly comparable with `pick_dashboard_paths`."""
+    candidates = [p.name for p in sorted((root / DASHBOARD_DIR).glob("*.toml"))]
+    found = [f"{DASHBOARD_DIR}/{name}" for name in candidates]
+    if (root / ROOT_DASHBOARD_PATH).is_file():
+        found.append(ROOT_DASHBOARD_PATH)
+    return found
 
 
 def validate_dashboard_toml(
     raw: str, output: Optional[Dict[str, Any]] = None
 ) -> Tuple[List[Dict[str, Any]], List[WidgetIssue]]:
-    """Parses and validates `dashboard.toml`, mirroring
+    """Parses and validates a dashboard spec, mirroring
     `parseDashboardConfig` + `parseWidgetEntry`. Returns the widgets that
     would actually render, plus every issue found (dropped widgets first,
     then — only when `output` is given — output.json dot-paths that won't
     resolve, which the platform itself can't check ahead of time).
+
+    A top-level `title` (the picker label when a project has several
+    dashboards) and a `[layout]` table are both accepted and ignored here —
+    neither affects whether a widget renders.
     """
     try:
         parsed = tomllib.loads(raw)
