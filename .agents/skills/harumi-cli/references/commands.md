@@ -379,7 +379,7 @@ harumi schedules remove SCHEDULE_ID [--yes] [--project ID]
 
 **`--start-at`** is an ISO-8601 datetime; defaults to "now" (UTC) if omitted on `add`.
 
-**`--email-to`** accepts `only-me` | `team` | `everyone` | a comma-separated list of email addresses (resolved server-side).
+**`--email-to`** accepts `only-me` | `everyone` | a comma-separated list of email addresses (resolved server-side).
 
 **`add`** calls `POST /projects/{project_id}/schedules` with `{cron, start_at, git_branch, git_commit?, command?, kernel_spec?, output_format?, email_to?}` → `Schedule`.
 

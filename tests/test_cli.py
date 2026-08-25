@@ -530,7 +530,7 @@ def test_schedules_add_forwards_optional_overrides(api):
             "--git-branch", "dev",
             "--command", "python solve.py",
             "--kernel", "or_python_large",
-            "--email-to", "team",
+            "--email-to", "everyone",
             "--project", "proj-1",
         ],
     )
@@ -541,7 +541,7 @@ def test_schedules_add_forwards_optional_overrides(api):
     assert body["git_branch"] == "dev"
     assert body["command"] == "python solve.py"
     assert body["kernel_spec"] == "or_python_large"
-    assert body["email_to"] == "team"
+    assert body["email_to"] == "everyone"
 
 
 def test_schedules_remove_aborts_without_confirmation(api):

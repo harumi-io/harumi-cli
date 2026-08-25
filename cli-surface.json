@@ -2433,7 +2433,7 @@
           "type": "str",
           "required": false,
           "default": null,
-          "help": "only-me | team | everyone | comma-separated emails."
+          "help": "only-me | everyone | comma-separated emails."
         },
         {
           "opts": [
@@ -2678,7 +2678,7 @@
           "type": "str",
           "required": false,
           "default": null,
-          "help": "only-me | team | everyone | comma-separated emails."
+          "help": "only-me | everyone | comma-separated emails."
         },
         {
           "opts": [
