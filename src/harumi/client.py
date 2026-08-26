@@ -262,12 +262,19 @@ class Client:
         this default a configured org would still create the project in the
         caller's personal workspace, where `projects list` (which *does* filter
         by that header) would then hide it. Pass `personal=True` to create in
-        the personal workspace despite a configured org.
+        the personal workspace despite a configured org; combining it with an
+        explicit `customer_id` is contradictory and raises `ValueError` rather
+        than silently dropping one of them.
 
         `repo` is `None` only when Harumi Git isn't configured on this
         backend (e.g. local dev without Gitea) — callers should handle that
         case rather than assume a repo always exists.
         """
+        if personal and customer_id:
+            raise ValueError(
+                "personal=True and customer_id are mutually exclusive. Pass only one."
+            )
+
         owner = None if personal else (customer_id or self.config.org_id)
 
         body: dict[str, Any] = {"name": name}

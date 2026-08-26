@@ -239,6 +239,22 @@ def test_projects_list_reports_empty_instead_of_an_empty_table(api):
     assert "No projects found." in result.output
 
 
+def test_projects_create_rejects_personal_with_customer_id(api):
+    """The two flags name different workspaces, so passing both must be refused.
+
+    Without this the guard could be dropped in a refactor and one flag would
+    silently win, putting the project somewhere the user didn't ask for.
+    """
+    result = runner.invoke(
+        cli.app, ["projects", "create", "Scoped", "--personal", "--customer-id", "org-other"]
+    )
+
+    assert result.exit_code == 1
+    assert "mutually exclusive" in result.output
+    # Refused during argument validation, before any project was created.
+    assert api.requests == []
+
+
 def test_api_error_exits_nonzero_with_a_message(api):
     api.route("GET", "/api/projects", {"detail": "boom"}, status=500)
 
