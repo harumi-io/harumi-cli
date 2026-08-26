@@ -759,6 +759,15 @@
         },
         {
           "opts": [
+            "--personal"
+          ],
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "help": "Create in your personal workspace, ignoring the configured org."
+        },
+        {
+          "opts": [
             "--api-url"
           ],
           "type": "str",
@@ -1323,7 +1332,16 @@
           "type": "str",
           "required": false,
           "default": null,
-          "help": "Customer/organization id (optional)."
+          "help": "Organization id to create the project under. Defaults to the configured org."
+        },
+        {
+          "opts": [
+            "--personal"
+          ],
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "help": "Create in your personal workspace, ignoring the configured org."
         },
         {
           "opts": [

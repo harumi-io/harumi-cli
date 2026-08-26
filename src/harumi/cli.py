@@ -205,6 +205,18 @@ def _fail(message: str) -> None:
     raise typer.Exit(code=1)
 
 
+def _print_project_workspace(customer_id: Optional[str]) -> None:
+    """Report which workspace a freshly-created project landed in.
+
+    `projects list` filters by the configured org, so a project created in the
+    other workspace would otherwise just look missing.
+    """
+    if customer_id:
+        console.print(f"Workspace: organization [bold]{customer_id}[/bold].")
+    else:
+        console.print("Workspace: your [bold]personal[/bold] workspace.")
+
+
 def _resolve_project(project: Optional[str]) -> str:
     """Resolve a project id from --project, falling back to the .harumi binding."""
     if project:
@@ -770,6 +782,11 @@ def import_project(
     bind: bool = typer.Option(
         True, "--bind/--no-bind", help="Bind the folder to the new project (like `harumi init`)."
     ),
+    personal: bool = typer.Option(
+        False,
+        "--personal",
+        help="Create in your personal workspace, ignoring the configured org.",
+    ),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -792,10 +809,11 @@ def import_project(
 
     name = project_name or folder.name
     console.print(f"Creating project [bold]{name}[/bold]...")
-    project = client.create_project(name)
+    project = client.create_project(name, personal=personal)
     console.print(
         f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id})."
     )
+    _print_project_workspace(project.customer_id)
 
     if project.repo is None:
         console.print(
@@ -858,7 +876,16 @@ app.add_typer(projects_app, name="projects")
 @_handle_errors
 def projects_create(
     name: str = typer.Argument(..., help="Project name."),
-    customer_id: Optional[str] = typer.Option(None, "--customer-id", help="Customer/organization id (optional)."),
+    customer_id: Optional[str] = typer.Option(
+        None,
+        "--customer-id",
+        help="Organization id to create the project under. Defaults to the configured org.",
+    ),
+    personal: bool = typer.Option(
+        False,
+        "--personal",
+        help="Create in your personal workspace, ignoring the configured org.",
+    ),
     template_id: Optional[str] = typer.Option(None, "--template-id", help="Template id to pre-configure the project (optional)."),
     bind: bool = typer.Option(
         True, "--bind/--no-bind", help="Bind the current directory to the new project (like `harumi init`)."
@@ -868,11 +895,17 @@ def projects_create(
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Create a new Harumi project and its Gitea repo, then bind this directory to it."""
+    if personal and customer_id:
+        _fail("--personal and --customer-id are mutually exclusive. Pass only one.")
+
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
 
     console.print(f"Creating project [bold]{name}[/bold]...")
-    project = client.create_project(name, customer_id=customer_id, template_id=template_id)
+    project = client.create_project(
+        name, customer_id=customer_id, template_id=template_id, personal=personal
+    )
     console.print(f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id}).")
+    _print_project_workspace(project.customer_id)
 
     if project.repo is None:
         console.print(

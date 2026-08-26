@@ -153,7 +153,7 @@ harumi config set-org <ORG_ID>     # persist it for the active environment
 harumi --help                      # (org can also be overridden per-command with --org)
 ```
 
-The resolved org is sent as the `X-Organization` header on every request. It is stored **per environment**.
+The resolved org is sent as the `X-Organization` header on every request, and is used as the owning workspace for projects created by `projects create` / `import`. It is stored **per environment**. To create a project in your personal workspace despite a configured org, pass `--personal`.
 
 ## 5. Verify
 
