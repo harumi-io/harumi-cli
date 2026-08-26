@@ -364,6 +364,28 @@ def test_client_create_project_personal_omits_customer_id_despite_configured_org
     assert project.customer_id is None
 
 
+def test_client_create_project_rejects_personal_with_explicit_customer_id():
+    """`Client` is public API, so the contradiction must fail loudly here too.
+
+    The CLI guards this before calling, but a library caller passing both would
+    otherwise have `customer_id` silently dropped and land the project in the
+    personal workspace it asked to override.
+    """
+    _write_credentials()
+    captured: dict = {}
+
+    client = Client(
+        api_url="https://harumi-api.test/api",
+        org_id="org-acme",
+        transport=_create_project_transport(captured),
+    )
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        client.create_project("Scoped Project", customer_id="org-other", personal=True)
+
+    # Rejected before any request went out.
+    assert "body" not in captured
+
+
 def test_client_create_project_without_configured_org_stays_personal():
     _write_credentials()
     captured: dict = {}
