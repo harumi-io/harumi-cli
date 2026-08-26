@@ -251,16 +251,35 @@ class Client:
         name: str,
         customer_id: Optional[str] = None,
         template_id: Optional[str] = None,
+        personal: bool = False,
     ) -> ProjectWithRepo:
         """Create a new Harumi project and fetch its (auto-provisioned) repo.
+
+        The owning workspace comes from `customer_id`, defaulting to the
+        configured org (`harumi config set-org` / `--org` / `HARUMI_ORG`).
+        POST /projects reads the workspace from the body only — it ignores the
+        `X-Organization` header that scopes the read endpoints — so without
+        this default a configured org would still create the project in the
+        caller's personal workspace, where `projects list` (which *does* filter
+        by that header) would then hide it. Pass `personal=True` to create in
+        the personal workspace despite a configured org; combining it with an
+        explicit `customer_id` is contradictory and raises `ValueError` rather
+        than silently dropping one of them.
 
         `repo` is `None` only when Harumi Git isn't configured on this
         backend (e.g. local dev without Gitea) — callers should handle that
         case rather than assume a repo always exists.
         """
+        if personal and customer_id:
+            raise ValueError(
+                "personal=True and customer_id are mutually exclusive. Pass only one."
+            )
+
+        owner = None if personal else (customer_id or self.config.org_id)
+
         body: dict[str, Any] = {"name": name}
-        if customer_id:
-            body["customer_id"] = customer_id
+        if owner:
+            body["customer_id"] = owner
         if template_id:
             body["template_id"] = template_id
 

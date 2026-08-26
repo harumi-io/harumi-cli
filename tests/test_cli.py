@@ -32,9 +32,9 @@ def test_every_command_builds():
 
     The contract comparison catches the other failure mode: a command added,
     removed, renamed, or re-flagged without regenerating cli-surface.json —
-    which is the file harumi-docs' CI reads to check commands.mdx for drift.
-    An unregenerated contract would let that check silently pass on stale
-    data.
+    which is the file harumi-docs' weekly drift check reads to find commands
+    and flags its CLI reference hasn't documented yet. An unregenerated
+    contract would let that check silently pass on stale data.
     """
     from typer.main import get_command
 
@@ -237,6 +237,22 @@ def test_projects_list_reports_empty_instead_of_an_empty_table(api):
 
     assert result.exit_code == 0, result.output
     assert "No projects found." in result.output
+
+
+def test_projects_create_rejects_personal_with_customer_id(api):
+    """The two flags name different workspaces, so passing both must be refused.
+
+    Without this the guard could be dropped in a refactor and one flag would
+    silently win, putting the project somewhere the user didn't ask for.
+    """
+    result = runner.invoke(
+        cli.app, ["projects", "create", "Scoped", "--personal", "--customer-id", "org-other"]
+    )
+
+    assert result.exit_code == 1
+    assert "mutually exclusive" in result.output
+    # Refused during argument validation, before any project was created.
+    assert api.requests == []
 
 
 def test_api_error_exits_nonzero_with_a_message(api):

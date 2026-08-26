@@ -232,5 +232,5 @@ Staging is **internal-only**: it's hidden from `env list`/help for regular users
 Environment selection precedence: `--env` > `HARUMI_ENV` > `harumi env use` (saved default) > `production`.
 
 - Per-command URL overrides: `--api-url` / `HARUMI_API_URL`, `--git-url` / `HARUMI_GIT_URL` (e.g. for a local harumi-api). These override the active environment's endpoints without changing which env you're on.
-- Org: `harumi config set-org <ORG_ID>` / `--org` / `HARUMI_ORG` (scoped per environment).
+- Org: `harumi config set-org <ORG_ID>` / `--org` / `HARUMI_ORG` (scoped per environment). Sent as `X-Organization` to scope reads, and used as the owning workspace when creating a project — `projects create --personal` / `import --personal` opts out.
 - Stored under `~/.harumi/`: global `config.json` (just the selected environment) + per-env `environments/<env>/{credentials,config}.json`. Override the home dir with `HARUMI_HOME`.

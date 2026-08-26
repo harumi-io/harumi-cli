@@ -224,6 +224,7 @@ class ProjectWithRepo(BaseModel):
 
     id: str
     name: str
+    customer_id: Optional[str] = None
     kernel_spec: Optional[str] = None
     notebook_ids: list[str] = Field(default_factory=list)
     repo: Optional[RepoInfo] = None
