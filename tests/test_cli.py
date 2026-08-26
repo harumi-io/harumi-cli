@@ -32,9 +32,9 @@ def test_every_command_builds():
 
     The contract comparison catches the other failure mode: a command added,
     removed, renamed, or re-flagged without regenerating cli-surface.json —
-    which is the file harumi-docs' CI reads to check commands.mdx for drift.
-    An unregenerated contract would let that check silently pass on stale
-    data.
+    which is the file harumi-docs' weekly drift check reads to find commands
+    and flags its CLI reference hasn't documented yet. An unregenerated
+    contract would let that check silently pass on stale data.
     """
     from typer.main import get_command
 
