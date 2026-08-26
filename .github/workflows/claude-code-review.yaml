@@ -226,10 +226,16 @@ jobs:
           claude_args: |
             --model us.anthropic.claude-sonnet-4-5-20250929-v1:0
             --max-turns 80
-            --allowedTools "Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(git diff:*),Bash(git log:*),Bash(git cat-file:*)"
+            --allowedTools "Read,Grep,Glob,Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(git diff:*),Bash(git log:*),Bash(git cat-file:*)"
             ${{ steps.load_prompt.outputs.HAS_PREVIOUS_SESSION == 'true' && '--continue' || '' }}
 
       # Record the current commit so the next run knows where to diff from.
+      # Only on success: a failed or cancelled run has not reviewed this SHA, so
+      # advancing the marker would make the next run skip those changes. The
+      # session cache still saves (Actions does that on exit regardless), but
+      # `Load review prompt` falls back to a full review whenever the marker is
+      # missing or names an unreachable commit, so a stale cache alone cannot
+      # produce a silently-empty review.
       - name: Save last reviewed commit
         if: success()
         shell: bash
