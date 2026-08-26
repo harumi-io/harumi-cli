@@ -294,6 +294,89 @@ def test_client_create_project_repo_none_when_not_provisioned():
     assert project.repo is None
 
 
+def _create_project_transport(captured: dict) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/projects":
+            captured["body"] = json.loads(request.content)
+            captured["header"] = request.headers.get("x-organization")
+            return httpx.Response(
+                201,
+                json={
+                    "id": "proj-4",
+                    "name": "Scoped Project",
+                    "customer_id": captured["body"].get("customer_id"),
+                    "notebook_ids": [],
+                },
+            )
+        return httpx.Response(404, json={"detail": "No repository provisioned for this project"})
+
+    return httpx.MockTransport(handler)
+
+
+def test_client_create_project_defaults_customer_id_to_configured_org():
+    """A configured org must reach the POST body, not just the header.
+
+    POST /projects reads the owning workspace from `customer_id` in the body and
+    ignores X-Organization, so sending only the header created the project in the
+    caller's personal workspace despite `harumi config set-org`.
+    """
+    _write_credentials()
+    captured: dict = {}
+
+    client = Client(
+        api_url="https://harumi-api.test/api",
+        org_id="org-acme",
+        transport=_create_project_transport(captured),
+    )
+    project = client.create_project("Scoped Project")
+
+    assert captured["body"]["customer_id"] == "org-acme"
+    assert captured["header"] == "org-acme"
+    assert project.customer_id == "org-acme"
+
+
+def test_client_create_project_explicit_customer_id_wins_over_configured_org():
+    _write_credentials()
+    captured: dict = {}
+
+    client = Client(
+        api_url="https://harumi-api.test/api",
+        org_id="org-acme",
+        transport=_create_project_transport(captured),
+    )
+    client.create_project("Scoped Project", customer_id="org-other")
+    assert captured["body"]["customer_id"] == "org-other"
+
+
+def test_client_create_project_personal_omits_customer_id_despite_configured_org():
+    """`--personal` opts out of the configured org so private projects stay private."""
+    _write_credentials()
+    captured: dict = {}
+
+    client = Client(
+        api_url="https://harumi-api.test/api",
+        org_id="org-acme",
+        transport=_create_project_transport(captured),
+    )
+    project = client.create_project("Scoped Project", personal=True)
+
+    assert "customer_id" not in captured["body"]
+    assert project.customer_id is None
+
+
+def test_client_create_project_without_configured_org_stays_personal():
+    _write_credentials()
+    captured: dict = {}
+
+    client = Client(
+        api_url="https://harumi-api.test/api",
+        transport=_create_project_transport(captured),
+    )
+    client.create_project("Scoped Project")
+
+    assert "customer_id" not in captured["body"]
+
+
 def test_client_get_project_returns_project():
     _write_credentials()
 

@@ -97,6 +97,8 @@ harumi config set-org <ORG_ID>
 
 Persists `org_id` in `~/.harumi/config.json`; every subsequent request sends it as `X-Organization`.
 
+The header scopes the *read* endpoints (`projects list`, `projects trash`, `notebooks`). Creation reads the workspace from the request body instead, so `projects create` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway.
+
 ## `specs`
 
 ```
@@ -124,7 +126,7 @@ Lists every project and its notebooks (legacy notebook-centric view; most projec
 ## `projects`
 
 ```
-harumi projects create NAME [--customer-id ID] [--template-id ID] [--bind/--no-bind]
+harumi projects create NAME [--customer-id ID] [--personal] [--template-id ID] [--bind/--no-bind]
                        [--api-url URL] [--git-url URL] [--org ORG]
 harumi projects list [--api-url URL] [--org ORG]
 harumi projects get PROJECT_ID [--api-url URL] [--org ORG]
@@ -132,7 +134,7 @@ harumi projects rename PROJECT_ID NAME [--api-url URL] [--org ORG]
 harumi projects delete PROJECT_ID [--yes] [--api-url URL] [--org ORG]
 ```
 
-- **`create`**: `POST /projects`, then `GET /projects/{id}/repo` to fetch the Gitea repo and (unless `--no-bind`) bind the current directory the same way `harumi init` does. If the repo fetch 404s (Harumi Git not configured for this backend), the project is still created — the CLI prints a warning and skips binding instead of failing.
+- **`create`**: `POST /projects`, then `GET /projects/{id}/repo` to fetch the Gitea repo and (unless `--no-bind`) bind the current directory the same way `harumi init` does. If the repo fetch 404s (Harumi Git not configured for this backend), the project is still created — the CLI prints a warning and skips binding instead of failing. The project is created in the configured org (`config set-org` / `--org` / `HARUMI_ORG`) unless you pass `--customer-id` to pick a different one or `--personal` to create it in your personal workspace; the command prints which workspace it landed in.
 - **`list`**: `GET /projects` → table of `id`, `name`, `kernel_spec`, `role`.
 - **`get`**: `GET /projects/{id}` → detail view.
 - **`rename`**: `PUT /projects/{id}` with `{name}`.
@@ -157,7 +159,7 @@ After `harumi init`, `harumi run`, `harumi runs`, `harumi repo`, `harumi outputs
 ## `import`
 
 ```
-harumi import [PATH] [--project-name NAME] [--from-git URL] [--bind/--no-bind]
+harumi import [PATH] [--project-name NAME] [--from-git URL] [--bind/--no-bind] [--personal]
               [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
@@ -172,10 +174,11 @@ the current directory and **must be a directory** — unzip the export first
 | `--project-name` | Name for the new project. Default: the folder's name. |
 | `--from-git` | Also clone this git URL (e.g. the project's old GitHub repo) flat into the folder — `.git` stripped, files copied alongside the exported ones — before importing. On a filename collision the exported file wins; the CLI warns and lists the first few colliding paths. |
 | `--bind / --no-bind` | Bind the folder to the new project afterward, like `harumi init`. Default: `--bind`. |
+| `--personal` | Create the project in your personal workspace, ignoring the configured org. |
 
 Sequence:
 
-1. `POST /projects` to create the project (`name` = `--project-name` or the folder name).
+1. `POST /projects` to create the project (`name` = `--project-name` or the folder name), in the configured org unless `--personal` is passed.
 2. If `--from-git` is set, shallow-clones that URL into a temp dir and copies its tree (minus `.git`) flat into the folder first.
 3. If the backend didn't provision a Gitea repo for the project (`project.repo is None`), prints a warning and stops — nothing is pushed, no binding happens.
 4. Otherwise, requires a Gitea token from `harumi login` (prints a warning and stops if missing — never fails hard), then commits and pushes the **entire folder** as one commit ("Import project") to the new repo's default branch.
