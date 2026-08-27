@@ -23,9 +23,11 @@ from scripts.live_check import (
     MANUAL,
     PLAN,
     READ,
+    REPO_ROOT,
     TIERS,
     Runner,
     Step,
+    _seed_credentials,
     ledger,
     load_surface,
     validate_plan,
@@ -38,6 +40,18 @@ class TestPlanIsValid:
         arguments, unknown commands, forward references and a missing teardown.
         Each of those failure modes is exercised individually below."""
         assert validate_plan() == []
+
+    def test_no_helper_is_defined_twice(self):
+        """Regression: `_positional_count_required` was accidentally defined
+        twice; the second definition silently shadowed the first as dead code.
+        A harmless duplicate today is a real bug the next time only one copy
+        gets edited."""
+        import ast
+
+        source = REPO_ROOT.joinpath("scripts", "live_check.py").read_text()
+        names = [node.name for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)]
+        duplicates = {name for name in names if names.count(name) > 1}
+        assert duplicates == set(), f"duplicate top-level function definitions: {duplicates}"
 
     def test_every_command_in_the_surface_is_classified(self):
         surface = set(load_surface())
@@ -196,6 +210,78 @@ class TestRunnerSubstitution:
             "run_id=bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb). status=queued"
         )
         assert self._runner(tmp_path)._capture(step, stdout) == "bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb"
+
+    def test_two_canary_names_generated_in_the_same_second_do_not_collide(self):
+        """A bare timestamp collides if two runs start in the same second (e.g.
+        a scheduled job overlapping a manual run) — `projects create` would
+        then fail on a name clash that looks like a backend bug."""
+        from scripts.live_check import _canary_name
+
+        assert len({_canary_name() for _ in range(50)}) == 50
+
+    def test_a_malformed_binding_falls_back_to_scraping_a_uuid_instead_of_crashing(self, tmp_path):
+        """A half-written or corrupt .harumi/config.json must not take down the
+        whole harness — fall through to the UUID scrape like there was no
+        binding at all."""
+        (tmp_path / ".harumi").mkdir()
+        (tmp_path / ".harumi" / "config.json").write_text("{not valid json")
+        runner = self._runner(tmp_path)
+        captured = runner._capture(
+            Step("projects create", capture="project"),
+            "Created project (id=11111111-2222-3333-4444-555555555555).",
+        )
+        assert captured == "11111111-2222-3333-4444-555555555555"
+
+
+class TestLoadSurface:
+    def test_a_missing_cli_surface_json_gives_an_actionable_message_not_a_traceback(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("scripts.live_check.SURFACE_PATH", tmp_path / "missing.json")
+        with pytest.raises(SystemExit, match="Run: python scripts/emit_cli_surface.py"):
+            load_surface()
+
+    def test_a_malformed_cli_surface_json_gives_an_actionable_message_not_a_traceback(self, monkeypatch, tmp_path):
+        bad = tmp_path / "cli-surface.json"
+        bad.write_text("{not valid json")
+        monkeypatch.setattr("scripts.live_check.SURFACE_PATH", bad)
+        with pytest.raises(SystemExit, match="malformed"):
+            load_surface()
+
+
+class TestSeedCredentials:
+    """Every file this writes holds a live session token, so permissions are a
+    security property, not a nice-to-have."""
+
+    def _staged_source(self, tmp_path, env_name="staging", with_org=True):
+        source_dir = tmp_path / "source" / "environments" / env_name
+        source_dir.mkdir(parents=True)
+        (source_dir / "credentials.json").write_text(json.dumps({"access_token": "a", "refresh_token": "r"}))
+        if with_org:
+            (source_dir / "config.json").write_text(json.dumps({"org_id": "org-1"}))
+        return tmp_path / "source"
+
+    def test_copying_an_existing_session_locks_down_credentials_permissions(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HARUMI_HOME", str(self._staged_source(tmp_path)))
+        monkeypatch.delenv("HARUMI_LIVE_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("HARUMI_LIVE_REFRESH_TOKEN", raising=False)
+
+        home = tmp_path / "sandbox-home"
+        _seed_credentials(home, "staging")
+
+        target = home / "environments" / "staging" / "credentials.json"
+        assert target.exists()
+        assert oct(target.stat().st_mode)[-3:] == "600"
+
+    def test_copying_the_org_config_also_locks_down_permissions(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HARUMI_HOME", str(self._staged_source(tmp_path)))
+        monkeypatch.delenv("HARUMI_LIVE_ACCESS_TOKEN", raising=False)
+        monkeypatch.delenv("HARUMI_LIVE_REFRESH_TOKEN", raising=False)
+
+        home = tmp_path / "sandbox-home"
+        _seed_credentials(home, "staging")
+
+        target = home / "environments" / "staging" / "config.json"
+        assert target.exists()
+        assert oct(target.stat().st_mode)[-3:] == "600"
 
 
 class TestTierSanity:

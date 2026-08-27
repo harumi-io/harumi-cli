@@ -51,6 +51,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -290,7 +291,14 @@ PLAN: tuple[Step, ...] = (
 
 def load_surface() -> dict[str, dict]:
     """The committed CLI contract, keyed by command path."""
-    data = json.loads(SURFACE_PATH.read_text())
+    if not SURFACE_PATH.exists():
+        raise SystemExit(
+            f"{SURFACE_PATH} not found. Run: python scripts/emit_cli_surface.py > cli-surface.json"
+        )
+    try:
+        data = json.loads(SURFACE_PATH.read_text())
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{SURFACE_PATH} is malformed: {exc}") from exc
     return {command["path"]: command for command in data["commands"]}
 
 
@@ -392,12 +400,6 @@ def _split_opts(param: dict) -> set[str]:
         if "/" in opt:
             names.update(part for part in opt.split("/") if part.startswith("-"))
     return names
-
-
-def _positional_count_required(command: dict) -> int:
-    return sum(
-        1 for param in command["params"] if not param["opts"][0].startswith("-") and param["required"]
-    )
 
 
 # Placeholders filled from the environment rather than captured from output.
@@ -509,7 +511,10 @@ class Runner:
         if step.capture == "project":
             binding = self.workdir / ".harumi" / "config.json"
             if binding.exists():
-                project_id = json.loads(binding.read_text()).get("project_id", "")
+                try:
+                    project_id = json.loads(binding.read_text()).get("project_id", "")
+                except (json.JSONDecodeError, OSError):
+                    project_id = ""
                 if project_id:
                     return str(project_id)
         if step.capture_re:
@@ -521,7 +526,7 @@ class Runner:
     def run_plan(self) -> list[Result]:
         self.context.update(
             {
-                "canary": f"livecheck-{time.strftime('%Y%m%d-%H%M%S')}",
+                "canary": _canary_name(),
                 "seed": str(self._seed_file()),
                 "spec": str(self._seed_dashboard()),
                 "tmp": str(self.tmpdir),
@@ -579,6 +584,13 @@ def _format(result: Result) -> str:
 # Wiring ----------------------------------------------------------------------
 
 
+def _canary_name() -> str:
+    """A timestamp alone collides if two runs start in the same second (e.g. a
+    scheduled job overlapping a manual one); the random suffix makes that a
+    non-issue without needing any cross-run coordination."""
+    return f"livecheck-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+
+
 def _build_env(env_name: str, home: Path) -> dict[str, str]:
     process_env = dict(os.environ)
     process_env["HARUMI_HOME"] = str(home)
@@ -618,11 +630,14 @@ def _seed_credentials(home: Path, env_name: str) -> str:
             f"or set HARUMI_LIVE_REFRESH_TOKEN (preferred in CI — a stale access token self-heals)."
         )
     shutil.copy2(existing, target)
+    target.chmod(0o600)
     # Carry the saved org across too, so `org members` and `config set-org` have
     # something real to point at.
     env_config = source / "environments" / env_name / "config.json"
     if env_config.exists():
-        shutil.copy2(env_config, target_dir / "config.json")
+        env_config_target = target_dir / "config.json"
+        shutil.copy2(env_config, env_config_target)
+        env_config_target.chmod(0o600)
     return str(existing)
 
 
