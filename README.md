@@ -111,3 +111,41 @@ pytest
 ```
 
 All tests are offline (SSE parser + mocked HTTP transport) — no live backend required.
+
+### Checking the CLI against a real backend
+
+The offline suite proves the CLI *builds* the right request; it cannot prove a
+deployed backend accepts it. `scripts/live_check.py` closes that gap by driving
+the real binary through a dependency-ordered lifecycle against a disposable
+"canary" project it creates and then deletes.
+
+```bash
+python scripts/live_check.py --plan          # print the plan + coverage ledger, run nothing
+python scripts/live_check.py                 # staging (default)
+python scripts/live_check.py --include-run    # also queue a real solver run (costs compute)
+python scripts/live_check.py --env production --allow-prod
+```
+
+Every run ends with a ledger: which of the CLI's commands it covered, and which
+it did not *with the reason*. Commands that cannot be driven against a live
+backend at all — `login` needs a code from a real mailbox, `org invite` emails a
+real person, the `datasources` group needs a reachable customer database — are
+classified in `TIERS` with a stated reason, so an untested command is a recorded
+decision rather than an oversight. Adding a CLI command without classifying it
+fails `tests/test_live_check.py`.
+
+Authentication is non-interactive: the harness copies your existing session for
+the target environment into a throwaway `HARUMI_HOME`, or mints one from
+`HARUMI_LIVE_REFRESH_TOKEN` / `HARUMI_LIVE_ACCESS_TOKEN` (prefer the refresh
+token in CI — a stale access token self-heals). It works in a copy on purpose:
+any request may refresh and rewrite `credentials.json`, and a harness run should
+not rotate your own session.
+
+There is also a thin pytest entry point, deselected by default:
+
+```bash
+pytest -m live
+```
+
+Staging requires the VPN. Production needs the second `--allow-prod` opt-in
+because the run creates real rows in a real workspace.
