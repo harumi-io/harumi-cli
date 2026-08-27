@@ -331,13 +331,19 @@ harumi datasources list [--project ID] [--api-url URL] [--org ORG]
 harumi datasources get NAME [--project ID]
 harumi datasources add NAME --type TYPE [--host H] [--port P] [--database D] [--username U]
                             [--use-proxy] [--proxy-host H] [--proxy-port P] [--proxy-server-name N]
+                            [--proxy-tls-ca-cert PATH] [--proxy-tls-client-cert PATH]
+                            [--proxy-tls-client-key PATH]
                             [--project ID]
 harumi datasources update NAME [--name NEW_NAME] [--type T] [--host H] [--port P] [--database D]
                                [--username U] [--set-credentials] [--use-proxy/--no-use-proxy]
-                               [--proxy-host H] [--proxy-port P] [--proxy-server-name N] [--project ID]
+                               [--proxy-host H] [--proxy-port P] [--proxy-server-name N]
+                               [--proxy-tls-ca-cert PATH] [--proxy-tls-client-cert PATH]
+                               [--proxy-tls-client-key PATH] [--project ID]
 harumi datasources remove NAME [--yes] [--project ID]
 harumi datasources test --type TYPE --host H --port P --database D --username U
                         [--use-proxy] [--proxy-host H] [--proxy-port P] [--proxy-server-name N]
+                        [--proxy-tls-ca-cert PATH] [--proxy-tls-client-cert PATH]
+                        [--proxy-tls-client-key PATH]
 harumi datasources query NAME --sql "SELECT ..." [--limit N] [--csv PATH] [--project ID]
 ```
 
@@ -346,6 +352,8 @@ harumi datasources query NAME --sql "SELECT ..." [--limit N] [--csv PATH] [--pro
 **Credentials are always prompted, never a flag.** `add`, `update --set-credentials`, and `test` each prompt with `typer.prompt(hide_input=True)`. This is deliberate — secrets must never land in shell history, process listings, or `--help` output. The server stores credentials in AWS SSM (SecureString) and never returns them; `get`/`list` responses have no credential field.
 
 **`type`** must be one of `postgresql | mysql | sqlserver | oracle`.
+
+**Proxy mTLS.** A datasource only reachable through the mTLS proxy needs `--use-proxy` together with the complete set: `--proxy-host`, `--proxy-port`, and all three of `--proxy-tls-ca-cert`, `--proxy-tls-client-cert`, `--proxy-tls-client-key`. Those three take **file paths**, not inline values, so a PEM never lands in shell history; the CLI reads each file and sends the contents, which the server stores in the same SSM bundle as the password. `--proxy-server-name` defaults to `vpnproxy.harumi.io` server-side. `add` and `test` reject an incomplete set locally, before prompting for credentials, listing each missing flag. `update` sends only the certs you pass, so any one of them can be rotated on its own without resupplying the others.
 
 **`add`** calls `POST /datasources/{project_id}` — the backend tests the connection before persisting, so a bad host/credentials fails the `add` with the same error `test` would surface.
 
