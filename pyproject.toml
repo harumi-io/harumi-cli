@@ -80,3 +80,10 @@ asyncio_mode = "auto"
 # needs this — the console-script entrypoint doesn't put the repo root on
 # sys.path on its own.
 pythonpath = ["."]
+markers = [
+    "live: drives the real CLI against a deployed backend (scripts/live_check.py). Needs credentials, and the VPN for staging.",
+]
+# The suite's contract is that `pytest -q` is offline and side-effect free, so
+# the live marker is opt-in: run it with `pytest -m live`. Without this, CI would
+# try to create real projects and fail on missing credentials.
+addopts = "-m 'not live'"

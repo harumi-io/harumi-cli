@@ -1,0 +1,244 @@
+"""Offline guards for the live-check harness (scripts/live_check.py).
+
+The harness itself only runs against a deployed backend, which means the part
+most likely to be wrong — a mistyped flag, a missing required argument, a step
+that reads an id nothing captured — would otherwise only surface mid-run, on a
+real environment, after a real project had been created. These tests move all of
+that to normal CI.
+
+They also lock in the property that makes the coverage ledger meaningful: every
+command in cli-surface.json is classified, so adding a command forces an
+explicit decision instead of silently widening the untested gap.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from scripts.live_check import (
+    CANARY,
+    LOCAL,
+    MANUAL,
+    PLAN,
+    READ,
+    TIERS,
+    Runner,
+    Step,
+    ledger,
+    load_surface,
+    validate_plan,
+)
+
+
+class TestPlanIsValid:
+    def test_the_committed_plan_has_no_problems(self):
+        """The single assertion that covers mistyped flags, missing required
+        arguments, unknown commands, forward references and a missing teardown.
+        Each of those failure modes is exercised individually below."""
+        assert validate_plan() == []
+
+    def test_every_command_in_the_surface_is_classified(self):
+        surface = set(load_surface())
+        assert surface - set(TIERS) == set(), "new command(s) need a tier in live_check.TIERS"
+        assert set(TIERS) - surface == set(), "TIERS names command(s) that no longer exist"
+
+    def test_no_manual_command_is_ever_executed(self):
+        """The safety property: a command classified as unsafe (emails a real
+        person, deletes a real org) must not appear in the executed plan."""
+        executed = {step.path for step in PLAN}
+        manual = {path for path, (tier, _) in TIERS.items() if tier == MANUAL}
+        assert executed & manual == set()
+
+    def test_every_manual_command_explains_itself(self):
+        for path, (tier, note) in TIERS.items():
+            if tier == MANUAL:
+                assert note, f"{path} is MANUAL without a reason, so the ledger can't justify the gap"
+
+    def test_the_canary_is_created_before_anything_uses_it_and_deleted_last(self):
+        paths = [step.path for step in PLAN]
+        assert paths.index("projects create") < paths.index("repo put")
+        assert paths.index("projects delete") > paths.index("repo put")
+        delete = next(step for step in PLAN if step.path == "projects delete")
+        assert delete.teardown, "delete must be a teardown step or a mid-plan failure leaks the project"
+
+    def test_project_deletion_only_ever_targets_the_captured_canary(self):
+        """A hardcoded id here would delete someone's real project."""
+        delete = next(step for step in PLAN if step.path == "projects delete")
+        assert "{project}" in delete.args
+
+    def test_compute_costing_steps_are_gated(self):
+        for step in PLAN:
+            if step.path in {"run", "runs get", "runs cancel", "outputs"}:
+                assert step.gated, f"{step.path} costs real compute and must need --include-run"
+
+
+class TestValidationActuallyCatchesMistakes:
+    """A validator that cannot fail is worse than none — it reads as coverage
+    while proving nothing. These pin each failure mode it is supposed to catch.
+    """
+
+    @pytest.fixture
+    def patched(self, monkeypatch):
+        def apply(plan=None, tiers=None):
+            if plan is not None:
+                monkeypatch.setattr("scripts.live_check.PLAN", plan)
+            if tiers is not None:
+                monkeypatch.setattr("scripts.live_check.TIERS", tiers)
+            return validate_plan()
+
+        return apply
+
+    def test_unknown_flag_is_rejected(self, patched):
+        problems = patched(plan=PLAN + (Step("whoami", ("--not-a-flag",)),))
+        assert any("unknown flag --not-a-flag" in p for p in problems)
+
+    def test_missing_required_positional_is_rejected(self, patched):
+        problems = patched(plan=PLAN + (Step("projects get"),))
+        assert any("positional" in p for p in problems)
+
+    def test_missing_required_option_is_rejected(self, patched):
+        # `schedules add` requires --cron.
+        problems = patched(plan=PLAN + (Step("schedules add", ("--project", "p")),))
+        assert any("--cron" in p for p in problems)
+
+    def test_nonexistent_command_is_rejected(self, patched):
+        problems = patched(plan=PLAN + (Step("repo teleport"),))
+        assert any("not a real command" in p for p in problems)
+
+    def test_executing_a_manual_command_is_rejected(self, patched):
+        problems = patched(plan=PLAN + (Step("org delete", ("org-1", "--yes")),))
+        assert any("MANUAL" in p for p in problems)
+
+    def test_using_an_id_before_it_is_captured_is_rejected(self, patched):
+        problems = patched(plan=(Step("projects get", ("{project}",)),))
+        assert any("before anything captures it" in p for p in problems)
+
+    def test_an_unclassified_command_is_reported_not_crashed(self, patched):
+        """Regression: this raised KeyError instead of reporting the problem."""
+        problems = patched(tiers={k: v for k, v in TIERS.items() if k != "specs"})
+        assert any("not classified" in p for p in problems)
+
+    def test_a_manual_command_without_a_reason_is_rejected(self, patched):
+        problems = patched(tiers={**TIERS, "org delete": (MANUAL, "")})
+        assert any("no reason" in p for p in problems)
+
+    def test_dropping_the_teardown_is_rejected(self, patched):
+        problems = patched(plan=tuple(s for s in PLAN if s.path != "projects delete"))
+        assert any("leak the canary" in p for p in problems)
+
+
+class TestLedger:
+    def test_static_ledger_accounts_for_every_command(self):
+        report = ledger()
+        total = len(report["covered"]) + len(report["manual"]) + len(report["gap"])
+        assert total == len(TIERS)
+
+    def test_the_committed_plan_leaves_no_unexplained_gap(self):
+        """Anything automatable but uncovered is a real gap. Closing it means
+        either planning a step or reclassifying with a stated reason."""
+        assert ledger()["gap"] == []
+
+    def test_a_partial_run_reports_the_shortfall(self):
+        report = ledger({"whoami", "specs"})
+        assert report["covered"] == ["specs", "whoami"]
+        assert any("projects list" in line for line in report["gap"])
+
+
+class TestRunnerSubstitution:
+    def _runner(self, tmp_path, **kwargs):
+        return Runner(
+            binary="harumi",
+            env_name="staging",
+            workdir=tmp_path,
+            tmpdir=tmp_path,
+            include_run=False,
+            **kwargs,
+        )
+
+    def test_a_missing_dependency_skips_instead_of_sending_a_literal_brace(self, tmp_path):
+        """Without this, a failed capture would send the literal '{project}' to
+        the backend and the failure would look like an API bug."""
+        runner = self._runner(tmp_path)
+        result = runner.execute(Step("projects get", ("{project}",)))
+        assert result.status == "skip"
+        assert "unresolved" in result.detail
+
+    def test_gated_steps_are_skipped_without_include_run(self, tmp_path):
+        runner = self._runner(tmp_path)
+        assert runner.execute(Step("run", gated=True)).status == "skip"
+
+    def test_the_project_id_is_read_from_the_binding_not_scraped_from_output(self, tmp_path):
+        """The .harumi binding is a contract; the printed line is cosmetic."""
+        (tmp_path / ".harumi").mkdir()
+        (tmp_path / ".harumi" / "config.json").write_text(json.dumps({"project_id": "bound-id-123"}))
+        runner = self._runner(tmp_path)
+        captured = runner._capture(Step("projects create", capture="project"), "Created project (id=printed-id)")
+        assert captured == "bound-id-123"
+
+    def test_a_uuid_is_recovered_from_output_when_there_is_no_binding(self, tmp_path):
+        runner = self._runner(tmp_path)
+        captured = runner._capture(
+            Step("schedules add", capture="schedule"),
+            "Created schedule 3f8b1c2d-4e5a-6b7c-8d9e-0f1a2b3c4d5e (cron=0 3 * * *, UTC).",
+        )
+        assert captured == "3f8b1c2d-4e5a-6b7c-8d9e-0f1a2b3c4d5e"
+
+    def test_run_captures_the_run_id_not_the_execution_log_id(self, tmp_path):
+        """`harumi run` prints execution_log_id first and run_id second, but
+        `runs get` only accepts the latter. Taking "the first UUID" here would
+        404 on a live backend — a failure that cannot show up offline.
+        """
+        step = next(s for s in PLAN if s.path == "run")
+        stdout = (
+            "Queued (execution_log_id=aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa, "
+            "run_id=bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb). status=queued"
+        )
+        assert self._runner(tmp_path)._capture(step, stdout) == "bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb"
+
+
+class TestTierSanity:
+    def test_read_and_local_tiers_never_mutate(self):
+        """Tier names are load-bearing: READ/LOCAL is the promise that makes
+        running against production acceptable."""
+        mutating_verbs = {"create", "delete", "remove", "add", "set", "rm", "put", "mv", "rename", "update"}
+        for path, (tier, _) in TIERS.items():
+            if tier in {READ, LOCAL}:
+                leaf = path.split()[-1]
+                assert leaf not in mutating_verbs or tier == LOCAL, (
+                    f"{path} is classified {tier} but its verb suggests it mutates"
+                )
+
+    def test_canary_steps_all_scope_themselves_to_a_project(self):
+        """A canary-tier command with no project scope would act on the account
+        at large."""
+        exempt = {"projects create", "init", "config set-org", "env use", "run", "outputs"}
+        for step in PLAN:
+            if TIERS[step.path][0] != CANARY or step.path in exempt:
+                continue
+            assert "{project}" in step.args or "{share}" in step.args or "{schedule}" in step.args, (
+                f"{step.path} mutates without scoping to the canary"
+            )
+
+
+@pytest.mark.live
+def test_the_cli_works_against_a_deployed_backend():
+    """The only test here that touches a network.
+
+    Deselected by default (`addopts = -m 'not live'`); run it deliberately:
+
+        pytest -m live                       # staging
+        HARUMI_LIVE_ENV=production pytest -m live
+
+    Failures name the command and the backend's own error message. Prefer
+    `python scripts/live_check.py` for day-to-day use — it prints the coverage
+    ledger, which this wrapper does not.
+    """
+    import os
+
+    from scripts.live_check import main
+
+    env = os.environ.get("HARUMI_LIVE_ENV", "staging")
+    argv = ["--env", env] + (["--allow-prod"] if env == "production" else [])
+    assert main(argv) == 0, "see the PASS/FAIL lines above for the failing command"
