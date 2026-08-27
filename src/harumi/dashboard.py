@@ -1,33 +1,32 @@
-"""The dashboard spec widget contract — a mirror of `WIDGET_SCHEMAS` in
-harumi-platform's `packages/ui/src/dashboard/schema.ts`.
+"""The dashboard spec widget contract, loaded from the generated schema artifact.
 
-# ponytail: this is a hand-maintained mirror of `WIDGET_SCHEMAS` — harumi-cli
-# has no dependency on that TS package (or on ai-solver, which keeps its own
-# mirror), so there's no automated way to keep these in sync; a change to
-# one that isn't ported to the others silently makes this module accept (or
-# reject) a widget shape the platform disagrees with. Ceiling: three
-# hand-synced copies (harumi-platform, ai-solver, harumi-cli), with the
-# field contract (toml key + required + enum values) pinned by an identical
-# literal in each repo's test suite (`schema.test.ts`,
-# `tests/agents/test_dashboard_tools.py`, `tests/test_dashboard.py` here) so
-# a field-level change fails every suite until it's ported — prose-only doc
-# drift is still uncaught. Upgrade path: have harumi-api serve
-# `WIDGET_SCHEMAS` as JSON (generated from schema.ts at build time) and have
-# this module fetch that instead of hardcoding it. Whoever edits
-# `WIDGET_SCHEMAS` in schema.ts must update this file (and its pinned test)
-# in the same change — see harumi-platform's dashboard-widgets cursor rule.
+`WIDGET_SCHEMAS` below is built at import from ``dashboard-schema.json``, which
+harumi-platform generates from ``packages/ui/src/dashboard/schema.ts`` (the
+canonical source of truth) and vendors here. That replaces what used to be a
+hand-maintained mirror: three copies of the same contract in three repos, kept
+in step only by an identical literal pinned in each repo's test suite, which
+caught a field change only once someone ran the other repo's tests and never
+caught prose drift at all.
 
-Only the machine-checkable contract lives here (toml key, required, enum
-values, and which fields are dot-paths into `output.json`). Prose
-descriptions/examples for humans live in the CLI skill's
-`references/dashboard.md` — drift there is a doc bug, not a broken
+Refreshing it is a copy: ``cp <harumi-platform>/packages/ui/dashboard-schema.json
+src/harumi/dashboard-schema.json``. ``tests/test_dashboard.py`` pins the
+contract the CLI needs out of it, so a platform change that removes a field the
+CLI depends on fails here rather than silently degrading validation.
+
+Only the machine-checkable contract is used here (toml key, required, enum
+values, and which fields are dot-paths into ``output.json``). The artifact also
+carries prose docs and examples for the agent's reference tool; those are
+ignored — human-facing prose for the CLI lives in the skill's
+``references/dashboard.md``, and drift there is a doc bug, not a broken
 validator.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -37,11 +36,14 @@ else:
     import tomli as tomllib  # type: ignore[no-redef]
 
 
+SCHEMA_ARTIFACT_PATH = Path(__file__).with_name("dashboard-schema.json")
+
+
 @dataclass(frozen=True)
 class WidgetField:
     toml_key: str
     required: bool = False
-    kind: str = "string"  # "string" | "enum" | "columns" | "series"
+    kind: str = "string"  # "string" | "number" | "enum" | "columns" | "series"
     values: Optional[Tuple[str, ...]] = None
     # True for fields that are a dot-path into the run's output.json (as
     # opposed to a field name *within* an already-resolved array item, e.g.
@@ -49,36 +51,50 @@ class WidgetField:
     is_output_path: bool = False
 
 
-_CHART_FIELDS: Tuple[WidgetField, ...] = (
-    WidgetField("data_key", required=True, is_output_path=True),
-    WidgetField("x_key", required=True),
-    WidgetField("series", required=True, kind="series"),
-)
+class DashboardSchemaError(RuntimeError):
+    """Raised when the vendored schema artifact is missing or unreadable.
 
-WIDGET_SCHEMAS: Dict[str, Tuple[WidgetField, ...]] = {
-    "metric": (
-        WidgetField("value_key", required=True, is_output_path=True),
-        WidgetField("delta_key", is_output_path=True),
-        WidgetField("format", kind="enum", values=("number", "currency", "percent")),
-        WidgetField("unit"),
-    ),
-    "table": (
-        WidgetField("rows_key", required=True, is_output_path=True),
-        WidgetField("columns", required=True, kind="columns"),
-    ),
-    "line-chart": _CHART_FIELDS,
-    "bar-chart": _CHART_FIELDS,
-    "gantt-chart": (
-        WidgetField("tasks_key", required=True, is_output_path=True),
-        WidgetField("resource_key"),
-        WidgetField("label_key"),
-        WidgetField("start_key"),
-        WidgetField("end_key"),
-        WidgetField("duration_key"),
-        WidgetField("color_key"),
-        WidgetField("time_unit"),
-    ),
-}
+    Fatal rather than falling back to a built-in default: validating against a
+    guessed contract would report a spec as fine while the platform drops half
+    its widgets, which is worse than refusing to validate.
+    """
+
+
+@lru_cache(maxsize=1)
+def _artifact() -> Dict[str, Any]:
+    try:
+        raw = SCHEMA_ARTIFACT_PATH.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise DashboardSchemaError(f"cannot read {SCHEMA_ARTIFACT_PATH.name}: {exc}") from exc
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name} is not valid JSON: {exc}") from exc
+    if not isinstance(parsed.get("widgetTypes"), list):
+        raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name} has no widgetTypes array")
+    return parsed
+
+
+def _load_widget_schemas() -> Dict[str, Tuple[WidgetField, ...]]:
+    schemas: Dict[str, Tuple[WidgetField, ...]] = {}
+    for widget in _artifact()["widgetTypes"]:
+        fields = tuple(
+            WidgetField(
+                toml_key=field["tomlKey"],
+                required=bool(field.get("required")),
+                kind=field.get("type", "string"),
+                values=tuple(field["values"]) if field.get("values") else None,
+                is_output_path=bool(field.get("isOutputPath")),
+            )
+            for field in widget["fields"]
+        )
+        schemas[widget["type"]] = fields
+    return schemas
+
+
+WIDGET_SCHEMAS: Dict[str, Tuple[WidgetField, ...]] = _load_widget_schemas()
+
+SCHEMA_VERSION: int = int(_artifact().get("version", 0))
 
 
 def _coerce_columns(value: Any) -> Optional[List[Dict[str, str]]]:
@@ -111,6 +127,9 @@ def _coerce_field(value: Any, field: WidgetField) -> Any:
         return None
     if field.kind == "string":
         return value if isinstance(value, str) else None
+    if field.kind == "number":
+        # bool is an int subclass in Python; `true` is not a number here.
+        return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
     if field.kind == "enum":
         return value if isinstance(value, str) and field.values and value in field.values else None
     if field.kind == "columns":
@@ -195,8 +214,8 @@ class DashboardTomlError(ValueError):
     """Raised when a dashboard spec isn't valid TOML."""
 
 
-DASHBOARD_DIR = "dashboard"
-ROOT_DASHBOARD_PATH = "dashboard.toml"
+DASHBOARD_DIR: str = _artifact().get("discovery", {}).get("dashboardDir", "dashboard")
+ROOT_DASHBOARD_PATH: str = _artifact().get("discovery", {}).get("rootPath", "dashboard.toml")
 
 
 def is_dashboard_path(path: str) -> bool:

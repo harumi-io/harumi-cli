@@ -1,8 +1,11 @@
-"""Tests for harumi.dashboard: the drift-pinned widget contract, dashboard
-spec discovery, and the spec validator.
+"""Tests for harumi.dashboard: the widget contract loaded from the vendored
+schema artifact, dashboard spec discovery, and the spec validator.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -17,19 +20,19 @@ from harumi.dashboard import (
     validate_dashboard_toml,
 )
 
-# The identical literal pinned in harumi-platform's `schema.test.ts`
-# (`AI_SOLVER_MIRROR_CONTRACT`) and ai-solver's `test_dashboard_tools.py`
-# (`_EXPECTED_WIDGET_CONTRACT`). A field-level change to `WIDGET_SCHEMAS` in
-# any of the three repos fails that repo's copy of this literal until the
-# change is ported to the other two — see the `ponytail:` comment in
-# harumi.dashboard and harumi-platform's dashboard-widgets cursor rule.
+# The contract the CLI actually depends on, out of the vendored
+# `dashboard-schema.json`. This is no longer a cross-repo hand-sync pin (the
+# artifact is generated from harumi-platform's schema.ts, so the copies can't
+# drift) — it's a guard on the *refresh*: re-vendoring an artifact that drops or
+# renames a field the CLI validates against fails here instead of quietly
+# validating less than it used to.
 _EXPECTED_WIDGET_CONTRACT = {
-    "metric": ["value_key!", "delta_key", "format[number|currency|percent]", "unit"],
-    "table": ["rows_key!", "columns!"],
-    "line-chart": ["data_key!", "x_key!", "series!"],
-    "bar-chart": ["data_key!", "x_key!", "series!"],
+    "metric": ["value_key!*", "delta_key*", "format[number|currency|percent]", "unit"],
+    "table": ["rows_key!*", "columns!"],
+    "line-chart": ["data_key!*", "x_key!", "series!"],
+    "bar-chart": ["data_key!*", "x_key!", "series!"],
     "gantt-chart": [
-        "tasks_key!",
+        "tasks_key!*",
         "resource_key",
         "label_key",
         "start_key",
@@ -41,19 +44,39 @@ _EXPECTED_WIDGET_CONTRACT = {
 }
 
 
-def test_widget_contract_matches_the_cross_repo_pinned_literal():
+def test_widget_contract_matches_the_vendored_schema_artifact():
+    """`!` marks required, `*` a dot-path into output.json, `[a|b]` an enum's values."""
     contract = {
         type_: [
             field.toml_key
             + ("!" if field.required else "")
+            + ("*" if field.is_output_path else "")
             + (f"[{'|'.join(field.values)}]" if field.kind == "enum" else "")
             for field in fields
         ]
         for type_, fields in WIDGET_SCHEMAS.items()
     }
-    # Failing here means: port the change to harumi-platform's schema.ts and
-    # ai-solver's dashboard_tools.py (and their pinned test literals) too.
+    # Failing here means the re-vendored artifact changed the contract. Check
+    # that the change is intended, then update this literal.
     assert contract == _EXPECTED_WIDGET_CONTRACT
+
+
+def test_schema_artifact_is_loaded_not_hardcoded():
+    """The whole point of vendoring: an unreadable artifact must fail loudly
+    rather than fall back to a stale built-in contract that reports a broken
+    spec as fine."""
+    from harumi.dashboard import SCHEMA_ARTIFACT_PATH, SCHEMA_VERSION, DashboardSchemaError, _artifact
+
+    assert SCHEMA_ARTIFACT_PATH.is_file(), "the artifact ships inside the package"
+    assert SCHEMA_VERSION >= 1
+
+    _artifact.cache_clear()
+    try:
+        with mock.patch.object(Path, "read_text", side_effect=OSError("boom")):
+            with pytest.raises(DashboardSchemaError):
+                _artifact()
+    finally:
+        _artifact.cache_clear()
 
 
 class TestParseWidgetEntry:
