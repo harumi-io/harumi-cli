@@ -70,6 +70,8 @@ def _artifact() -> Dict[str, Any]:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name} is not valid JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name} is not a JSON object")
     if not isinstance(parsed.get("widgetTypes"), list):
         raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name} has no widgetTypes array")
     return parsed
