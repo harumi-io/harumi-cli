@@ -30,7 +30,11 @@
           "as": "format",
           "type": "enum",
           "required": false,
-          "values": ["number", "currency", "percent"],
+          "values": [
+            "number",
+            "currency",
+            "percent"
+          ],
           "isOutputPath": false,
           "doc": "Display format. \"currency\" is USD; \"percent\" expects a 0-1 fraction."
         },
