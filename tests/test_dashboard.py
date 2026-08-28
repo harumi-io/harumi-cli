@@ -41,6 +41,22 @@ _EXPECTED_WIDGET_CONTRACT = {
         "color_key",
         "time_unit",
     ],
+    "timeline": [
+        "items_key!*",
+        "resource_key",
+        "label_key",
+        "start_key",
+        "end_key",
+        "duration_key",
+        "color_key",
+        "id_key",
+        "regions_key*",
+        "region_start_key",
+        "region_end_key",
+        "region_label_key",
+        "region_resource_key",
+        "time_unit",
+    ],
 }
 
 
@@ -328,6 +344,54 @@ value_key = "objective"
         widgets, issues = validate_dashboard_toml(raw)
         assert len(widgets) == 1
         assert issues == []
+
+
+class TestValidateTimeline:
+    """The point of re-vendoring: before the refresh `harumi dashboard validate`
+    called a valid timeline spec an unknown type and dropped it."""
+
+    def test_a_full_timeline_spec_validates(self):
+        raw = """
+[[widgets]]
+type = "timeline"
+id = "schedule"
+title = "Machine schedule"
+items_key = "schedule"
+id_key = "op"
+regions_key = "breaks"
+region_resource_key = "maquina"
+time_unit = "h"
+"""
+        widgets, issues = validate_dashboard_toml(
+            raw, output={"schedule": [{"resource": "M1"}], "breaks": []}
+        )
+        assert len(widgets) == 1
+        assert issues == []
+
+    def test_a_timeline_missing_its_required_key_is_dropped(self):
+        raw = """
+[[widgets]]
+type = "timeline"
+id = "schedule"
+title = "Machine schedule"
+"""
+        widgets, issues = validate_dashboard_toml(raw)
+        assert widgets == []
+        assert len(issues) == 1 and issues[0].dropped is True
+
+    def test_an_unresolved_regions_path_is_reported(self):
+        """`regions_key` is a dot-path into output.json, so a typo in it must be
+        caught the same way `items_key` is — not silently render zero bands."""
+        raw = """
+[[widgets]]
+type = "timeline"
+id = "schedule"
+title = "Machine schedule"
+items_key = "schedule"
+regions_key = "paradas"
+"""
+        _, issues = validate_dashboard_toml(raw, output={"schedule": [{"resource": "M1"}]})
+        assert any("paradas" in issue.message for issue in issues)
 
 
 class TestPickDashboardPaths:
