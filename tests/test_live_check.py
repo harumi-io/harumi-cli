@@ -75,14 +75,18 @@ class TestPlanIsValid:
     def test_the_canary_is_created_before_anything_uses_it_and_deleted_last(self):
         paths = [step.path for step in PLAN]
         assert paths.index("projects create") < paths.index("repo put")
-        assert paths.index("projects delete") > paths.index("repo put")
-        delete = next(step for step in PLAN if step.path == "projects delete")
-        assert delete.teardown, "delete must be a teardown step or a mid-plan failure leaks the project"
+        deletes = [step for step in PLAN if step.path == "projects delete"]
+        assert deletes, "expected at least one `projects delete` teardown step"
+        for delete in deletes:
+            assert delete.teardown, "delete must be a teardown step or a mid-plan failure leaks the project"
 
-    def test_project_deletion_only_ever_targets_the_captured_canary(self):
-        """A hardcoded id here would delete someone's real project."""
-        delete = next(step for step in PLAN if step.path == "projects delete")
-        assert "{project}" in delete.args
+    def test_project_deletion_only_ever_targets_a_captured_id(self):
+        """A hardcoded id here would delete someone's real project. `import`
+        creates an independent second project, so it gets its own delete
+        targeting its own captured id rather than reusing {project}."""
+        deletes = [step for step in PLAN if step.path == "projects delete"]
+        targets = {delete.args[0] for delete in deletes}
+        assert targets == {"{project}", "{import_project}"}
 
     def test_compute_costing_steps_are_gated(self):
         for step in PLAN:
@@ -294,6 +298,15 @@ class TestRunnerSubstitution:
         )
         assert status.stdout.strip() == ""
 
+    def test_seed_import_folder_has_no_project_dependency(self, tmp_path):
+        """`import` never takes --project — it always creates a new project —
+        so its input folder must be independently buildable with no {project}
+        substitution, unlike every other CANARY step."""
+        runner = self._runner(tmp_path)
+        folder = runner._seed_import_folder()
+        assert folder.is_dir()
+        assert (folder / "main.py").exists()
+
 
 class TestLoadSurface:
     def test_a_missing_cli_surface_json_gives_an_actionable_message_not_a_traceback(self, monkeypatch, tmp_path):
@@ -361,13 +374,16 @@ class TestTierSanity:
     def test_canary_steps_all_scope_themselves_to_a_project(self):
         """A canary-tier command with no project scope would act on the account
         at large."""
-        exempt = {"projects create", "init", "config set-org", "env use", "run", "outputs"}
+        exempt = {"projects create", "import", "init", "config set-org", "env use", "run", "outputs"}
         for step in PLAN:
             if TIERS[step.path][0] != CANARY or step.path in exempt:
                 continue
-            assert "{project}" in step.args or "{share}" in step.args or "{schedule}" in step.args, (
-                f"{step.path} mutates without scoping to the canary"
-            )
+            assert (
+                "{project}" in step.args
+                or "{share}" in step.args
+                or "{schedule}" in step.args
+                or "{import_project}" in step.args
+            ), f"{step.path} mutates without scoping to the canary"
 
 
 @pytest.mark.live
