@@ -483,6 +483,23 @@ class Runner:
                 capture_output=True,
                 text=True,
                 timeout=600,
+                # Hidden prompts (secrets set, share set-password) call
+                # getpass.getpass(), which opens /dev/tty *directly* and only
+                # falls back to stdin if that open fails. Without this, the
+                # child inherits our controlling terminal, getpass reads from
+                # it instead of `input=` above, and the run hangs forever
+                # waiting on a terminal nothing is typing into. Detaching the
+                # child into its own session makes /dev/tty unavailable to it,
+                # so getpass falls back to the stdin we actually provided.
+                #
+                # ponytail: this also means Ctrl-C no longer reaches the child
+                # directly (it's outside the terminal's foreground process
+                # group), so a hang for any *other* reason now leaves an
+                # orphaned `harumi` process running until its own 600s timeout
+                # instead of dying with the parent. Upgrade path if that shows
+                # up in practice: use Popen instead of run() and explicitly
+                # os.killpg() on KeyboardInterrupt/timeout.
+                start_new_session=True,
             )
         except subprocess.TimeoutExpired:
             return Result(step, argv, "fail", "timed out after 600s", time.monotonic() - started)
@@ -538,20 +555,24 @@ class Runner:
         main_steps = [s for s in PLAN if not s.teardown]
         teardown = [s for s in PLAN if s.teardown]
 
-        for step in main_steps:
-            result = self.execute(step)
-            self.results.append(result)
-            print(_format(result), flush=True)
-            # A failed `projects create` means nothing downstream can work; stop
-            # early rather than emitting forty confusing skips. Teardown still runs.
-            if result.status == "fail" and step.path == "projects create":
-                print("  canary project was not created — skipping to teardown", flush=True)
-                break
-
-        for step in teardown:
-            result = self.execute(step)
-            self.results.append(result)
-            print(_format(result), flush=True)
+        try:
+            for step in main_steps:
+                result = self.execute(step)
+                self.results.append(result)
+                print(_format(result), flush=True)
+                # A failed `projects create` means nothing downstream can work;
+                # stop early rather than emitting forty confusing skips.
+                if result.status == "fail" and step.path == "projects create":
+                    print("  canary project was not created — skipping to teardown", flush=True)
+                    break
+        finally:
+            # Teardown must run even on Ctrl-C or an unexpected exception —
+            # not just the checked `projects create` failure above — or the
+            # canary project leaks on the real backend.
+            for step in teardown:
+                result = self.execute(step)
+                self.results.append(result)
+                print(_format(result), flush=True)
 
         return self.results
 
@@ -721,6 +742,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"sandbox: {sandbox}\n")
 
         results = runner.run_plan()
+    except KeyboardInterrupt:
+        # run_plan()'s own try/finally already ran teardown (deleting the
+        # canary) before this unwinds here, so it is safe to just stop.
+        print("\nInterrupted — teardown ran for whatever had already been created.")
+        return 130
     finally:
         if args.keep:
             print(f"\nsandbox kept at {sandbox}")
