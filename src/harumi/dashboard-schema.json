@@ -1,0 +1,426 @@
+{
+  "version": 2,
+  "discovery": {
+    "dashboardDir": "dashboard",
+    "rootPath": "dashboard.toml"
+  },
+  "widgetTypes": [
+    {
+      "type": "metric",
+      "description": "A single KPI tile — a value with an optional delta.",
+      "fields": [
+        {
+          "tomlKey": "value_key",
+          "as": "valueKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": true,
+          "doc": "Dot-path into the run output payload, e.g. \"totals.revenue\"."
+        },
+        {
+          "tomlKey": "delta_key",
+          "as": "deltaKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": true,
+          "doc": "Optional dot-path to a delta/comparison value shown alongside the metric."
+        },
+        {
+          "tomlKey": "format",
+          "as": "format",
+          "type": "enum",
+          "required": false,
+          "values": [
+            "number",
+            "currency",
+            "percent"
+          ],
+          "isOutputPath": false,
+          "doc": "Display format. \"currency\" is USD; \"percent\" expects a 0-1 fraction."
+        },
+        {
+          "tomlKey": "unit",
+          "as": "unit",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Suffix appended to a \"number\"-formatted value, e.g. \"kg\"."
+        }
+      ],
+      "dataExample": {
+        "totals": {
+          "revenue": 812300
+        }
+      },
+      "tomlExample": "[[widgets]]\ntype = \"metric\"\nid = \"revenue\"\ntitle = \"Total revenue\"\nvalue_key = \"totals.revenue\"\nformat = \"currency\""
+    },
+    {
+      "type": "table",
+      "description": "A sortable data grid bound to an array of row objects.",
+      "fields": [
+        {
+          "tomlKey": "rows_key",
+          "as": "rowsKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": true,
+          "doc": "Dot-path to an array of row objects in the run output payload."
+        },
+        {
+          "tomlKey": "columns",
+          "as": "columns",
+          "type": "columns",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "One or more `{ key, label? }` entries, in display order. `key` is a top-level field on each row (not a dot-path)."
+        }
+      ],
+      "dataExample": {
+        "breakdown": [
+          {
+            "name": "Item A",
+            "value": 52400
+          }
+        ]
+      },
+      "tomlExample": "[[widgets]]\ntype = \"table\"\nid = \"breakdown\"\ntitle = \"Breakdown\"\nrows_key = \"breakdown\"\ncolumns = [\n  { key = \"name\", label = \"Name\" },\n  { key = \"value\", label = \"Value\" },\n]"
+    },
+    {
+      "type": "line-chart",
+      "description": "A line chart — good for a value trending over time.",
+      "fields": [
+        {
+          "tomlKey": "data_key",
+          "as": "dataKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": true,
+          "doc": "Dot-path to an array of data points in the run output payload."
+        },
+        {
+          "tomlKey": "x_key",
+          "as": "xKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "The data point field to use as the category/x-axis value."
+        },
+        {
+          "tomlKey": "series",
+          "as": "series",
+          "type": "series",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "One or more `{ key, label?, color? }` entries — each renders as its own line/bar."
+        }
+      ],
+      "dataExample": {
+        "timeseries": [
+          {
+            "label": "Mon",
+            "value": 412
+          },
+          {
+            "label": "Tue",
+            "value": 398
+          }
+        ]
+      },
+      "tomlExample": "[[widgets]]\ntype = \"line-chart\"\nid = \"trend\"\ntitle = \"Objective value over time\"\ndata_key = \"timeseries\"\nx_key = \"label\"\nseries = [{ key = \"value\", label = \"Objective value\" }]"
+    },
+    {
+      "type": "bar-chart",
+      "description": "A bar chart — good for comparing values across categories.",
+      "fields": [
+        {
+          "tomlKey": "data_key",
+          "as": "dataKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": true,
+          "doc": "Dot-path to an array of data points in the run output payload."
+        },
+        {
+          "tomlKey": "x_key",
+          "as": "xKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "The data point field to use as the category/x-axis value."
+        },
+        {
+          "tomlKey": "series",
+          "as": "series",
+          "type": "series",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "One or more `{ key, label?, color? }` entries — each renders as its own line/bar."
+        }
+      ],
+      "dataExample": {
+        "breakdown": [
+          {
+            "name": "Warehouse A",
+            "value": 52400
+          },
+          {
+            "name": "Warehouse B",
+            "value": 38900
+          }
+        ]
+      },
+      "tomlExample": "[[widgets]]\ntype = \"bar-chart\"\nid = \"breakdown-chart\"\ntitle = \"Cost by warehouse\"\ndata_key = \"breakdown\"\nx_key = \"name\"\nseries = [{ key = \"value\", label = \"Cost\" }]"
+    },
+    {
+      "type": "gantt-chart",
+      "description": "A resource-row Gantt chart on a numeric time axis — the common shape for scheduling/job-shop solver results (one row per machine/resource, one bar per task).",
+      "fields": [
+        {
+          "tomlKey": "tasks_key",
+          "as": "tasksKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": true,
+          "doc": "Dot-path to an array of task objects in the run output payload."
+        },
+        {
+          "tomlKey": "resource_key",
+          "as": "resourceKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Task field naming the resource/machine its row is grouped under. Defaults to \"resource\"."
+        },
+        {
+          "tomlKey": "label_key",
+          "as": "labelKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Task field for its display label. Defaults to \"task\"."
+        },
+        {
+          "tomlKey": "start_key",
+          "as": "startKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Task field for its numeric start time. Defaults to \"start\"."
+        },
+        {
+          "tomlKey": "end_key",
+          "as": "endKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Task field for its numeric end time. Set either this or `duration_key` — `end_key` wins when both are set, and a task resolving neither is dropped from the chart."
+        },
+        {
+          "tomlKey": "duration_key",
+          "as": "durationKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Task field for a numeric duration, added to `start_key`, for solvers that emit start+duration. Read only when `end_key` is unset."
+        },
+        {
+          "tomlKey": "color_key",
+          "as": "colorKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Task field naming a categorical group (e.g. a job spanning several tasks), colored from a stable palette."
+        },
+        {
+          "tomlKey": "time_unit",
+          "as": "timeUnit",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Suffix appended to axis tick labels and tooltip times, e.g. \"min\"."
+        }
+      ],
+      "dataExample": {
+        "schedule": [
+          {
+            "resource": "Machine 1",
+            "task": "Job A op1",
+            "start": 0,
+            "end": 45
+          },
+          {
+            "resource": "Machine 1",
+            "task": "Job B op1",
+            "start": 45,
+            "end": 90
+          },
+          {
+            "resource": "Machine 2",
+            "task": "Job A op2",
+            "start": 45,
+            "end": 120,
+            "group": "Job A"
+          }
+        ]
+      },
+      "tomlExample": "[[widgets]]\ntype = \"gantt-chart\"\nid = \"schedule\"\ntitle = \"Machine schedule\"\ntasks_key = \"schedule\"\ntime_unit = \"min\""
+    },
+    {
+      "type": "timeline",
+      "description": "A resource-row timeline on a numeric time axis. Supersedes `gantt-chart`: interrupted work folds into one item drawn with gaps, non-working spans render as background bands, the axis is drag-to-zoom, a `[clock]` playhead shows as a now-marker, and rows it cannot draw are reported instead of silently dropped.",
+      "fields": [
+        {
+          "tomlKey": "items_key",
+          "as": "itemsKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": true,
+          "doc": "Dot-path to an array of interval objects in the run output payload."
+        },
+        {
+          "tomlKey": "resource_key",
+          "as": "resourceKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Item field naming the resource/machine its row is grouped under. Defaults to \"resource\"."
+        },
+        {
+          "tomlKey": "label_key",
+          "as": "labelKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Item field for its display label. Defaults to \"task\"."
+        },
+        {
+          "tomlKey": "start_key",
+          "as": "startKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Item field for its numeric start time. Defaults to \"start\"."
+        },
+        {
+          "tomlKey": "end_key",
+          "as": "endKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Item field for its numeric end time. Set either this or `duration_key` — `end_key` wins when both are set."
+        },
+        {
+          "tomlKey": "duration_key",
+          "as": "durationKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Item field for a numeric duration, added to `start_key`, for solvers that emit start+duration. Read only when `end_key` is unset."
+        },
+        {
+          "tomlKey": "color_key",
+          "as": "colorKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Item field naming a categorical group, colored from a stable palette."
+        },
+        {
+          "tomlKey": "id_key",
+          "as": "idKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Item field identifying the logical task a row belongs to. Rows sharing a value on one resource fold into a single interrupted item drawn with gaps, instead of separate bars that hide the fact they are one job."
+        },
+        {
+          "tomlKey": "regions_key",
+          "as": "regionsKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": true,
+          "doc": "Dot-path to an array of non-working spans (off-shift, maintenance), drawn as background bands."
+        },
+        {
+          "tomlKey": "region_start_key",
+          "as": "regionStartKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Region field for its numeric start. Defaults to \"start\"."
+        },
+        {
+          "tomlKey": "region_end_key",
+          "as": "regionEndKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Region field for its numeric end. Defaults to \"end\"."
+        },
+        {
+          "tomlKey": "region_label_key",
+          "as": "regionLabelKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Region field for a label shown on hover."
+        },
+        {
+          "tomlKey": "region_resource_key",
+          "as": "regionResourceKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Region field naming the single resource it applies to. Regions without one apply to every row."
+        },
+        {
+          "tomlKey": "time_unit",
+          "as": "timeUnit",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Suffix appended to axis tick labels and tooltip times, e.g. \"min\"."
+        }
+      ],
+      "dataExample": {
+        "schedule": [
+          {
+            "resource": "Machine 1",
+            "task": "Job A op1",
+            "start": 0,
+            "end": 45
+          },
+          {
+            "resource": "Machine 1",
+            "task": "Job B op1",
+            "op": "B1",
+            "start": 45,
+            "end": 60
+          },
+          {
+            "resource": "Machine 1",
+            "task": "Job B op1",
+            "op": "B1",
+            "start": 75,
+            "end": 90
+          },
+          {
+            "resource": "Machine 2",
+            "task": "Job A op2",
+            "start": 45,
+            "end": 120,
+            "group": "Job A"
+          }
+        ],
+        "breaks": [
+          {
+            "start": 60,
+            "end": 75,
+            "label": "Shift change"
+          }
+        ]
+      },
+      "tomlExample": "[[widgets]]\ntype = \"timeline\"\nid = \"schedule\"\ntitle = \"Machine schedule\"\nitems_key = \"schedule\"\nid_key = \"op\"\nregions_key = \"breaks\"\ntime_unit = \"min\""
+    }
+  ]
+}

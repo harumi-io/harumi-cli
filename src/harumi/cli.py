@@ -119,11 +119,12 @@ from harumi.config import (
     save_git_token,
 )
 from harumi.dashboard import (
-    WIDGET_SCHEMAS,
+    DashboardSchemaError,
     DashboardTomlError,
     local_dashboard_paths,
     pick_dashboard_paths,
     validate_dashboard_toml,
+    widget_schemas,
 )
 from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
 from harumi.git import (
@@ -243,6 +244,12 @@ def _handle_errors(fn):
             _fail(str(exc))
         except HarumiError as exc:
             _fail(str(exc))
+        except DashboardSchemaError as exc:
+            # The vendored widget contract is unusable. Only the dashboard
+            # commands need it, so this surfaces as a normal command failure
+            # rather than a traceback (or, if it were loaded at import, as every
+            # command in the CLI refusing to start).
+            _fail(f"{exc}\nThis is a packaging problem — try reinstalling the CLI.")
         except FileNotFoundError as exc:
             _fail(str(exc))
 
@@ -1581,11 +1588,12 @@ def dashboard_widgets(
     type_: Optional[str] = typer.Option(None, "--type", help="Only show this widget type."),
 ) -> None:
     """Print every dashboard widget type and its required/optional keys."""
-    types = [type_] if type_ else list(WIDGET_SCHEMAS)
+    schemas = widget_schemas()
+    types = [type_] if type_ else list(schemas)
     for t in types:
-        schema = WIDGET_SCHEMAS.get(t)
+        schema = schemas.get(t)
         if schema is None:
-            _fail(f'Unknown widget type "{t}". Known types: {", ".join(WIDGET_SCHEMAS)}')
+            _fail(f'Unknown widget type "{t}". Known types: {", ".join(schemas)}')
 
         table = Table("key", "required", "kind", "values", title=f"[bold]{t}[/bold]")
         for field in schema:
