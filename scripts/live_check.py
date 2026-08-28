@@ -551,6 +551,7 @@ class Runner:
                 "env": self.env_name,
             }
         )
+        self._seed_git_repo()
 
         main_steps = [s for s in PLAN if not s.teardown]
         teardown = [s for s in PLAN if s.teardown]
@@ -581,6 +582,24 @@ class Runner:
         path = self.tmpdir / "seed_main.py"
         path.write_text('print("harumi live check ok")\n')
         return path
+
+    def _seed_git_repo(self) -> None:
+        """`harumi init` and `harumi run` both assume the bound directory came
+        from `git clone`/`git init` — a real project checkout, never an empty
+        folder. Without this, `init` silently skips remote setup ("Not inside
+        a git repo") and `run`'s dirty/unpushed check (plain `git status` /
+        `git rev-list`) fails outright with "not a git repository". Seed one
+        commit so the canary's workdir has the same shape a real checkout
+        would, and `run`'s scratch-push path has a HEAD to parent onto.
+        """
+        target = self.workdir / "main.py"
+        target.write_text(self._seed_file().read_text())
+        git = ["git", "-C", str(self.workdir)]
+        subprocess.run(git + ["init", "-q"], check=True)
+        subprocess.run(git + ["config", "user.email", "livecheck@harumi.io"], check=True)
+        subprocess.run(git + ["config", "user.name", "livecheck"], check=True)
+        subprocess.run(git + ["add", "-A"], check=True)
+        subprocess.run(git + ["commit", "-q", "-m", "livecheck: seed"], check=True)
 
     def _seed_dashboard(self) -> Path:
         """A minimal spec that must validate clean, so any reported issue is a

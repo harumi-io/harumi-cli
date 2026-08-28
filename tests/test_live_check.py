@@ -271,6 +271,29 @@ class TestRunnerSubstitution:
         assert "projects delete" in executed
         assert "logout" in executed
 
+    def test_seed_git_repo_leaves_a_committed_head_the_cli_can_push_from(self, tmp_path):
+        """Regression: `init` silently skips remote setup, and `run`'s dirty/
+        unpushed check errors outright, when the bound directory isn't a real
+        git repo — which an empty tempdir never is. `_seed_git_repo` must
+        leave a workdir indistinguishable (for git's purposes) from a real
+        checkout: a repo with a HEAD commit, so `push_scratch`'s `commit-tree
+        -p HEAD` has a parent to attach to."""
+        runner = self._runner(tmp_path)
+        runner._seed_git_repo()
+
+        assert (tmp_path / ".git").is_dir()
+        assert (tmp_path / "main.py").exists()
+        head = subprocess.run(
+            ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True,
+        )
+        assert head.stdout.strip()
+        status = subprocess.run(
+            ["git", "-C", str(tmp_path), "status", "--porcelain"],
+            capture_output=True, text=True, check=True,
+        )
+        assert status.stdout.strip() == ""
+
 
 class TestLoadSurface:
     def test_a_missing_cli_surface_json_gives_an_actionable_message_not_a_traceback(self, monkeypatch, tmp_path):
