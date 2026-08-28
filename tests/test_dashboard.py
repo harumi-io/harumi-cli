@@ -4,13 +4,12 @@ schema artifact, dashboard spec discovery, and the spec validator.
 
 from __future__ import annotations
 
-from pathlib import Path
+import importlib
 from unittest import mock
 
 import pytest
 
 from harumi.dashboard import (
-    WIDGET_SCHEMAS,
     DashboardTomlError,
     describe_missing_key,
     local_dashboard_paths,
@@ -18,6 +17,7 @@ from harumi.dashboard import (
     pick_dashboard_paths,
     resolve_path,
     validate_dashboard_toml,
+    widget_schemas,
 )
 
 # The contract the CLI actually depends on, out of the vendored
@@ -54,7 +54,7 @@ def test_widget_contract_matches_the_vendored_schema_artifact():
             + (f"[{'|'.join(field.values)}]" if field.kind == "enum" else "")
             for field in fields
         ]
-        for type_, fields in WIDGET_SCHEMAS.items()
+        for type_, fields in widget_schemas().items()
     }
     # Failing here means the re-vendored artifact changed the contract. Check
     # that the change is intended, then update this literal.
@@ -62,21 +62,110 @@ def test_widget_contract_matches_the_vendored_schema_artifact():
 
 
 def test_schema_artifact_is_loaded_not_hardcoded():
-    """The whole point of vendoring: an unreadable artifact must fail loudly
+    """The whole point of vendoring: an unusable artifact must fail loudly
     rather than fall back to a stale built-in contract that reports a broken
     spec as fine."""
-    from harumi.dashboard import SCHEMA_ARTIFACT_PATH, SCHEMA_VERSION, DashboardSchemaError, _artifact
+    from harumi.dashboard import SCHEMA_ARTIFACT_PATH, DashboardSchemaError, _artifact, schema_version
 
     assert SCHEMA_ARTIFACT_PATH.is_file(), "the artifact ships inside the package"
-    assert SCHEMA_VERSION >= 1
+    assert schema_version() >= 1
 
+    # Patch the artifact path's own `read_text`, not `Path.read_text` globally,
+    # so an unrelated file read inside this test can't fail too.
     _artifact.cache_clear()
     try:
-        with mock.patch.object(Path, "read_text", side_effect=OSError("boom")):
+        with mock.patch.object(type(SCHEMA_ARTIFACT_PATH), "read_text", side_effect=OSError("boom")):
             with pytest.raises(DashboardSchemaError):
                 _artifact()
     finally:
         _artifact.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("artifact", "expected_fragment"),
+    [
+        ("not json at all {{{", "not valid JSON"),
+        ('["a", "list"]', "not a JSON object"),
+        ('{"version": 1}', "no widgetTypes"),
+        ('{"version": 1, "widgetTypes": ["nope"]}', "non-object entry"),
+        ('{"version": 1, "widgetTypes": [{"fields": []}]}', "no string type"),
+        ('{"version": 1, "widgetTypes": [{"type": "metric"}]}', "no fields array"),
+        (
+            '{"version": 1, "widgetTypes": [{"type": "metric", "fields": [{"required": true}]}]}',
+            "no tomlKey",
+        ),
+        # A typo in a field's type would otherwise make that field impossible to
+        # satisfy — validation would silently accept widgets the platform drops,
+        # the exact failure this contract exists to catch.
+        (
+            '{"version": 1, "widgetTypes": [{"type": "metric", "fields": '
+            '[{"tomlKey": "value_key", "type": "strnig"}]}]}',
+            'unknown type "strnig"',
+        ),
+        (
+            '{"version": 1, "widgetTypes": [{"type": "metric", "fields": '
+            '[{"tomlKey": "format", "type": "enum"}]}]}',
+            "enum with no values",
+        ),
+    ],
+)
+def test_malformed_artifact_raises_a_clear_error(artifact, expected_fragment, tmp_path, monkeypatch):
+    """A broken artifact must produce DashboardSchemaError, not a KeyError or a
+    quietly weakened contract."""
+    import harumi.dashboard as dashboard_module
+    from harumi.dashboard import DashboardSchemaError
+
+    path = tmp_path / "dashboard-schema.json"
+    path.write_text(artifact, encoding="utf-8")
+    monkeypatch.setattr(dashboard_module, "SCHEMA_ARTIFACT_PATH", path)
+
+    dashboard_module._artifact.cache_clear()
+    dashboard_module.widget_schemas.cache_clear()
+    try:
+        with pytest.raises(DashboardSchemaError) as exc:
+            dashboard_module.widget_schemas()
+        assert expected_fragment in str(exc.value)
+    finally:
+        dashboard_module._artifact.cache_clear()
+        dashboard_module.widget_schemas.cache_clear()
+
+
+def test_bad_version_raises_rather_than_coercing(tmp_path, monkeypatch):
+    """`int()` would turn 1.9 into 1 and blow up on "v1" with a TypeError."""
+    import harumi.dashboard as dashboard_module
+    from harumi.dashboard import DashboardSchemaError
+
+    path = tmp_path / "dashboard-schema.json"
+    path.write_text('{"version": "v1", "widgetTypes": []}', encoding="utf-8")
+    monkeypatch.setattr(dashboard_module, "SCHEMA_ARTIFACT_PATH", path)
+
+    dashboard_module._artifact.cache_clear()
+    try:
+        with pytest.raises(DashboardSchemaError, match="must be an integer"):
+            dashboard_module.schema_version()
+    finally:
+        dashboard_module._artifact.cache_clear()
+
+
+def test_importing_the_cli_does_not_read_the_artifact():
+    """Regression guard. `cli.py` imports `harumi.dashboard` at module level, so
+    loading the contract eagerly would make a corrupt artifact break *every*
+    command — `harumi --version`, `harumi login` — not just the dashboard ones.
+    The schema this replaced was a hardcoded dict that couldn't fail, so eager
+    loading would be a real regression.
+    """
+    import harumi.dashboard as dashboard_module
+
+    dashboard_module._artifact.cache_clear()
+    dashboard_module.widget_schemas.cache_clear()
+    with mock.patch.object(
+        type(dashboard_module.SCHEMA_ARTIFACT_PATH), "read_text", side_effect=AssertionError("read at import")
+    ):
+        importlib.reload(importlib.import_module("harumi.cli"))
+
+    # And the discovery rule keeps working without the artifact, so
+    # `harumi dashboard list` survives a bad JSON file.
+    assert dashboard_module.pick_dashboard_paths(["dashboard.toml"]) == ["dashboard.toml"]
 
 
 class TestParseWidgetEntry:
