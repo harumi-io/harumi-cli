@@ -14,6 +14,7 @@ explicit decision instead of silently widening the untested gap.
 from __future__ import annotations
 
 import json
+import subprocess
 
 import pytest
 
@@ -25,6 +26,7 @@ from scripts.live_check import (
     READ,
     REPO_ROOT,
     TIERS,
+    Result,
     Runner,
     Step,
     _seed_credentials,
@@ -211,6 +213,22 @@ class TestRunnerSubstitution:
         )
         assert self._runner(tmp_path)._capture(step, stdout) == "bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb"
 
+    def test_execute_detaches_the_child_so_hidden_prompts_read_stdin_not_the_tty(self, tmp_path, monkeypatch):
+        """Regression: `secrets set` / `share set-password` prompt via
+        getpass.getpass(), which opens /dev/tty directly and ignores a piped
+        stdin unless the child has no controlling terminal. Without
+        start_new_session=True this hangs forever instead of reading the
+        password the harness already supplies via `input=`."""
+        captured_kwargs = {}
+
+        def fake_run(argv, **kwargs):
+            captured_kwargs.update(kwargs)
+            return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+        monkeypatch.setattr("scripts.live_check.subprocess.run", fake_run)
+        self._runner(tmp_path).execute(Step("whoami"))
+        assert captured_kwargs.get("start_new_session") is True
+
     def test_two_canary_names_generated_in_the_same_second_do_not_collide(self):
         """A bare timestamp collides if two runs start in the same second (e.g.
         a scheduled job overlapping a manual run) — `projects create` would
@@ -231,6 +249,27 @@ class TestRunnerSubstitution:
             "Created project (id=11111111-2222-3333-4444-555555555555).",
         )
         assert captured == "11111111-2222-3333-4444-555555555555"
+
+    def test_teardown_runs_even_when_a_main_step_raises(self, tmp_path, monkeypatch):
+        """Regression: run_plan()'s main loop had no try/finally, so a
+        KeyboardInterrupt (or any other exception) during the main steps would
+        skip straight past `projects delete` / `logout` and leak the canary
+        project on the real backend."""
+        executed: list[str] = []
+
+        def fake_execute(step):
+            executed.append(step.path)
+            if step.path == "repo put":
+                raise KeyboardInterrupt
+            return Result(step, [], "ok")
+
+        runner = self._runner(tmp_path)
+        monkeypatch.setattr(runner, "execute", fake_execute)
+        with pytest.raises(KeyboardInterrupt):
+            runner.run_plan()
+
+        assert "projects delete" in executed
+        assert "logout" in executed
 
 
 class TestLoadSurface:
