@@ -106,7 +106,7 @@ TIERS: dict[str, tuple[str, str]] = {
     "projects rename": (CANARY, ""),
     "projects delete": (CANARY, "teardown; only ever the canary id"),
     "init": (CANARY, "binds a throwaway directory to the canary"),
-    "import": (MANUAL, "needs a project export directory produced out of band"),
+    "import": (CANARY, "creates a project from a throwaway folder, so it is self-contained like `projects create`"),
     # -- repo -----------------------------------------------------------------
     "repo ls": (READ, ""),
     "repo dir": (READ, ""),
@@ -238,6 +238,11 @@ PLAN: tuple[Step, ...] = (
     Step("repo rm", ("livecheck/renamed.py", "--yes", "--project", "{project}", "-m", "livecheck: rm")),
     Step("repo download", ("--output", "{tmp}/repo.zip", "--project", "{project}")),
     Step("notebooks", ("--project", "{project}")),
+    # -- import: turns a plain folder into its own second project ------------
+    # Independent of the canary project above — `import` never takes
+    # --project, it always creates a new one — so it gets its own capture
+    # key and its own teardown delete instead of reusing {project}.
+    Step("import", ("{import_folder}", "--project-name", "{canary}-import"), capture="import_project"),
     # -- secrets --------------------------------------------------------------
     Step("secrets set", ("LIVECHECK_TOKEN", "--project", "{project}"), stdin="livecheck-value\n"),
     Step("secrets list", ("--project", "{project}")),
@@ -278,6 +283,7 @@ PLAN: tuple[Step, ...] = (
     # -- teardown -------------------------------------------------------------
     Step("config set-org", ("{org}",)),
     Step("env use", ("{env}",)),
+    Step("projects delete", ("{import_project}", "--yes"), teardown=True),
     Step("projects delete", ("{project}", "--yes"), teardown=True),
     Step("logout", teardown=True),
 )
@@ -403,7 +409,7 @@ def _split_opts(param: dict) -> set[str]:
 
 
 # Placeholders filled from the environment rather than captured from output.
-_RUNTIME_PLACEHOLDERS = frozenset({"canary", "seed", "spec", "tmp", "org", "env"})
+_RUNTIME_PLACEHOLDERS = frozenset({"canary", "seed", "spec", "import_folder", "tmp", "org", "env"})
 
 
 def ledger(exercised: Optional[set[str]] = None) -> dict[str, list[str]]:
@@ -546,6 +552,7 @@ class Runner:
                 "canary": _canary_name(),
                 "seed": str(self._seed_file()),
                 "spec": str(self._seed_dashboard()),
+                "import_folder": str(self._seed_import_folder()),
                 "tmp": str(self.tmpdir),
                 "org": self.org,
                 "env": self.env_name,
@@ -582,6 +589,18 @@ class Runner:
         path = self.tmpdir / "seed_main.py"
         path.write_text('print("harumi live check ok")\n')
         return path
+
+    def _seed_import_folder(self) -> Path:
+        """A plain folder for `harumi import` to turn into a new project.
+
+        `import` accepts any directory — there is no export manifest or
+        schema to satisfy — and `push_folder()` (git.py) `git init`s its own
+        throwaway repo in-place, so this just needs something in it.
+        """
+        folder = self.tmpdir / "import-seed"
+        folder.mkdir(exist_ok=True)
+        (folder / "main.py").write_text('print("harumi live check import ok")\n')
+        return folder
 
     def _seed_git_repo(self) -> None:
         """`harumi init` and `harumi run` both assume the bound directory came
