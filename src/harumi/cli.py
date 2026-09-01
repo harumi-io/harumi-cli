@@ -6,7 +6,6 @@
     harumi profile show|set
     harumi specs
     harumi templates
-    harumi notebooks [--project <id>]
     harumi init --project <id> [--api-url <url>] [--git-url <url>]
     harumi import [path] [--from-git <url>] [--project-name <name>]
     harumi run [--branch <b>] [--commit <sha>] [--command <c>] [--kernel <k>]
@@ -608,33 +607,6 @@ def templates(
     for t in items:
         table.add_row(t.id, t.slug, t.name, t.description)
     console.print(table)
-
-
-@app.command()
-@_handle_errors
-def notebooks(
-    project: Optional[str] = typer.Option(None, "--project", help="Only list notebooks for this project."),
-    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
-    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
-) -> None:
-    """List projects and their notebooks."""
-    client = _get_client(api_url=api_url, org=org)
-
-    projects = [p for p in client.list_projects() if not project or p.id == project]
-    if not projects:
-        console.print("No projects found.")
-        return
-
-    for proj in projects:
-        console.print(f"\n[bold]{proj.name}[/bold] (project: {proj.id})")
-        notebook_list = client.list_notebooks(proj.id)
-        if not notebook_list:
-            console.print("  (no notebooks)")
-            continue
-        table = Table("notebook_id", "name")
-        for nb in notebook_list:
-            table.add_row(nb.id, nb.name or "")
-        console.print(table)
 
 
 # ---------------------------------------------------------------------------

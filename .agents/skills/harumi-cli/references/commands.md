@@ -10,7 +10,6 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [config set-org](#config-set-org)
 - [specs](#specs)
 - [templates](#templates)
-- [notebooks](#notebooks)
 - [projects](#projects)
 - [init](#init)
 - [import](#import)
@@ -97,7 +96,7 @@ harumi config set-org <ORG_ID>
 
 Persists `org_id` in `~/.harumi/config.json`; every subsequent request sends it as `X-Organization`.
 
-The header scopes the *read* endpoints (`projects list`, `projects trash`, `notebooks`). Creation reads the workspace from the request body instead, so `projects create` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway.
+The header scopes the *read* endpoints (`projects list`, `projects trash`). Creation reads the workspace from the request body instead, so `projects create` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway.
 
 ## `specs`
 
@@ -114,14 +113,6 @@ harumi templates [--api-url URL] [--org ORG]
 ```
 
 Lists project templates (`id`, `slug`, `name`, `description`) from `GET /templates`. Pass a template's `id` as `projects create --template-id`.
-
-## `notebooks`
-
-```
-harumi notebooks [--project PROJECT_ID] [--api-url URL] [--org ORG]
-```
-
-Lists every project and its notebooks (legacy notebook-centric view; most projects have exactly one). Useful for finding a `PROJECT_ID`, though `harumi projects list` is the more direct way to do that today.
 
 ## `projects`
 

@@ -1,5 +1,5 @@
 {
-  "cli_version": "0.4.2",
+  "cli_version": "0.5.0",
   "commands": [
     {
       "path": "config set-org",
@@ -884,39 +884,6 @@
       "path": "logout",
       "help": "Clear the stored local session for the active environment.",
       "params": []
-    },
-    {
-      "path": "notebooks",
-      "help": "List projects and their notebooks.",
-      "params": [
-        {
-          "opts": [
-            "--project"
-          ],
-          "type": "str",
-          "required": false,
-          "default": null,
-          "help": "Only list notebooks for this project."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "type": "str",
-          "required": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "type": "str",
-          "required": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
     },
     {
       "path": "org create",

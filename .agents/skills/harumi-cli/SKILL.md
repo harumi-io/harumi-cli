@@ -36,7 +36,7 @@ harumi init --project <PROJECT_ID>
 
 This fetches the Gitea repo metadata (`GET /projects/{id}/repo`), writes `.harumi/config.json`, and configures the `harumi` git remote for authenticated HTTPS pushes.
 
-Find project IDs with: `harumi projects list` (or `harumi notebooks` for the legacy notebook-centric view).
+Find project IDs with: `harumi projects list`.
 
 **Creating a brand-new project instead of binding to an existing one:**
 
