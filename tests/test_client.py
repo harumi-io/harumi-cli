@@ -1029,6 +1029,26 @@ def test_client_upload_file_to_presigned_url_carries_no_auth_header(tmp_path):
     client.upload_file_to_presigned_url(upload_url, local, "text/csv")
 
 
+def test_client_upload_file_to_presigned_url_streams_with_a_content_length(tmp_path):
+    """The body is streamed from the open file, not read into memory — but it
+    must still carry a Content-Length: S3 rejects a chunked presigned PUT."""
+    _write_credentials()
+    local = tmp_path / "data.csv"
+    local.write_bytes(b"0" * 4096)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["content-length"] == "4096"
+        assert "transfer-encoding" not in {k.lower() for k in request.headers}
+        assert request.content == b"0" * 4096
+        return httpx.Response(200)
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    from harumi.models import FileUploadUrl
+
+    upload_url = FileUploadUrl(url="https://uploads.test/proj-1/data.csv", key="proj-1/data.csv", expires_in=900)
+    client.upload_file_to_presigned_url(upload_url, local, "text/csv")
+
+
 def test_client_upload_file_to_presigned_url_raises_on_error_status(tmp_path):
     _write_credentials()
     local = tmp_path / "data.csv"

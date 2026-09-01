@@ -726,13 +726,22 @@ class Client:
         self, upload_url: FileUploadUrl, local_path: Path, content_type: str
     ) -> None:
         """PUT a local file's bytes straight to S3. No Authorization header —
-        the presigned URL's query string is the only auth it accepts."""
+        the presigned URL's query string is the only auth it accepts.
+
+        Streams from the open handle rather than reading the whole file in:
+        the sync cap allows a single file up to 500 MiB, which is not an
+        amount of memory a CLI on a user's laptop should need. httpx sizes
+        the body with `fstat`, so this still goes out with a `Content-Length`
+        and not `Transfer-Encoding: chunked` — S3 rejects chunked on a
+        presigned PUT.
+        """
         with httpx.Client(timeout=300.0, transport=self.api.transport) as http_client:
-            response = http_client.put(
-                upload_url.url,
-                content=local_path.read_bytes(),
-                headers={"Content-Type": content_type},
-            )
+            with open(local_path, "rb") as f:
+                response = http_client.put(
+                    upload_url.url,
+                    content=f,
+                    headers={"Content-Type": content_type},
+                )
         if response.status_code >= 400:
             raise ApiError(response.status_code, response.text or response.reason_phrase)
 

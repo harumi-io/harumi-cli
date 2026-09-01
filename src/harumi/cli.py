@@ -1629,8 +1629,11 @@ def files_put(
 
     existing = client.list_project_files(project_id)
     file_size = local_path.stat().st_size
+    # Uploading to a path that already exists overwrites that object, so the file
+    # it displaces must not be counted — otherwise replacing a file in a project
+    # sitting at the cap is refused even though the totals wouldn't move.
     violation = check_project_sync_cap(
-        [f.size for f in existing.files], [file_size]
+        [f.size for f in existing.files if f.name != dest_path], [file_size]
     )
     if violation:
         if violation.reason == "file-count":
