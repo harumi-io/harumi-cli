@@ -23,6 +23,9 @@ from harumi.models import (
     ConnectionTestResponse,
     Datasource,
     DatasourceList,
+    DeleteFilesResult,
+    FileDownloadUrl,
+    FileUploadUrl,
     GitCredentials,
     KernelSpec,
     Notebook,
@@ -30,6 +33,7 @@ from harumi.models import (
     OrganizationMember,
     Project,
     ProjectExecuteResponse,
+    ProjectFileList,
     ProjectRun,
     ProjectShareLink,
     ProjectWithRepo,
@@ -685,4 +689,70 @@ class Client:
             "DELETE", f"/projects/{project_id}/share-links/{link_id}/password"
         )
         return ProjectShareLink.model_validate(response.json())
+
+    # -- Project files --------------------------------------------------------
+    # /projects/{id}/files* — a project's non-git file storage, distinct from
+    # the repo (`repo_*` above): uploads land in a shared bucket under this
+    # project's own prefix and appear at `inputs/` inside every run's sandbox.
+    # Mirrors `harumi-platform`'s `use-project-files.ts` hooks. The presigned
+    # PUT/GET URLs carry their own auth in the query string and must NOT go
+    # through `self.api` — adding this client's Authorization/X-Organization
+    # headers to them would invalidate the signature.
+
+    def list_project_files(self, project_id: str) -> ProjectFileList:
+        response = self.api.request("GET", f"/projects/{project_id}/files")
+        return ProjectFileList.model_validate(response.json())
+
+    def create_file_upload_url(
+        self, project_id: str, path: str, content_type: str = "application/octet-stream"
+    ) -> FileUploadUrl:
+        response = self.api.request(
+            "POST",
+            f"/projects/{project_id}/files/upload-url",
+            json={"path": path, "content_type": content_type},
+        )
+        return FileUploadUrl.model_validate(response.json())
+
+    def create_file_download_url(self, project_id: str, path: str) -> FileDownloadUrl:
+        response = self.api.request(
+            "GET",
+            f"/projects/{project_id}/files/download-url",
+            params={"path": path},
+        )
+        return FileDownloadUrl.model_validate(response.json())
+
+    def delete_project_file(self, project_id: str, path: str) -> DeleteFilesResult:
+        response = self.api.request(
+            "DELETE", f"/projects/{project_id}/files", params={"path": path}
+        )
+        return DeleteFilesResult.model_validate(response.json())
+
+    def upload_file_to_presigned_url(
+        self, upload_url: FileUploadUrl, local_path: Path, content_type: str
+    ) -> None:
+        """PUT a local file's bytes straight to S3. No Authorization header —
+        the presigned URL's query string is the only auth it accepts."""
+        with httpx.Client(timeout=300.0, transport=self.api.transport) as http_client:
+            response = http_client.put(
+                upload_url.url,
+                content=local_path.read_bytes(),
+                headers={"Content-Type": content_type},
+            )
+        if response.status_code >= 400:
+            raise ApiError(response.status_code, response.text or response.reason_phrase)
+
+    def download_file_from_presigned_url(
+        self, download_url: FileDownloadUrl, dest_path: Path
+    ) -> None:
+        """GET a file straight from S3 to `dest_path`. No Authorization header,
+        same reasoning as `upload_file_to_presigned_url`."""
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        with httpx.Client(timeout=300.0, transport=self.api.transport) as http_client:
+            with http_client.stream("GET", download_url.url) as response:
+                if response.status_code >= 400:
+                    response.read()
+                    raise ApiError(response.status_code, response.text or response.reason_phrase)
+                with open(dest_path, "wb") as f:
+                    for chunk in response.iter_bytes():
+                        f.write(chunk)
 

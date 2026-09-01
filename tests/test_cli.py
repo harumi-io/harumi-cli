@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from pathlib import Path
 from typer.testing import CliRunner
 
 import harumi.cli as cli
@@ -483,6 +484,124 @@ def test_repo_branch_rm_aborts_without_confirmation(api):
     assert result.exit_code == 0, result.output
     assert "Aborted." in result.output
     assert api.requests == []
+
+
+# ---------------------------------------------------------------------------
+# harumi files
+# ---------------------------------------------------------------------------
+
+def test_files_ls_lists_uploaded_files(api):
+    api.route(
+        "GET",
+        "/api/projects/proj-1/files",
+        {
+            "files": [
+                {"name": "data.csv", "key": "proj-1/data.csv", "last_modified": "2026-01-01T00:00:00Z", "etag": "abc", "size": 42}
+            ],
+            "is_truncated": False,
+        },
+    )
+
+    result = runner.invoke(cli.app, ["files", "ls", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "data.csv" in result.output
+
+
+def test_files_ls_reports_no_files(api):
+    api.route("GET", "/api/projects/proj-1/files", {"files": [], "is_truncated": False})
+
+    result = runner.invoke(cli.app, ["files", "ls", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "No files uploaded." in result.output
+
+
+def test_files_put_uploads_and_defaults_remote_path_to_local_name(api, tmp_path, monkeypatch):
+    local = tmp_path / "data.csv"
+    local.write_text("a,b\n1,2\n")
+    api.route("GET", "/api/projects/proj-1/files", {"files": [], "is_truncated": False})
+    api.route("POST", "/api/projects/proj-1/files/upload-url", {"url": "https://s3.test/proj-1/data.csv", "key": "proj-1/data.csv", "expires_in": 900})
+
+    put_calls = []
+
+    def fake_upload(self, upload_url, path, content_type):
+        put_calls.append((upload_url.url, path, content_type))
+
+    monkeypatch.setattr(Client, "upload_file_to_presigned_url", fake_upload)
+
+    result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "Uploaded" in result.output
+    assert put_calls == [("https://s3.test/proj-1/data.csv", local, "text/csv")]
+    body = api.body_for("POST", "/api/projects/proj-1/files/upload-url")
+    assert body["path"] == "data.csv"
+
+
+def test_files_put_rejects_a_missing_local_file(api, tmp_path):
+    result = runner.invoke(
+        cli.app, ["files", "put", str(tmp_path / "ghost.csv"), "--project", "proj-1"]
+    )
+
+    assert result.exit_code != 0
+    assert api.requests == []
+
+
+def test_files_put_refuses_when_the_batch_would_exceed_the_file_count_cap(api, tmp_path, monkeypatch):
+    """Mirrors harumi-platform's upload-cap guard: refuse before signing a URL."""
+    local = tmp_path / "one-more.csv"
+    local.write_text("x")
+    existing = [
+        {"name": f"f{i}.csv", "key": f"proj-1/f{i}.csv", "last_modified": "2026-01-01T00:00:00Z", "etag": "e", "size": 1}
+        for i in range(500)
+    ]
+    api.route("GET", "/api/projects/proj-1/files", {"files": existing, "is_truncated": False})
+
+    result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
+
+    assert result.exit_code != 0
+    assert "500-file" in result.output.replace("\n", " ")
+    # Refused before ever asking for a presigned URL.
+    assert not any(r.url.path.endswith("/upload-url") for r in api.requests)
+
+
+def test_files_get_downloads_to_the_remote_files_basename_by_default(api, tmp_path, monkeypatch):
+    api.route("GET", "/api/projects/proj-1/files/download-url", {"url": "https://s3.test/proj-1/data.csv", "expires_in": 900})
+
+    calls = []
+
+    def fake_download(self, download_url, dest_path):
+        calls.append((download_url.url, dest_path))
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        dest_path.write_bytes(b"a,b\n1,2\n")
+
+    monkeypatch.setattr(Client, "download_file_from_presigned_url", fake_download)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["files", "get", "data.csv", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert calls[0][1] == Path("data.csv")
+    assert api.params_for("GET", "/api/projects/proj-1/files/download-url")["path"] == "data.csv"
+
+
+def test_files_rm_aborts_without_confirmation(api):
+    result = runner.invoke(cli.app, ["files", "rm", "data.csv", "--project", "proj-1"], input="n\n")
+
+    assert result.exit_code == 0, result.output
+    assert "Aborted." in result.output
+    assert api.requests == []
+
+
+def test_files_rm_deletes_when_confirmed(api):
+    api.route("DELETE", "/api/projects/proj-1/files", {"deleted": 1})
+
+    result = runner.invoke(cli.app, ["files", "rm", "data.csv", "--project", "proj-1"], input="y\n")
+
+    assert result.exit_code == 0, result.output
+    assert "Deleted" in result.output
+    assert api.params_for("DELETE", "/api/projects/proj-1/files")["path"] == "data.csv"
 
 
 # ---------------------------------------------------------------------------

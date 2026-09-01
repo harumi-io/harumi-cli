@@ -5,7 +5,6 @@ backend or network required.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import httpx
 import pytest
@@ -975,5 +974,106 @@ def test_client_get_profile_and_git_credentials_use_new_paths():
 
     creds = client.get_git_token()
     assert creds.username == "harumi-alice"
+
+
+# ---------------------------------------------------------------------------
+# Project files — presigned upload/download must never carry this client's
+# Authorization/X-Organization headers (they'd invalidate the signature).
+# ---------------------------------------------------------------------------
+
+def test_client_list_project_files():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1/files"
+        return httpx.Response(
+            200,
+            json={
+                "files": [
+                    {"name": "data.csv", "key": "proj-1/data.csv", "last_modified": "2026-01-01T00:00:00Z", "etag": "abc", "size": 42}
+                ],
+                "is_truncated": False,
+            },
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    result = client.list_project_files("proj-1")
+    assert result.files[0].name == "data.csv"
+    assert result.files[0].size == 42
+    assert result.is_truncated is False
+
+
+def test_client_upload_file_to_presigned_url_carries_no_auth_header(tmp_path):
+    """The presigned URL's query string is the only auth it accepts — adding
+    this client's Authorization/X-Organization headers would invalidate the
+    signature, so the PUT must go out with neither."""
+    _write_credentials()
+    local = tmp_path / "data.csv"
+    local.write_text("a,b\n1,2\n")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/proj-1/data.csv"
+        assert "authorization" not in {k.lower() for k in request.headers}
+        assert "x-organization" not in {k.lower() for k in request.headers}
+        assert request.content == b"a,b\n1,2\n"
+        return httpx.Response(200)
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    from harumi.models import FileUploadUrl
+
+    upload_url = FileUploadUrl(
+        url="https://uploads.test.s3.amazonaws.com/proj-1/data.csv?X-Amz-Signature=abc",
+        key="proj-1/data.csv",
+        expires_in=900,
+    )
+    client.upload_file_to_presigned_url(upload_url, local, "text/csv")
+
+
+def test_client_upload_file_to_presigned_url_raises_on_error_status(tmp_path):
+    _write_credentials()
+    local = tmp_path / "data.csv"
+    local.write_text("x")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="Forbidden")
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    from harumi.models import FileUploadUrl
+
+    upload_url = FileUploadUrl(url="https://uploads.test/proj-1/data.csv", key="proj-1/data.csv", expires_in=900)
+    with pytest.raises(ApiError):
+        client.upload_file_to_presigned_url(upload_url, local, "text/csv")
+
+
+def test_client_download_file_from_presigned_url_carries_no_auth_header(tmp_path):
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/proj-1/data.csv"
+        assert "authorization" not in {k.lower() for k in request.headers}
+        return httpx.Response(200, content=b"a,b\n1,2\n")
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    from harumi.models import FileDownloadUrl
+
+    dest = tmp_path / "nested" / "data.csv"
+    download_url = FileDownloadUrl(url="https://uploads.test.s3.amazonaws.com/proj-1/data.csv", expires_in=900)
+    client.download_file_from_presigned_url(download_url, dest)
+
+    assert dest.read_bytes() == b"a,b\n1,2\n"
+
+
+def test_client_delete_project_file():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/projects/proj-1/files"
+        assert request.url.params["path"] == "data.csv"
+        return httpx.Response(200, json={"deleted": 1})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    result = client.delete_project_file("proj-1", "data.csv")
+    assert result.deleted == 1
+
 
 

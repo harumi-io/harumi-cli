@@ -1,5 +1,5 @@
 {
-  "cli_version": "0.4.2",
+  "cli_version": "0.4.3",
   "commands": [
     {
       "path": "config set-org",
@@ -714,6 +714,198 @@
           "required": true,
           "default": null,
           "help": "Environment to make the default (e.g. production, staging)."
+        }
+      ]
+    },
+    {
+      "path": "files get",
+      "help": "Download a file to a local path.",
+      "params": [
+        {
+          "opts": [
+            "remote_path"
+          ],
+          "type": "str",
+          "required": true,
+          "default": null,
+          "help": "File path within the project's files."
+        },
+        {
+          "opts": [
+            "--output",
+            "-o"
+          ],
+          "type": "path",
+          "required": false,
+          "default": null,
+          "help": "Local path to write to (default: the remote file's name)."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "files ls",
+      "help": "List every file uploaded to this project.",
+      "params": [
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "files put",
+      "help": "Upload a local file, refusing an upload that would exceed the run-time sync cap.",
+      "params": [
+        {
+          "opts": [
+            "local_path"
+          ],
+          "type": "path",
+          "required": true,
+          "default": null,
+          "help": "Local file to upload."
+        },
+        {
+          "opts": [
+            "remote_path"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Destination path within the project's files (default: the local file's name)."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "files rm",
+      "help": "Delete an uploaded file.",
+      "params": [
+        {
+          "opts": [
+            "remote_path"
+          ],
+          "type": "str",
+          "required": true,
+          "default": null,
+          "help": "File path within the project's files."
+        },
+        {
+          "opts": [
+            "--yes",
+            "-y"
+          ],
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "help": "Skip the confirmation prompt."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "type": "str",
+          "required": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
         }
       ]
     },
