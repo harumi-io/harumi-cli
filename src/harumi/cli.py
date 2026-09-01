@@ -47,6 +47,12 @@ Credentials are only ever prompted interactively (hidden input) — never
 accepted as a flag — and are stored server-side in AWS SSM. `datasources
 query` runs a SELECT/WITH-only, row-capped proxy query so users can validate
 SQL before wiring it into solver code.
+A datasource reachable only through the mTLS proxy needs `--use-proxy` plus
+its whole set: `--proxy-host`, `--proxy-port` and the three
+`--proxy-tls-*` PEM paths. Those take file paths rather than inline values so
+a certificate never lands in shell history; the CLI reads them and the API
+stores them alongside the password in SSM. `datasources update` can rotate
+any one of them on its own.
 
 Dashboards & widgets
 ---------------------
@@ -1965,6 +1971,63 @@ def _prompt_credentials(current: str = "credentials") -> str:
     return typer.prompt(f"Enter {current} (hidden)", hide_input=True)
 
 
+def _read_pem(path: Path, field: str) -> str:
+    """Read a certificate/key file as text, failing clearly if it can't be used."""
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        _fail(f"Could not read {field} from {str(path)!r}: {exc}")
+        raise AssertionError("unreachable")  # _fail always raises
+    if not text.strip():
+        _fail(f"{str(path)!r} is empty — {field} needs the PEM contents.")
+    return text
+
+
+def _proxy_tls_material(
+    ca_cert: Optional[Path],
+    client_cert: Optional[Path],
+    client_key: Optional[Path],
+) -> dict:
+    """Turn the --proxy-tls-* file paths into the PEM strings the API stores in SSM.
+
+    The flags take paths because these are multi-line PEM blobs; passing one
+    inline would mean the certificate ends up in the user's shell history.
+    """
+    paths = {
+        "proxy_tls_ca_cert": ca_cert,
+        "proxy_tls_client_cert": client_cert,
+        "proxy_tls_client_key": client_key,
+    }
+    return {field: _read_pem(path, field) for field, path in paths.items() if path is not None}
+
+
+def _require_complete_proxy_config(
+    proxy_host: Optional[str],
+    proxy_port: Optional[int],
+    material: dict,
+) -> None:
+    """Reject a half-specified --use-proxy before doing any work.
+
+    The API requires the whole set (host, port and all three PEMs) whenever
+    use_proxy is on, so checking here turns a wasted round trip — and a
+    credentials prompt the user would have to answer again — into one message
+    naming every flag that's still missing.
+    """
+    missing = [
+        flag
+        for flag, value in (
+            ("--proxy-host", proxy_host),
+            ("--proxy-port", proxy_port),
+            ("--proxy-tls-ca-cert", material.get("proxy_tls_ca_cert")),
+            ("--proxy-tls-client-cert", material.get("proxy_tls_client_cert")),
+            ("--proxy-tls-client-key", material.get("proxy_tls_client_key")),
+        )
+        if not value
+    ]
+    if missing:
+        _fail("--use-proxy also needs: " + ", ".join(missing) + ".")
+
+
 @datasources_app.command("list")
 @_handle_errors
 def datasources_list(
@@ -2019,6 +2082,9 @@ def datasources_add(
     proxy_host: Optional[str] = typer.Option(None, "--proxy-host", help="Proxy target host. Used when --use-proxy is set."),
     proxy_port: Optional[int] = typer.Option(None, "--proxy-port", help="Proxy target port. Used when --use-proxy is set."),
     proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name", help="Proxy TLS server name. Used when --use-proxy is set."),
+    proxy_tls_ca_cert: Optional[Path] = typer.Option(None, "--proxy-tls-ca-cert", help="Path to the proxy CA certificate PEM. Required with --use-proxy."),
+    proxy_tls_client_cert: Optional[Path] = typer.Option(None, "--proxy-tls-client-cert", help="Path to the client certificate PEM. Required with --use-proxy."),
+    proxy_tls_client_key: Optional[Path] = typer.Option(None, "--proxy-tls-client-key", help="Path to the client private key PEM. Required with --use-proxy."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -2026,6 +2092,12 @@ def datasources_add(
     """Create a new datasource. Credentials are prompted interactively (never a flag)."""
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
+
+    # Read and check the proxy material before prompting, so a missing flag
+    # doesn't cost the user a credentials prompt they have to repeat.
+    tls_material = _proxy_tls_material(proxy_tls_ca_cert, proxy_tls_client_cert, proxy_tls_client_key)
+    if use_proxy:
+        _require_complete_proxy_config(proxy_host, proxy_port, tls_material)
 
     credentials = _prompt_credentials()
 
@@ -2044,6 +2116,7 @@ def datasources_add(
         body["proxy_port"] = proxy_port
         if proxy_server_name:
             body["proxy_server_name"] = proxy_server_name
+        body.update(tls_material)
 
     ds = client.create_datasource(project_id, body)
     console.print(f"[bold green]Created[/bold green] datasource [bold]{ds.name}[/bold] ({ds.type}).")
@@ -2064,6 +2137,9 @@ def datasources_update(
     proxy_host: Optional[str] = typer.Option(None, "--proxy-host", help="Proxy target host. Used when --use-proxy is set."),
     proxy_port: Optional[int] = typer.Option(None, "--proxy-port", help="Proxy target port. Used when --use-proxy is set."),
     proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name", help="Proxy TLS server name. Used when --use-proxy is set."),
+    proxy_tls_ca_cert: Optional[Path] = typer.Option(None, "--proxy-tls-ca-cert", help="Path to a new proxy CA certificate PEM."),
+    proxy_tls_client_cert: Optional[Path] = typer.Option(None, "--proxy-tls-client-cert", help="Path to a new client certificate PEM."),
+    proxy_tls_client_key: Optional[Path] = typer.Option(None, "--proxy-tls-client-key", help="Path to a new client private key PEM."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -2093,6 +2169,11 @@ def datasources_update(
         body["proxy_port"] = proxy_port
     if proxy_server_name:
         body["proxy_server_name"] = proxy_server_name
+    # Certificates are rotatable one at a time: the API keeps whichever parts of
+    # the stored bundle this request doesn't mention, so only the flags actually
+    # passed are sent. Completeness is the API's call, since it alone knows what
+    # the datasource already has.
+    body.update(_proxy_tls_material(proxy_tls_ca_cert, proxy_tls_client_cert, proxy_tls_client_key))
     if set_credentials:
         body["credentials"] = _prompt_credentials()
 
@@ -2136,11 +2217,19 @@ def datasources_test(
     proxy_host: Optional[str] = typer.Option(None, "--proxy-host", help="Proxy target host. Used when --use-proxy is set."),
     proxy_port: Optional[int] = typer.Option(None, "--proxy-port", help="Proxy target port. Used when --use-proxy is set."),
     proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name", help="Proxy TLS server name. Used when --use-proxy is set."),
+    proxy_tls_ca_cert: Optional[Path] = typer.Option(None, "--proxy-tls-ca-cert", help="Path to the proxy CA certificate PEM. Required with --use-proxy."),
+    proxy_tls_client_cert: Optional[Path] = typer.Option(None, "--proxy-tls-client-cert", help="Path to the client certificate PEM. Required with --use-proxy."),
+    proxy_tls_client_key: Optional[Path] = typer.Option(None, "--proxy-tls-client-key", help="Path to the client private key PEM. Required with --use-proxy."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Test a connection without persisting it. Credentials are prompted interactively."""
     client = _get_client(api_url=api_url, org=org)
+
+    tls_material = _proxy_tls_material(proxy_tls_ca_cert, proxy_tls_client_cert, proxy_tls_client_key)
+    if use_proxy:
+        _require_complete_proxy_config(proxy_host, proxy_port, tls_material)
+
     credentials = _prompt_credentials()
 
     body: dict = {
@@ -2157,6 +2246,7 @@ def datasources_test(
         body["proxy_port"] = proxy_port
         if proxy_server_name:
             body["proxy_server_name"] = proxy_server_name
+        body.update(tls_material)
 
     result = client.test_datasource_connection(body)
     if result.success:
