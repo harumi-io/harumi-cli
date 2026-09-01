@@ -471,3 +471,51 @@ class ProjectShareLinkList(BaseModel):
 
     links: list[ProjectShareLink] = Field(default_factory=list)
 
+
+class ProjectFile(BaseModel):
+    """One entry from `GET /projects/{id}/files` — mirrors harumi-api's
+    `ProjectFile` schema (`src/api/projects/schemas.py`)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    key: str
+    last_modified: Optional[datetime] = None
+    etag: Optional[str] = None
+    size: int = 0
+
+
+class ProjectFileList(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    files: list[ProjectFile] = Field(default_factory=list)
+    is_truncated: bool = False
+
+
+class FileUploadUrl(BaseModel):
+    """A presigned S3 `PUT` from `POST /projects/{id}/files/upload-url` —
+    upload the file's bytes directly to `url`, with no Authorization header;
+    the signature in the URL's query string is the only auth it accepts."""
+
+    model_config = ConfigDict(extra="allow")
+
+    url: str
+    key: str
+    expires_in: int
+
+
+class FileDownloadUrl(BaseModel):
+    """A presigned S3 `GET` from `GET /projects/{id}/files/download-url`."""
+
+    model_config = ConfigDict(extra="allow")
+
+    url: str
+    expires_in: int
+
+
+class DeleteFilesResult(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    deleted: int = 0
+
+

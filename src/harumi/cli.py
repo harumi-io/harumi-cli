@@ -16,6 +16,7 @@
     harumi skill install|path
     harumi projects create|list|get|rename|delete
     harumi repo ls|cat|put|rm|mv|download|branches|branch|promote|dir
+    harumi files ls|put|get|rm [--project <id>]
     harumi dashboard widgets|validate [--project <id>]
     harumi share list|get|add|update|remove|rotate|set-password|rm-password [--project <id>]
     harumi datasources list|get|add|update|remove|test|query [--project <id>]
@@ -38,6 +39,16 @@ Repo files
 harumi-api (no local git credential needed for file operations — only
 `git push`/`harumi run`'s scratch-branch path uses the Gitea token). Writes
 always land in a single commit via the batch `repo/changes` endpoint.
+
+Project files
+-------------
+`harumi files` manages a project's non-git file storage — distinct from
+`harumi repo` (git-tracked, lands in a commit): uploads land in a shared
+bucket under the project's own prefix and appear at `inputs/` inside every
+run's sandbox. `files put` refuses an upload that would push the project
+past the same per-project file-count/total-size cap the run-time sync
+enforces, so a bad upload fails at upload time instead of bricking every
+run afterward.
 
 Datasources
 -----------
@@ -100,6 +111,7 @@ from __future__ import annotations
 import base64
 import functools
 import json
+import mimetypes
 import os
 from pathlib import Path
 from typing import Optional
@@ -111,6 +123,7 @@ from rich.table import Table
 from harumi import __version__, auth
 from harumi import skills as skills_mod
 from harumi.client import Client
+from harumi.file_sync_cap import check_project_sync_cap
 from harumi.config import (
     ENVIRONMENTS,
     Config,
@@ -209,6 +222,14 @@ def _get_client(
 def _fail(message: str) -> None:
     err_console.print(f"[bold red]Error:[/bold red] {message}")
     raise typer.Exit(code=1)
+
+
+def _format_bytes(num_bytes: int) -> str:
+    if num_bytes < 1024:
+        return f"{num_bytes} B"
+    if num_bytes < 1024 * 1024:
+        return f"{num_bytes / 1024:.1f} KB"
+    return f"{num_bytes / (1024 * 1024):.1f} MB"
 
 
 def _print_project_workspace(customer_id: Optional[str]) -> None:
@@ -1554,6 +1575,122 @@ def repo_dir(
         last = e.last_commit.message[:60] if e.last_commit else ""
         table.add_row(e.name, e.type, str(e.size or ""), last)
     console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# harumi files
+# ---------------------------------------------------------------------------
+
+files_app = typer.Typer(help="Manage the project's non-git file storage (uploads land at inputs/ inside every run).")
+app.add_typer(files_app, name="files")
+
+
+@files_app.command("ls")
+@_handle_errors
+def files_ls(
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """List every file uploaded to this project."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    file_list = client.list_project_files(project_id)
+    if not file_list.files:
+        console.print("No files uploaded.")
+        return
+
+    table = Table("name", "size", "last_modified")
+    for f in sorted(file_list.files, key=lambda f: f.name):
+        table.add_row(f.name, str(f.size), str(f.last_modified or ""))
+    console.print(table)
+    if file_list.is_truncated:
+        console.print("[yellow]Listing is truncated; this project has more files than shown.[/yellow]")
+
+
+@files_app.command("put")
+@_handle_errors
+def files_put(
+    local_path: Path = typer.Argument(..., help="Local file to upload."),
+    remote_path: Optional[str] = typer.Argument(None, help="Destination path within the project's files (default: the local file's name)."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Upload a local file, refusing an upload that would exceed the run-time sync cap."""
+    project_id = _resolve_project(project)
+
+    if not local_path.is_file():
+        _fail(f"{local_path} is not a file.")
+
+    dest_path = remote_path or local_path.name
+    client = _get_client(api_url=api_url, org=org)
+
+    existing = client.list_project_files(project_id)
+    file_size = local_path.stat().st_size
+    # Uploading to a path that already exists overwrites that object, so the file
+    # it displaces must not be counted — otherwise replacing a file in a project
+    # sitting at the cap is refused even though the totals wouldn't move.
+    violation = check_project_sync_cap(
+        [f.size for f in existing.files if f.name != dest_path], [file_size]
+    )
+    if violation:
+        if violation.reason == "file-count":
+            _fail(
+                f"That upload would bring this project to {violation.would_be} files, "
+                f"over the {violation.limit}-file limit every run enforces. Remove some files first."
+            )
+        else:
+            _fail(
+                f"That upload would bring this project to {_format_bytes(violation.would_be)}, "
+                f"over the {_format_bytes(violation.limit)} limit every run enforces. Remove some files first."
+            )
+
+    content_type = mimetypes.guess_type(str(local_path))[0] or "application/octet-stream"
+    upload_url = client.create_file_upload_url(project_id, dest_path, content_type)
+    client.upload_file_to_presigned_url(upload_url, local_path, content_type)
+    console.print(f"[bold green]Uploaded[/bold green] {local_path} -> {dest_path} ({_format_bytes(file_size)}).")
+
+
+@files_app.command("get")
+@_handle_errors
+def files_get(
+    remote_path: str = typer.Argument(..., help="File path within the project's files."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Local path to write to (default: the remote file's name)."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Download a file to a local path."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    dest_path = output or Path(remote_path.rsplit("/", 1)[-1])
+    download_url = client.create_file_download_url(project_id, remote_path)
+    client.download_file_from_presigned_url(download_url, dest_path)
+    console.print(f"Downloaded {remote_path} -> {dest_path}")
+
+
+@files_app.command("rm")
+@_handle_errors
+def files_rm(
+    remote_path: str = typer.Argument(..., help="File path within the project's files."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Delete an uploaded file."""
+    project_id = _resolve_project(project)
+
+    if not yes and not typer.confirm(f"Delete '{remote_path}' from this project's files? This cannot be undone."):
+        console.print("Aborted.")
+        return
+
+    client = _get_client(api_url=api_url, org=org)
+    result = client.delete_project_file(project_id, remote_path)
+    console.print(f"[bold red]Deleted[/bold red] {result.deleted} file(s).")
 
 
 # ---------------------------------------------------------------------------

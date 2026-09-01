@@ -118,6 +118,11 @@ TIERS: dict[str, tuple[str, str]] = {
     "repo branch-create": (CANARY, ""),
     "repo branch-rm": (CANARY, ""),
     "repo promote": (CANARY, ""),
+    # -- files ------------------------------------------------------------
+    "files ls": (READ, ""),
+    "files put": (CANARY, ""),
+    "files get": (READ, "reads back the file `files put` just uploaded"),
+    "files rm": (CANARY, ""),
     # -- runs -----------------------------------------------------------------
     "run": (CANARY, "queues real sandbox compute, so it is behind --include-run"),
     "runs list": (READ, ""),
@@ -236,6 +241,11 @@ PLAN: tuple[Step, ...] = (
     Step("repo branch-rm", ("livecheck-branch", "--yes", "--project", "{project}")),
     Step("repo rm", ("livecheck/renamed.py", "--yes", "--project", "{project}", "-m", "livecheck: rm")),
     Step("repo download", ("--output", "{tmp}/repo.zip", "--project", "{project}")),
+    # -- files: upload, list, download, delete --------------------------------
+    Step("files put", ("{seed}", "livecheck.py", "--project", "{project}")),
+    Step("files ls", ("--project", "{project}")),
+    Step("files get", ("livecheck.py", "--output", "{tmp}/livecheck-downloaded.py", "--project", "{project}")),
+    Step("files rm", ("livecheck.py", "--yes", "--project", "{project}")),
     # -- import: turns a plain folder into its own second project ------------
     # Independent of the canary project above — `import` never takes
     # --project, it always creates a new one — so it gets its own capture
