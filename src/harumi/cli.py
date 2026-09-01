@@ -261,6 +261,17 @@ def _handle_errors(fn):
             )
         except FileNotFoundError as exc:
             _fail(str(exc))
+        except UnicodeDecodeError:
+            # Every text file this CLI reads is either user-supplied (a PEM, a
+            # dashboard spec, a run-output JSON) or pulled from the project repo,
+            # so non-UTF-8 bytes here mean the wrong path was passed — an honest
+            # mistake, not something worth a traceback. Caught at this boundary
+            # rather than per call site because `_read_pem`, `dashboard validate`'s
+            # --path/--against and its base64 repo-file decode all reach it.
+            _fail(
+                "That file isn't UTF-8 text — check the path points at the text "
+                "file you meant, not a binary one."
+            )
 
     return wrapper
 

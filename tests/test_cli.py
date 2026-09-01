@@ -947,6 +947,43 @@ def test_datasources_add_reports_an_unreadable_cert_path(api, tmp_path):
     assert "nope.pem" in result.output
 
 
+def test_datasources_add_reports_a_binary_cert_file_without_a_traceback(api, tmp_path):
+    """A binary file where a PEM was meant is an honest mistake, so it gets a
+    message rather than a UnicodeDecodeError traceback."""
+    binary = tmp_path / "not-a-cert.png"
+    binary.write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "datasources", "add", "sales_db",
+            "--type", "postgresql",
+            "--use-proxy",
+            "--proxy-host", "vpnproxy.harumi.io",
+            "--proxy-port", "1433",
+            "--proxy-tls-ca-cert", str(binary),
+            "--project", "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "isn't UTF-8 text" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_dashboard_validate_reports_a_binary_spec_without_a_traceback(api, tmp_path):
+    """Same guard, reached from a different command — it lives in _handle_errors,
+    not in the PEM reader."""
+    binary = tmp_path / "dashboard.toml"
+    binary.write_bytes(b"\x00\x81\xfe spec")
+
+    result = runner.invoke(cli.app, ["dashboard", "validate", str(binary)])
+
+    assert result.exit_code == 1
+    assert "isn't UTF-8 text" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_datasources_query_renders_rows_and_the_count(api):
     api.route(
         "POST",
