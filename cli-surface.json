@@ -1,5 +1,5 @@
 {
-  "cli_version": "0.4.3",
+  "cli_version": "0.5.0",
   "commands": [
     {
       "path": "config set-org",
@@ -203,6 +203,33 @@
           "required": false,
           "default": null,
           "help": "Proxy TLS server name. Used when --use-proxy is set."
+        },
+        {
+          "opts": [
+            "--proxy-tls-ca-cert"
+          ],
+          "type": "path",
+          "required": false,
+          "default": null,
+          "help": "Path to the proxy CA certificate PEM. Required with --use-proxy."
+        },
+        {
+          "opts": [
+            "--proxy-tls-client-cert"
+          ],
+          "type": "path",
+          "required": false,
+          "default": null,
+          "help": "Path to the client certificate PEM. Required with --use-proxy."
+        },
+        {
+          "opts": [
+            "--proxy-tls-client-key"
+          ],
+          "type": "path",
+          "required": false,
+          "default": null,
+          "help": "Path to the client private key PEM. Required with --use-proxy."
         },
         {
           "opts": [
@@ -521,6 +548,33 @@
         },
         {
           "opts": [
+            "--proxy-tls-ca-cert"
+          ],
+          "type": "path",
+          "required": false,
+          "default": null,
+          "help": "Path to the proxy CA certificate PEM. Required with --use-proxy."
+        },
+        {
+          "opts": [
+            "--proxy-tls-client-cert"
+          ],
+          "type": "path",
+          "required": false,
+          "default": null,
+          "help": "Path to the client certificate PEM. Required with --use-proxy."
+        },
+        {
+          "opts": [
+            "--proxy-tls-client-key"
+          ],
+          "type": "path",
+          "required": false,
+          "default": null,
+          "help": "Path to the client private key PEM. Required with --use-proxy."
+        },
+        {
+          "opts": [
             "--api-url"
           ],
           "type": "str",
@@ -650,6 +704,33 @@
           "required": false,
           "default": null,
           "help": "Proxy TLS server name. Used when --use-proxy is set."
+        },
+        {
+          "opts": [
+            "--proxy-tls-ca-cert"
+          ],
+          "type": "path",
+          "required": false,
+          "default": null,
+          "help": "Path to a new proxy CA certificate PEM."
+        },
+        {
+          "opts": [
+            "--proxy-tls-client-cert"
+          ],
+          "type": "path",
+          "required": false,
+          "default": null,
+          "help": "Path to a new client certificate PEM."
+        },
+        {
+          "opts": [
+            "--proxy-tls-client-key"
+          ],
+          "type": "path",
+          "required": false,
+          "default": null,
+          "help": "Path to a new client private key PEM."
         },
         {
           "opts": [
@@ -1076,39 +1157,6 @@
       "path": "logout",
       "help": "Clear the stored local session for the active environment.",
       "params": []
-    },
-    {
-      "path": "notebooks",
-      "help": "List projects and their notebooks.",
-      "params": [
-        {
-          "opts": [
-            "--project"
-          ],
-          "type": "str",
-          "required": false,
-          "default": null,
-          "help": "Only list notebooks for this project."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "type": "str",
-          "required": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "type": "str",
-          "required": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
     },
     {
       "path": "org create",

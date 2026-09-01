@@ -941,6 +941,131 @@ def test_datasources_add_prompts_for_credentials_and_never_echoes_them(api):
     assert "hunter2" not in result.output
 
 
+def _write_proxy_certs(tmp_path):
+    ca = tmp_path / "ca.pem"
+    cert = tmp_path / "client.crt"
+    key = tmp_path / "client.key"
+    ca.write_text("-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n")
+    cert.write_text("-----BEGIN CERTIFICATE-----\nclient\n-----END CERTIFICATE-----\n")
+    key.write_text("-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----\n")
+    return ca, cert, key
+
+
+def test_datasources_add_sends_the_proxy_mtls_pem_contents(api, tmp_path):
+    """--use-proxy must ship all three PEMs, or the API rejects the datasource.
+
+    The flags previously stopped at --proxy-host/--proxy-port/--proxy-server-name,
+    so a proxied datasource could not be created at all: the API requires the
+    certificate material whenever use_proxy is on.
+    """
+    api.route("POST", "/api/datasources/proj-1", DATASOURCE, status=201)
+    ca, cert, key = _write_proxy_certs(tmp_path)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "datasources", "add", "sales_db",
+            "--type", "postgresql",
+            "--host", "db.internal",
+            "--use-proxy",
+            "--proxy-host", "vpnproxy.harumi.io",
+            "--proxy-port", "1433",
+            "--proxy-tls-ca-cert", str(ca),
+            "--proxy-tls-client-cert", str(cert),
+            "--proxy-tls-client-key", str(key),
+            "--project", "proj-1",
+        ],
+        input="hunter2\nhunter2\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("POST", "/api/datasources/proj-1")
+    assert body["use_proxy"] is True
+    assert body["proxy_host"] == "vpnproxy.harumi.io"
+    assert body["proxy_port"] == 1433
+    # The file contents travel, not the paths — the API stores these in SSM.
+    assert "ca" in body["proxy_tls_ca_cert"]
+    assert "BEGIN CERTIFICATE" in body["proxy_tls_ca_cert"]
+    assert "client" in body["proxy_tls_client_cert"]
+    assert "BEGIN PRIVATE KEY" in body["proxy_tls_client_key"]
+    assert str(ca) not in str(body)
+    # The private key must not be echoed to the terminal.
+    assert "BEGIN PRIVATE KEY" not in result.output
+
+
+def test_datasources_add_rejects_use_proxy_without_certs_before_prompting(api, tmp_path):
+    """A half-specified --use-proxy fails locally, naming every missing flag.
+
+    Worth doing client-side: the check runs before the credentials prompt, so
+    the user isn't asked for a password only to have the request rejected.
+    """
+    api.route("POST", "/api/datasources/proj-1", DATASOURCE, status=201)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "datasources", "add", "sales_db",
+            "--type", "postgresql",
+            "--host", "db.internal",
+            "--use-proxy",
+            "--proxy-host", "vpnproxy.harumi.io",
+            "--project", "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--proxy-port" in result.output
+    assert "--proxy-tls-ca-cert" in result.output
+    assert "--proxy-tls-client-cert" in result.output
+    assert "--proxy-tls-client-key" in result.output
+    # Nothing should have been sent, and no password should have been asked for.
+    assert api.paths() == []
+
+
+def test_datasources_update_rotates_one_cert_without_resending_the_others(api, tmp_path):
+    """Certificates rotate individually; the API keeps the rest of the bundle."""
+    api.route("PUT", "/api/datasources/proj-1/sales_db", DATASOURCE)
+    _, cert, _ = _write_proxy_certs(tmp_path)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "datasources", "update", "sales_db",
+            "--proxy-tls-client-cert", str(cert),
+            "--project", "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("PUT", "/api/datasources/proj-1/sales_db")
+    assert "client" in body["proxy_tls_client_cert"]
+    # The untouched certs must be absent, not null — the API treats a present
+    # null as "clear this" and would wipe the stored CA and key.
+    assert "proxy_tls_ca_cert" not in body
+    assert "proxy_tls_client_key" not in body
+
+
+def test_datasources_add_reports_an_unreadable_cert_path(api, tmp_path):
+    api.route("POST", "/api/datasources/proj-1", DATASOURCE, status=201)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "datasources", "add", "sales_db",
+            "--type", "postgresql",
+            "--use-proxy",
+            "--proxy-host", "vpnproxy.harumi.io",
+            "--proxy-port", "1433",
+            "--proxy-tls-ca-cert", str(tmp_path / "nope.pem"),
+            "--project", "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "proxy_tls_ca_cert" in result.output
+    assert "nope.pem" in result.output
+
+
 def test_datasources_query_renders_rows_and_the_count(api):
     api.route(
         "POST",

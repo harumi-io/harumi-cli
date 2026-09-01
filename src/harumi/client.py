@@ -28,7 +28,6 @@ from harumi.models import (
     FileUploadUrl,
     GitCredentials,
     KernelSpec,
-    Notebook,
     Organization,
     OrganizationMember,
     Project,
@@ -231,10 +230,6 @@ class Client:
     def delete_project(self, project_id: str) -> Project:
         response = self.api.request("DELETE", f"/projects/{project_id}")
         return Project.model_validate(response.json())
-
-    def list_notebooks(self, project_id: str) -> list[Notebook]:
-        response = self.api.request("GET", f"/projects/{project_id}/notebooks")
-        return [Notebook.model_validate(n) for n in response.json()]
 
     def get_specs(self) -> list[KernelSpec]:
         response = self.api.request("GET", "/sandbox/specs")

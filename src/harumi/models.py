@@ -74,13 +74,6 @@ class Project(BaseModel):
     updated_at: Optional[datetime] = None
 
 
-class Notebook(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    id: str
-    name: Optional[str] = None
-
-
 class InteractiveResult(BaseModel):
     """Aggregated result of a raw SSE execution run (see sse.py).
 
