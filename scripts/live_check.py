@@ -88,7 +88,6 @@ TIERS: dict[str, tuple[str, str]] = {
     # -- discovery ------------------------------------------------------------
     "specs": (READ, "proves real API reachability"),
     "templates": (READ, ""),
-    "notebooks": (READ, ""),
     "outputs": (READ, ""),
     # -- organizations --------------------------------------------------------
     "org list": (READ, ""),
@@ -237,7 +236,6 @@ PLAN: tuple[Step, ...] = (
     Step("repo branch-rm", ("livecheck-branch", "--yes", "--project", "{project}")),
     Step("repo rm", ("livecheck/renamed.py", "--yes", "--project", "{project}", "-m", "livecheck: rm")),
     Step("repo download", ("--output", "{tmp}/repo.zip", "--project", "{project}")),
-    Step("notebooks", ("--project", "{project}")),
     # -- import: turns a plain folder into its own second project ------------
     # Independent of the canary project above — `import` never takes
     # --project, it always creates a new one — so it gets its own capture

@@ -967,39 +967,6 @@
       "params": []
     },
     {
-      "path": "notebooks",
-      "help": "List projects and their notebooks.",
-      "params": [
-        {
-          "opts": [
-            "--project"
-          ],
-          "type": "str",
-          "required": false,
-          "default": null,
-          "help": "Only list notebooks for this project."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "type": "str",
-          "required": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "type": "str",
-          "required": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
       "path": "org create",
       "help": "Create a new organization.",
       "params": [
