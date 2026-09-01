@@ -249,7 +249,11 @@ def _handle_errors(fn):
             # commands need it, so this surfaces as a normal command failure
             # rather than a traceback (or, if it were loaded at import, as every
             # command in the CLI refusing to start).
-            _fail(f"{exc}\nThis is a packaging problem — try reinstalling the CLI.")
+            _fail(
+                f"{exc}\nIf the installed dashboard-schema.json was edited by hand, "
+                "reinstall the CLI. Otherwise this is a packaging bug — please report it "
+                "at https://github.com/harumi-io/harumi-cli/issues"
+            )
         except FileNotFoundError as exc:
             _fail(str(exc))
 

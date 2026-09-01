@@ -5,6 +5,7 @@ schema artifact, dashboard spec discovery, and the spec validator.
 from __future__ import annotations
 
 import importlib
+import json
 from unittest import mock
 
 import pytest
@@ -153,6 +154,33 @@ def test_bad_version_raises_rather_than_coercing(tmp_path, monkeypatch):
 
     path = tmp_path / "dashboard-schema.json"
     path.write_text('{"version": "v1", "widgetTypes": []}', encoding="utf-8")
+    monkeypatch.setattr(dashboard_module, "SCHEMA_ARTIFACT_PATH", path)
+
+    dashboard_module._artifact.cache_clear()
+    try:
+        with pytest.raises(DashboardSchemaError, match="must be an integer"):
+            dashboard_module.schema_version()
+    finally:
+        dashboard_module._artifact.cache_clear()
+
+
+@pytest.mark.parametrize(
+    "version",
+    [1.9, True, False, [1], {"v": 1}, None],
+    ids=["float", "true", "false", "list", "dict", "null"],
+)
+def test_non_integer_version_types_are_rejected(version, tmp_path, monkeypatch):
+    """`test_bad_version_raises_rather_than_coercing` only pins the string case.
+    `True` is the one that needs its own guard: `bool` is an `int` subclass, so
+    the `isinstance(version, int)` check alone would accept `true` as version 1.
+    """
+    import harumi.dashboard as dashboard_module
+    from harumi.dashboard import DashboardSchemaError
+
+    path = tmp_path / "dashboard-schema.json"
+    path.write_text(
+        json.dumps({"version": version, "widgetTypes": []}), encoding="utf-8"
+    )
     monkeypatch.setattr(dashboard_module, "SCHEMA_ARTIFACT_PATH", path)
 
     dashboard_module._artifact.cache_clear()
