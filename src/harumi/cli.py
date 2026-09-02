@@ -6,7 +6,6 @@
     harumi profile show|set
     harumi specs
     harumi templates
-    harumi notebooks [--project <id>]
     harumi init --project <id> [--api-url <url>] [--git-url <url>]
     harumi import [path] [--from-git <url>] [--project-name <name>]
     harumi run [--branch <b>] [--commit <sha>] [--command <c>] [--kernel <k>]
@@ -17,6 +16,7 @@
     harumi skill install|path
     harumi projects create|list|get|rename|delete
     harumi repo ls|cat|put|rm|mv|download|branches|branch|promote|dir
+    harumi files ls|put|get|rm [--project <id>]
     harumi dashboard widgets|validate [--project <id>]
     harumi share list|get|add|update|remove|rotate|set-password|rm-password [--project <id>]
     harumi datasources list|get|add|update|remove|test|query [--project <id>]
@@ -40,6 +40,16 @@ harumi-api (no local git credential needed for file operations — only
 `git push`/`harumi run`'s scratch-branch path uses the Gitea token). Writes
 always land in a single commit via the batch `repo/changes` endpoint.
 
+Project files
+-------------
+`harumi files` manages a project's non-git file storage — distinct from
+`harumi repo` (git-tracked, lands in a commit): uploads land in a shared
+bucket under the project's own prefix and appear at `inputs/` inside every
+run's sandbox. `files put` refuses an upload that would push the project
+past the same per-project file-count/total-size cap the run-time sync
+enforces, so a bad upload fails at upload time instead of bricking every
+run afterward.
+
 Datasources
 -----------
 `harumi datasources` manages project-scoped database connections.
@@ -47,6 +57,12 @@ Credentials are only ever prompted interactively (hidden input) — never
 accepted as a flag — and are stored server-side in AWS SSM. `datasources
 query` runs a SELECT/WITH-only, row-capped proxy query so users can validate
 SQL before wiring it into solver code.
+A datasource reachable only through the mTLS proxy needs `--use-proxy` plus
+its whole set: `--proxy-host`, `--proxy-port` and the three
+`--proxy-tls-*` PEM paths. Those take file paths rather than inline values so
+a certificate never lands in shell history; the CLI reads them and the API
+stores them alongside the password in SSM. `datasources update` can rotate
+any one of them on its own.
 
 Dashboards & widgets
 ---------------------
@@ -95,6 +111,7 @@ from __future__ import annotations
 import base64
 import functools
 import json
+import mimetypes
 import os
 from pathlib import Path
 from typing import Optional
@@ -106,6 +123,7 @@ from rich.table import Table
 from harumi import __version__, auth
 from harumi import skills as skills_mod
 from harumi.client import Client
+from harumi.file_sync_cap import check_project_sync_cap
 from harumi.config import (
     ENVIRONMENTS,
     Config,
@@ -206,6 +224,14 @@ def _fail(message: str) -> None:
     raise typer.Exit(code=1)
 
 
+def _format_bytes(num_bytes: int) -> str:
+    if num_bytes < 1024:
+        return f"{num_bytes} B"
+    if num_bytes < 1024 * 1024:
+        return f"{num_bytes / 1024:.1f} KB"
+    return f"{num_bytes / (1024 * 1024):.1f} MB"
+
+
 def _print_project_workspace(customer_id: Optional[str]) -> None:
     """Report which workspace a freshly-created project landed in.
 
@@ -256,6 +282,17 @@ def _handle_errors(fn):
             )
         except FileNotFoundError as exc:
             _fail(str(exc))
+        except UnicodeDecodeError:
+            # Every text file this CLI reads is either user-supplied (a PEM, a
+            # dashboard spec, a run-output JSON) or pulled from the project repo,
+            # so non-UTF-8 bytes here mean the wrong path was passed — an honest
+            # mistake, not something worth a traceback. Caught at this boundary
+            # rather than per call site because `_read_pem`, `dashboard validate`'s
+            # --path/--against and its base64 repo-file decode all reach it.
+            _fail(
+                "That file isn't UTF-8 text — check the path points at the text "
+                "file you meant, not a binary one."
+            )
 
     return wrapper
 
@@ -612,33 +649,6 @@ def templates(
     for t in items:
         table.add_row(t.id, t.slug, t.name, t.description)
     console.print(table)
-
-
-@app.command()
-@_handle_errors
-def notebooks(
-    project: Optional[str] = typer.Option(None, "--project", help="Only list notebooks for this project."),
-    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
-    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
-) -> None:
-    """List projects and their notebooks."""
-    client = _get_client(api_url=api_url, org=org)
-
-    projects = [p for p in client.list_projects() if not project or p.id == project]
-    if not projects:
-        console.print("No projects found.")
-        return
-
-    for proj in projects:
-        console.print(f"\n[bold]{proj.name}[/bold] (project: {proj.id})")
-        notebook_list = client.list_notebooks(proj.id)
-        if not notebook_list:
-            console.print("  (no notebooks)")
-            continue
-        table = Table("notebook_id", "name")
-        for nb in notebook_list:
-            table.add_row(nb.id, nb.name or "")
-        console.print(table)
 
 
 # ---------------------------------------------------------------------------
@@ -1579,6 +1589,122 @@ def repo_dir(
 
 
 # ---------------------------------------------------------------------------
+# harumi files
+# ---------------------------------------------------------------------------
+
+files_app = typer.Typer(help="Manage the project's non-git file storage (uploads land at inputs/ inside every run).")
+app.add_typer(files_app, name="files")
+
+
+@files_app.command("ls")
+@_handle_errors
+def files_ls(
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """List every file uploaded to this project."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    file_list = client.list_project_files(project_id)
+    if not file_list.files:
+        console.print("No files uploaded.")
+        return
+
+    table = Table("name", "size", "last_modified")
+    for f in sorted(file_list.files, key=lambda f: f.name):
+        table.add_row(f.name, str(f.size), str(f.last_modified or ""))
+    console.print(table)
+    if file_list.is_truncated:
+        console.print("[yellow]Listing is truncated; this project has more files than shown.[/yellow]")
+
+
+@files_app.command("put")
+@_handle_errors
+def files_put(
+    local_path: Path = typer.Argument(..., help="Local file to upload."),
+    remote_path: Optional[str] = typer.Argument(None, help="Destination path within the project's files (default: the local file's name)."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Upload a local file, refusing an upload that would exceed the run-time sync cap."""
+    project_id = _resolve_project(project)
+
+    if not local_path.is_file():
+        _fail(f"{local_path} is not a file.")
+
+    dest_path = remote_path or local_path.name
+    client = _get_client(api_url=api_url, org=org)
+
+    existing = client.list_project_files(project_id)
+    file_size = local_path.stat().st_size
+    # Uploading to a path that already exists overwrites that object, so the file
+    # it displaces must not be counted — otherwise replacing a file in a project
+    # sitting at the cap is refused even though the totals wouldn't move.
+    violation = check_project_sync_cap(
+        [f.size for f in existing.files if f.name != dest_path], [file_size]
+    )
+    if violation:
+        if violation.reason == "file-count":
+            _fail(
+                f"That upload would bring this project to {violation.would_be} files, "
+                f"over the {violation.limit}-file limit every run enforces. Remove some files first."
+            )
+        else:
+            _fail(
+                f"That upload would bring this project to {_format_bytes(violation.would_be)}, "
+                f"over the {_format_bytes(violation.limit)} limit every run enforces. Remove some files first."
+            )
+
+    content_type = mimetypes.guess_type(str(local_path))[0] or "application/octet-stream"
+    upload_url = client.create_file_upload_url(project_id, dest_path, content_type)
+    client.upload_file_to_presigned_url(upload_url, local_path, content_type)
+    console.print(f"[bold green]Uploaded[/bold green] {local_path} -> {dest_path} ({_format_bytes(file_size)}).")
+
+
+@files_app.command("get")
+@_handle_errors
+def files_get(
+    remote_path: str = typer.Argument(..., help="File path within the project's files."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Local path to write to (default: the remote file's name)."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Download a file to a local path."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    dest_path = output or Path(remote_path.rsplit("/", 1)[-1])
+    download_url = client.create_file_download_url(project_id, remote_path)
+    client.download_file_from_presigned_url(download_url, dest_path)
+    console.print(f"Downloaded {remote_path} -> {dest_path}")
+
+
+@files_app.command("rm")
+@_handle_errors
+def files_rm(
+    remote_path: str = typer.Argument(..., help="File path within the project's files."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Delete an uploaded file."""
+    project_id = _resolve_project(project)
+
+    if not yes and not typer.confirm(f"Delete '{remote_path}' from this project's files? This cannot be undone."):
+        console.print("Aborted.")
+        return
+
+    client = _get_client(api_url=api_url, org=org)
+    result = client.delete_project_file(project_id, remote_path)
+    console.print(f"[bold red]Deleted[/bold red] {result.deleted} file(s).")
+
+
+# ---------------------------------------------------------------------------
 # harumi dashboard
 # ---------------------------------------------------------------------------
 
@@ -1965,6 +2091,63 @@ def _prompt_credentials(current: str = "credentials") -> str:
     return typer.prompt(f"Enter {current} (hidden)", hide_input=True)
 
 
+def _read_pem(path: Path, field: str) -> str:
+    """Read a certificate/key file as text, failing clearly if it can't be used."""
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        _fail(f"Could not read {field} from {str(path)!r}: {exc}")
+        raise AssertionError("unreachable")  # _fail always raises
+    if not text.strip():
+        _fail(f"{str(path)!r} is empty — {field} needs the PEM contents.")
+    return text
+
+
+def _proxy_tls_material(
+    ca_cert: Optional[Path],
+    client_cert: Optional[Path],
+    client_key: Optional[Path],
+) -> dict:
+    """Turn the --proxy-tls-* file paths into the PEM strings the API stores in SSM.
+
+    The flags take paths because these are multi-line PEM blobs; passing one
+    inline would mean the certificate ends up in the user's shell history.
+    """
+    paths = {
+        "proxy_tls_ca_cert": ca_cert,
+        "proxy_tls_client_cert": client_cert,
+        "proxy_tls_client_key": client_key,
+    }
+    return {field: _read_pem(path, field) for field, path in paths.items() if path is not None}
+
+
+def _require_complete_proxy_config(
+    proxy_host: Optional[str],
+    proxy_port: Optional[int],
+    material: dict,
+) -> None:
+    """Reject a half-specified --use-proxy before doing any work.
+
+    The API requires the whole set (host, port and all three PEMs) whenever
+    use_proxy is on, so checking here turns a wasted round trip — and a
+    credentials prompt the user would have to answer again — into one message
+    naming every flag that's still missing.
+    """
+    missing = [
+        flag
+        for flag, value in (
+            ("--proxy-host", proxy_host),
+            ("--proxy-port", proxy_port),
+            ("--proxy-tls-ca-cert", material.get("proxy_tls_ca_cert")),
+            ("--proxy-tls-client-cert", material.get("proxy_tls_client_cert")),
+            ("--proxy-tls-client-key", material.get("proxy_tls_client_key")),
+        )
+        if not value
+    ]
+    if missing:
+        _fail("--use-proxy also needs: " + ", ".join(missing) + ".")
+
+
 @datasources_app.command("list")
 @_handle_errors
 def datasources_list(
@@ -2019,6 +2202,9 @@ def datasources_add(
     proxy_host: Optional[str] = typer.Option(None, "--proxy-host", help="Proxy target host. Used when --use-proxy is set."),
     proxy_port: Optional[int] = typer.Option(None, "--proxy-port", help="Proxy target port. Used when --use-proxy is set."),
     proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name", help="Proxy TLS server name. Used when --use-proxy is set."),
+    proxy_tls_ca_cert: Optional[Path] = typer.Option(None, "--proxy-tls-ca-cert", help="Path to the proxy CA certificate PEM. Required with --use-proxy."),
+    proxy_tls_client_cert: Optional[Path] = typer.Option(None, "--proxy-tls-client-cert", help="Path to the client certificate PEM. Required with --use-proxy."),
+    proxy_tls_client_key: Optional[Path] = typer.Option(None, "--proxy-tls-client-key", help="Path to the client private key PEM. Required with --use-proxy."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -2026,6 +2212,12 @@ def datasources_add(
     """Create a new datasource. Credentials are prompted interactively (never a flag)."""
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
+
+    # Read and check the proxy material before prompting, so a missing flag
+    # doesn't cost the user a credentials prompt they have to repeat.
+    tls_material = _proxy_tls_material(proxy_tls_ca_cert, proxy_tls_client_cert, proxy_tls_client_key)
+    if use_proxy:
+        _require_complete_proxy_config(proxy_host, proxy_port, tls_material)
 
     credentials = _prompt_credentials()
 
@@ -2044,6 +2236,7 @@ def datasources_add(
         body["proxy_port"] = proxy_port
         if proxy_server_name:
             body["proxy_server_name"] = proxy_server_name
+        body.update(tls_material)
 
     ds = client.create_datasource(project_id, body)
     console.print(f"[bold green]Created[/bold green] datasource [bold]{ds.name}[/bold] ({ds.type}).")
@@ -2064,6 +2257,9 @@ def datasources_update(
     proxy_host: Optional[str] = typer.Option(None, "--proxy-host", help="Proxy target host. Used when --use-proxy is set."),
     proxy_port: Optional[int] = typer.Option(None, "--proxy-port", help="Proxy target port. Used when --use-proxy is set."),
     proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name", help="Proxy TLS server name. Used when --use-proxy is set."),
+    proxy_tls_ca_cert: Optional[Path] = typer.Option(None, "--proxy-tls-ca-cert", help="Path to a new proxy CA certificate PEM."),
+    proxy_tls_client_cert: Optional[Path] = typer.Option(None, "--proxy-tls-client-cert", help="Path to a new client certificate PEM."),
+    proxy_tls_client_key: Optional[Path] = typer.Option(None, "--proxy-tls-client-key", help="Path to a new client private key PEM."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -2093,6 +2289,11 @@ def datasources_update(
         body["proxy_port"] = proxy_port
     if proxy_server_name:
         body["proxy_server_name"] = proxy_server_name
+    # Certificates are rotatable one at a time: the API keeps whichever parts of
+    # the stored bundle this request doesn't mention, so only the flags actually
+    # passed are sent. Completeness is the API's call, since it alone knows what
+    # the datasource already has.
+    body.update(_proxy_tls_material(proxy_tls_ca_cert, proxy_tls_client_cert, proxy_tls_client_key))
     if set_credentials:
         body["credentials"] = _prompt_credentials()
 
@@ -2136,11 +2337,19 @@ def datasources_test(
     proxy_host: Optional[str] = typer.Option(None, "--proxy-host", help="Proxy target host. Used when --use-proxy is set."),
     proxy_port: Optional[int] = typer.Option(None, "--proxy-port", help="Proxy target port. Used when --use-proxy is set."),
     proxy_server_name: Optional[str] = typer.Option(None, "--proxy-server-name", help="Proxy TLS server name. Used when --use-proxy is set."),
+    proxy_tls_ca_cert: Optional[Path] = typer.Option(None, "--proxy-tls-ca-cert", help="Path to the proxy CA certificate PEM. Required with --use-proxy."),
+    proxy_tls_client_cert: Optional[Path] = typer.Option(None, "--proxy-tls-client-cert", help="Path to the client certificate PEM. Required with --use-proxy."),
+    proxy_tls_client_key: Optional[Path] = typer.Option(None, "--proxy-tls-client-key", help="Path to the client private key PEM. Required with --use-proxy."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Test a connection without persisting it. Credentials are prompted interactively."""
     client = _get_client(api_url=api_url, org=org)
+
+    tls_material = _proxy_tls_material(proxy_tls_ca_cert, proxy_tls_client_cert, proxy_tls_client_key)
+    if use_proxy:
+        _require_complete_proxy_config(proxy_host, proxy_port, tls_material)
+
     credentials = _prompt_credentials()
 
     body: dict = {
@@ -2157,6 +2366,7 @@ def datasources_test(
         body["proxy_port"] = proxy_port
         if proxy_server_name:
             body["proxy_server_name"] = proxy_server_name
+        body.update(tls_material)
 
     result = client.test_datasource_connection(body)
     if result.success:

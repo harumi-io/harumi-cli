@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from pathlib import Path
 from typer.testing import CliRunner
 
 import harumi.cli as cli
@@ -486,6 +487,144 @@ def test_repo_branch_rm_aborts_without_confirmation(api):
 
 
 # ---------------------------------------------------------------------------
+# harumi files
+# ---------------------------------------------------------------------------
+
+def test_files_ls_lists_uploaded_files(api):
+    api.route(
+        "GET",
+        "/api/projects/proj-1/files",
+        {
+            "files": [
+                {"name": "data.csv", "key": "proj-1/data.csv", "last_modified": "2026-01-01T00:00:00Z", "etag": "abc", "size": 42}
+            ],
+            "is_truncated": False,
+        },
+    )
+
+    result = runner.invoke(cli.app, ["files", "ls", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "data.csv" in result.output
+
+
+def test_files_ls_reports_no_files(api):
+    api.route("GET", "/api/projects/proj-1/files", {"files": [], "is_truncated": False})
+
+    result = runner.invoke(cli.app, ["files", "ls", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "No files uploaded." in result.output
+
+
+def test_files_put_uploads_and_defaults_remote_path_to_local_name(api, tmp_path, monkeypatch):
+    local = tmp_path / "data.csv"
+    local.write_text("a,b\n1,2\n")
+    api.route("GET", "/api/projects/proj-1/files", {"files": [], "is_truncated": False})
+    api.route("POST", "/api/projects/proj-1/files/upload-url", {"url": "https://s3.test/proj-1/data.csv", "key": "proj-1/data.csv", "expires_in": 900})
+
+    put_calls = []
+
+    def fake_upload(self, upload_url, path, content_type):
+        put_calls.append((upload_url.url, path, content_type))
+
+    monkeypatch.setattr(Client, "upload_file_to_presigned_url", fake_upload)
+
+    result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "Uploaded" in result.output
+    assert put_calls == [("https://s3.test/proj-1/data.csv", local, "text/csv")]
+    body = api.body_for("POST", "/api/projects/proj-1/files/upload-url")
+    assert body["path"] == "data.csv"
+
+
+def test_files_put_rejects_a_missing_local_file(api, tmp_path):
+    result = runner.invoke(
+        cli.app, ["files", "put", str(tmp_path / "ghost.csv"), "--project", "proj-1"]
+    )
+
+    assert result.exit_code != 0
+    assert api.requests == []
+
+
+def test_files_put_refuses_when_the_batch_would_exceed_the_file_count_cap(api, tmp_path, monkeypatch):
+    """Mirrors harumi-platform's upload-cap guard: refuse before signing a URL."""
+    local = tmp_path / "one-more.csv"
+    local.write_text("x")
+    existing = [
+        {"name": f"f{i}.csv", "key": f"proj-1/f{i}.csv", "last_modified": "2026-01-01T00:00:00Z", "etag": "e", "size": 1}
+        for i in range(500)
+    ]
+    api.route("GET", "/api/projects/proj-1/files", {"files": existing, "is_truncated": False})
+
+    result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
+
+    assert result.exit_code != 0
+    assert "500-file" in result.output.replace("\n", " ")
+    # Refused before ever asking for a presigned URL.
+    assert not any(r.url.path.endswith("/upload-url") for r in api.requests)
+
+
+def test_files_put_does_not_count_the_file_it_replaces_against_the_cap(api, tmp_path, monkeypatch):
+    """Re-uploading an existing path overwrites that object, so a project sitting
+    exactly at the file cap can still replace one of its files."""
+    local = tmp_path / "f0.csv"
+    local.write_text("x")
+    existing = [
+        {"name": f"f{i}.csv", "key": f"proj-1/f{i}.csv", "last_modified": "2026-01-01T00:00:00Z", "etag": "e", "size": 1}
+        for i in range(500)
+    ]
+    api.route("GET", "/api/projects/proj-1/files", {"files": existing, "is_truncated": False})
+    api.route("POST", "/api/projects/proj-1/files/upload-url", {"url": "https://s3.test/proj-1/f0.csv", "key": "proj-1/f0.csv", "expires_in": 900})
+
+    monkeypatch.setattr(Client, "upload_file_to_presigned_url", lambda *a, **k: None)
+
+    result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "Uploaded" in result.output
+
+
+def test_files_get_downloads_to_the_remote_files_basename_by_default(api, tmp_path, monkeypatch):
+    api.route("GET", "/api/projects/proj-1/files/download-url", {"url": "https://s3.test/proj-1/data.csv", "expires_in": 900})
+
+    calls = []
+
+    def fake_download(self, download_url, dest_path):
+        calls.append((download_url.url, dest_path))
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        dest_path.write_bytes(b"a,b\n1,2\n")
+
+    monkeypatch.setattr(Client, "download_file_from_presigned_url", fake_download)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["files", "get", "data.csv", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert calls[0][1] == Path("data.csv")
+    assert api.params_for("GET", "/api/projects/proj-1/files/download-url")["path"] == "data.csv"
+
+
+def test_files_rm_aborts_without_confirmation(api):
+    result = runner.invoke(cli.app, ["files", "rm", "data.csv", "--project", "proj-1"], input="n\n")
+
+    assert result.exit_code == 0, result.output
+    assert "Aborted." in result.output
+    assert api.requests == []
+
+
+def test_files_rm_deletes_when_confirmed(api):
+    api.route("DELETE", "/api/projects/proj-1/files", {"deleted": 1})
+
+    result = runner.invoke(cli.app, ["files", "rm", "data.csv", "--project", "proj-1"], input="y\n")
+
+    assert result.exit_code == 0, result.output
+    assert "Deleted" in result.output
+    assert api.params_for("DELETE", "/api/projects/proj-1/files")["path"] == "data.csv"
+
+
+# ---------------------------------------------------------------------------
 # harumi schedules
 # ---------------------------------------------------------------------------
 
@@ -820,6 +959,168 @@ def test_datasources_add_prompts_for_credentials_and_never_echoes_them(api):
     assert api.body_for("POST", "/api/datasources/proj-1")["credentials"] == "hunter2"
     # ...but must never be echoed back to the terminal.
     assert "hunter2" not in result.output
+
+
+def _write_proxy_certs(tmp_path):
+    ca = tmp_path / "ca.pem"
+    cert = tmp_path / "client.crt"
+    key = tmp_path / "client.key"
+    ca.write_text("-----BEGIN CERTIFICATE-----\nca\n-----END CERTIFICATE-----\n")
+    cert.write_text("-----BEGIN CERTIFICATE-----\nclient\n-----END CERTIFICATE-----\n")
+    key.write_text("-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----\n")
+    return ca, cert, key
+
+
+def test_datasources_add_sends_the_proxy_mtls_pem_contents(api, tmp_path):
+    """--use-proxy must ship all three PEMs, or the API rejects the datasource.
+
+    The flags previously stopped at --proxy-host/--proxy-port/--proxy-server-name,
+    so a proxied datasource could not be created at all: the API requires the
+    certificate material whenever use_proxy is on.
+    """
+    api.route("POST", "/api/datasources/proj-1", DATASOURCE, status=201)
+    ca, cert, key = _write_proxy_certs(tmp_path)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "datasources", "add", "sales_db",
+            "--type", "postgresql",
+            "--host", "db.internal",
+            "--use-proxy",
+            "--proxy-host", "vpnproxy.harumi.io",
+            "--proxy-port", "1433",
+            "--proxy-tls-ca-cert", str(ca),
+            "--proxy-tls-client-cert", str(cert),
+            "--proxy-tls-client-key", str(key),
+            "--project", "proj-1",
+        ],
+        input="hunter2\nhunter2\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("POST", "/api/datasources/proj-1")
+    assert body["use_proxy"] is True
+    assert body["proxy_host"] == "vpnproxy.harumi.io"
+    assert body["proxy_port"] == 1433
+    # The file contents travel, not the paths — the API stores these in SSM.
+    assert "ca" in body["proxy_tls_ca_cert"]
+    assert "BEGIN CERTIFICATE" in body["proxy_tls_ca_cert"]
+    assert "client" in body["proxy_tls_client_cert"]
+    assert "BEGIN PRIVATE KEY" in body["proxy_tls_client_key"]
+    assert str(ca) not in str(body)
+    # The private key must not be echoed to the terminal.
+    assert "BEGIN PRIVATE KEY" not in result.output
+
+
+def test_datasources_add_rejects_use_proxy_without_certs_before_prompting(api, tmp_path):
+    """A half-specified --use-proxy fails locally, naming every missing flag.
+
+    Worth doing client-side: the check runs before the credentials prompt, so
+    the user isn't asked for a password only to have the request rejected.
+    """
+    api.route("POST", "/api/datasources/proj-1", DATASOURCE, status=201)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "datasources", "add", "sales_db",
+            "--type", "postgresql",
+            "--host", "db.internal",
+            "--use-proxy",
+            "--proxy-host", "vpnproxy.harumi.io",
+            "--project", "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--proxy-port" in result.output
+    assert "--proxy-tls-ca-cert" in result.output
+    assert "--proxy-tls-client-cert" in result.output
+    assert "--proxy-tls-client-key" in result.output
+    # Nothing should have been sent, and no password should have been asked for.
+    assert api.paths() == []
+
+
+def test_datasources_update_rotates_one_cert_without_resending_the_others(api, tmp_path):
+    """Certificates rotate individually; the API keeps the rest of the bundle."""
+    api.route("PUT", "/api/datasources/proj-1/sales_db", DATASOURCE)
+    _, cert, _ = _write_proxy_certs(tmp_path)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "datasources", "update", "sales_db",
+            "--proxy-tls-client-cert", str(cert),
+            "--project", "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("PUT", "/api/datasources/proj-1/sales_db")
+    assert "client" in body["proxy_tls_client_cert"]
+    # The untouched certs must be absent, not null — the API treats a present
+    # null as "clear this" and would wipe the stored CA and key.
+    assert "proxy_tls_ca_cert" not in body
+    assert "proxy_tls_client_key" not in body
+
+
+def test_datasources_add_reports_an_unreadable_cert_path(api, tmp_path):
+    api.route("POST", "/api/datasources/proj-1", DATASOURCE, status=201)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "datasources", "add", "sales_db",
+            "--type", "postgresql",
+            "--use-proxy",
+            "--proxy-host", "vpnproxy.harumi.io",
+            "--proxy-port", "1433",
+            "--proxy-tls-ca-cert", str(tmp_path / "nope.pem"),
+            "--project", "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "proxy_tls_ca_cert" in result.output
+    assert "nope.pem" in result.output
+
+
+def test_datasources_add_reports_a_binary_cert_file_without_a_traceback(api, tmp_path):
+    """A binary file where a PEM was meant is an honest mistake, so it gets a
+    message rather than a UnicodeDecodeError traceback."""
+    binary = tmp_path / "not-a-cert.png"
+    binary.write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "datasources", "add", "sales_db",
+            "--type", "postgresql",
+            "--use-proxy",
+            "--proxy-host", "vpnproxy.harumi.io",
+            "--proxy-port", "1433",
+            "--proxy-tls-ca-cert", str(binary),
+            "--project", "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "isn't UTF-8 text" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_dashboard_validate_reports_a_binary_spec_without_a_traceback(api, tmp_path):
+    """Same guard, reached from a different command — it lives in _handle_errors,
+    not in the PEM reader."""
+    binary = tmp_path / "dashboard.toml"
+    binary.write_bytes(b"\x00\x81\xfe spec")
+
+    result = runner.invoke(cli.app, ["dashboard", "validate", str(binary)])
+
+    assert result.exit_code == 1
+    assert "isn't UTF-8 text" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_datasources_query_renders_rows_and_the_count(api):
