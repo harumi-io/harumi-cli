@@ -606,6 +606,56 @@ def test_files_get_downloads_to_the_remote_files_basename_by_default(api, tmp_pa
     assert api.params_for("GET", "/api/projects/proj-1/files/download-url")["path"] == "data.csv"
 
 
+def test_files_get_defaults_the_name_from_a_path_with_a_trailing_slash(api, tmp_path, monkeypatch):
+    """`data/` still has a usable name once the slash is stripped. Without the
+    strip, `rsplit("/")` leaves an empty basename and `Path("")` is `Path(".")`."""
+    api.route("GET", "/api/projects/proj-1/files/download-url", {"url": "https://s3.test/proj-1/data.csv", "expires_in": 900})
+
+    calls = []
+
+    def fake_download(self, download_url, dest_path):
+        calls.append(dest_path)
+        dest_path.write_bytes(b"a,b\n")
+
+    monkeypatch.setattr(Client, "download_file_from_presigned_url", fake_download)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["files", "get", "nested/data.csv/", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert calls[0] == Path("data.csv")
+
+
+def test_files_get_refuses_a_remote_path_with_no_basename(api, tmp_path, monkeypatch):
+    """A path that is nothing but separators has no name to default to."""
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["files", "get", "/", "--project", "proj-1"])
+
+    assert result.exit_code != 0
+    assert "no file name to save as" in result.output
+    assert api.requests == []  # refused before signing a download URL
+
+
+def test_files_get_reports_an_unwritable_output_path(api, tmp_path, monkeypatch):
+    """An OSError from the write reaches `_handle_errors`, not the user's
+    terminal as a traceback. `-o <dir>` raises IsADirectoryError."""
+    api.route("GET", "/api/projects/proj-1/files/download-url", {"url": "https://s3.test/proj-1/data.csv", "expires_in": 900})
+
+    def fake_download(self, download_url, dest_path):
+        raise IsADirectoryError(21, "Is a directory", str(dest_path))
+
+    monkeypatch.setattr(Client, "download_file_from_presigned_url", fake_download)
+
+    result = runner.invoke(
+        cli.app, ["files", "get", "data.csv", "-o", str(tmp_path), "--project", "proj-1"]
+    )
+
+    assert result.exit_code != 0
+    assert "Is a directory" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_files_rm_aborts_without_confirmation(api):
     result = runner.invoke(cli.app, ["files", "rm", "data.csv", "--project", "proj-1"], input="n\n")
 

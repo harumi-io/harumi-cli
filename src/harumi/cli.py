@@ -280,7 +280,16 @@ def _handle_errors(fn):
                 "reinstall the CLI. Otherwise this is a packaging bug — please report it "
                 "at https://github.com/harumi-io/harumi-cli/issues"
             )
-        except FileNotFoundError as exc:
+        except OSError as exc:
+            # Every path this CLI writes to or reads from is user-supplied (`-o`,
+            # `--path`, an import/export directory), so an unwritable
+            # destination is a mistake to report, not a bug to traceback:
+            # `files get x -o /etc/foo` raises PermissionError, and `-o somedir`
+            # (or a remote path whose basename comes out empty) raises
+            # IsADirectoryError. Broadened from FileNotFoundError at this one
+            # boundary rather than per call site, same reasoning as the
+            # UnicodeDecodeError clause below — every OSError subclass carries
+            # errno + filename in its str(), so the message still names the path.
             _fail(str(exc))
         except UnicodeDecodeError:
             # Every text file this CLI reads is either user-supplied (a PEM, a
@@ -1677,7 +1686,14 @@ def files_get(
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
-    dest_path = output or Path(remote_path.rsplit("/", 1)[-1])
+    # A trailing slash (`files get data/`) leaves an empty basename, and
+    # `Path("")` is `Path(".")` — writing the download into the cwd itself.
+    # Refuse instead, since there's no name to default to.
+    default_name = remote_path.rstrip("/").rsplit("/", 1)[-1]
+    if output is None and not default_name:
+        _fail(f"'{remote_path}' has no file name to save as. Pass --output, or name a file.")
+
+    dest_path = output or Path(default_name)
     download_url = client.create_file_download_url(project_id, remote_path)
     client.download_file_from_presigned_url(download_url, dest_path)
     console.print(f"Downloaded {remote_path} -> {dest_path}")
