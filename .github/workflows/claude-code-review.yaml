@@ -224,7 +224,7 @@ jobs:
           use_bedrock: 'true'
           prompt: ${{ env.REVIEW_PROMPT }}
           claude_args: |
-            --model us.anthropic.claude-sonnet-4-5-20250929-v1:0
+            --model us.anthropic.claude-sonnet-5
             --max-turns 80
             --allowedTools "Read,Grep,Glob,Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(git diff:*),Bash(git log:*),Bash(git cat-file:*)"
             ${{ steps.load_prompt.outputs.HAS_PREVIOUS_SESSION == 'true' && '--continue' || '' }}
