@@ -1,244 +1,123 @@
+# Thin caller for the org-shared review workflow. Everything mechanical — session caching and
+# its unreachable-commit fallback, AWS auth, diff pre-fetch, turn ceiling, concurrency, draft
+# skipping — lives in harumi-io/.github-private. Only this repo's review focus is local.
+#
+# Pinned to a tag, never @main: a bad edit upstream would otherwise reach every repo's review
+# pipeline at once. Bump the pin deliberately, like a dependency upgrade.
 name: Claude Code Review
-
-permissions:
-  contents: read
-  pull-requests: write
-  id-token: write
 
 on:
   pull_request:
-    types: [opened, synchronize]
-
-env:
-  AWS_REGION: us-east-2
-
-  # Used on first review of a PR (or when the session cache was evicted).
-  PROMPT_FULL: |
-    REPO: ${{ github.repository }}
-    PR NUMBER: ${{ github.event.pull_request.number }}
-
-    Please review this pull request thoroughly. This repo is the `harumi` CLI:
-    a Typer-based Python package that talks to harumi-api over HTTP and drives
-    git against Harumi Git (Gitea). It is published to PyPI and installed on
-    users' own machines, so a regression ships to laptops and cannot be
-    hot-fixed server-side. Focus on:
-
-    1. **Security**: Exposed secrets, and especially credential handling.
-       `~/.harumi` holds JWTs plus a Gitea token and must stay mode 0600;
-       tokens must never be printed, logged, or interpolated into a URL that
-       could land in `git remote -v`, shell history, or an error message
-       (`src/harumi/git.py` builds authenticated URLs — check escaping).
-       Also: command injection via `subprocess`, unvalidated server responses,
-       and TLS/verification being disabled.
-    2. **Bugs & Edge Cases**: Logic errors, unhandled errors/nulls, incorrect
-       assumptions about API response shape, paths with spaces or non-ASCII,
-       partially-written config files, and network failures midway through a
-       multi-step command (`projects create` and `import` both create a
-       project, then provision a repo, then push — consider what a failure
-       between those steps leaves behind).
-    3. **CLI contract**: Flags and commands are a public interface. Watch for
-       breaking renames or removals, changed defaults, and mutually exclusive
-       flags that aren't actually rejected. `cli-surface.json` must be
-       regenerated (`python scripts/emit_cli_surface.py > cli-surface.json`)
-       whenever the command tree or any flag changes — `test_every_command_builds`
-       enforces this, and harumi-docs' weekly drift check reads that file.
-    4. **API/CLI alignment**: A setting that scopes reads does not necessarily
-       scope writes. The `X-Organization` header is honored only by harumi-api's
-       read endpoints; creation reads the owning workspace from `customer_id`
-       in the request body. Flag anything that assumes a header alone changes
-       what the server writes.
-    5. **Python & typing**: `requires-python = ">=3.9"` — no `match`, no
-       `X | Y` annotations at runtime outside `from __future__ import
-       annotations`, no 3.10+ stdlib. Also mutable default arguments, bare
-       `except`, swallowed exceptions, and Pydantic models that would reject
-       an unknown field the server started sending.
-    6. **Tests**: Non-trivial logic should leave a runnable check behind. Tests
-       here are offline by design (`httpx.MockTransport`, isolated
-       `HARUMI_HOME`) — flag anything that would hit the real network or touch
-       the developer's real `~/.harumi`. A new test that would pass equally
-       well against the unfixed code is worth calling out.
-    7. **Maintainability**: Code clarity, naming, duplication, missing or
-       misleading comments, and prose in `README.md` /
-       `.agents/skills/**` that no longer matches the code it describes.
-
-    For each finding provide: the file and line, a clear explanation of the issue,
-    its potential impact, and a concrete recommended fix (with a code snippet where
-    it helps clarify the solution).
-
-    Post your review on the PR using `gh pr comment`.
-    Do not use emojis.
-    The PR branch is already checked out in the current working directory.
-
-  # Used for subsequent pushes when a session cache exists.
-  # {LAST_COMMIT} is substituted at runtime with the previous reviewed SHA.
-  PROMPT_SIMPLE: |
-    REPO: ${{ github.repository }}
-    PR NUMBER: ${{ github.event.pull_request.number }}
-    LAST REVIEWED COMMIT: {LAST_COMMIT}
-
-    New commits have been pushed to this PR since your last review at {LAST_COMMIT}.
-    Review ONLY the changes introduced since that commit — use `git diff` and
-    `git log` to scope exactly what is new. Do NOT re-review code already present
-    at {LAST_COMMIT}.
-
-    For issues raised in your previous review: if a finding has been fixed,
-    acknowledge it briefly; if it is still present, reference it in one line rather
-    than restating it in full.
-
-    For new findings apply the same depth as a full review. This repo is the
-    `harumi` CLI: a Typer-based Python package published to PyPI that talks to
-    harumi-api over HTTP and drives git against Harumi Git (Gitea).
-
-    1. **Security**: Exposed secrets, and especially credential handling.
-       `~/.harumi` holds JWTs plus a Gitea token and must stay mode 0600;
-       tokens must never be printed, logged, or interpolated into a URL that
-       could land in `git remote -v`, shell history, or an error message.
-       Also: command injection via `subprocess`, unvalidated server responses,
-       and TLS/verification being disabled.
-    2. **Bugs & Edge Cases**: Logic errors, unhandled errors/nulls, incorrect
-       assumptions about API response shape, paths with spaces or non-ASCII,
-       partially-written config files, and network failures midway through a
-       multi-step command.
-    3. **CLI contract**: Flags and commands are a public interface. Watch for
-       breaking renames or removals, changed defaults, and mutually exclusive
-       flags that aren't actually rejected. `cli-surface.json` must be
-       regenerated whenever the command tree or any flag changes.
-    4. **API/CLI alignment**: A setting that scopes reads does not necessarily
-       scope writes — `X-Organization` is honored only by harumi-api's read
-       endpoints, while creation reads `customer_id` from the request body.
-    5. **Python & typing**: `requires-python = ">=3.9"` — no 3.10+ syntax or
-       stdlib. Also mutable default arguments, bare `except`, swallowed
-       exceptions, and Pydantic models that would reject a new server field.
-    6. **Tests**: Non-trivial logic should leave a runnable check behind. Tests
-       are offline by design — flag anything that would hit the real network or
-       the developer's real `~/.harumi`, or a test that would pass equally well
-       against the unfixed code.
-    7. **Maintainability**: Code clarity, naming, duplication, and prose in
-       `README.md` / `.agents/skills/**` that no longer matches the code.
-
-    For each finding provide: the file and line, a clear explanation of the issue,
-    its potential impact, and a concrete recommended fix (with a code snippet where
-    it helps clarify the solution).
-
-    Post your review on the PR using `gh pr comment`.
-    Do not use emojis.
-    The PR branch is already checked out in the current working directory.
+    # `ready_for_review` matters because the shared workflow skips drafts — without it a PR
+    # opened as a draft would never be reviewed at all. `reopened` doubles as the manual
+    # re-run lever: close and reopen a PR to force a fresh review.
+    types: [opened, synchronize, ready_for_review, reopened]
 
 jobs:
   code-review:
-    runs-on: ubuntu-latest
-    # Unlike harumi-platform/harumi-api/frontend, this repo is PUBLIC, so a
-    # `pull_request` from a fork would run with a read-only token and no access
-    # to the AWS role — the job would fail on every outside contribution rather
-    # than review it. Skip forks instead. (`pull_request_target` would grant the
-    # needed permissions but checks out untrusted code with them, which is the
-    # documented privilege-escalation footgun; not worth it for a repo whose
-    # PRs all come from harumi-io branches today.)
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    uses: harumi-io/.github-private/.github/workflows/claude-code-review.yml@v1
+    with:
+      # Used on the first review of a PR (or when the session cache was evicted).
+      prompt_full: |
+        REPO: ${{ github.repository }}
+        PR NUMBER: ${{ github.event.pull_request.number }}
 
-      # Restore Claude's session from a previous run on this PR (if any).
-      # The key includes the current commit SHA so each run saves a distinct
-      # entry; restore-keys falls back to the most recent run for this PR.
-      - name: Restore Claude session cache
-        id: cache_session
-        continue-on-error: true
-        uses: actions/cache@v4
-        with:
-          path: ~/.claude/projects
-          key: claude-review-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
-          restore-keys: |
-            claude-review-${{ github.event.pull_request.number }}-
+        Please review this pull request thoroughly. This repo is the `harumi` CLI:
+        a Typer-based Python package that talks to harumi-api over HTTP and drives
+        git against Harumi Git (Gitea). It is published to PyPI and installed on
+        users' own machines, so a regression ships to laptops and cannot be
+        hot-fixed server-side. Focus on:
 
-      # This repo has no AWS_ROLE_TO_ASSUME secret (unlike harumi-api/frontend),
-      # so the shared org-wide CI/CD role is referenced by ARN — the same
-      # pattern harumi-platform's review workflow uses. Its trust policy allows
-      # `repo:harumi-io/*` and its policy already grants bedrock:InvokeModel, so
-      # no new secret or IAM change is needed here.
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::715841362904:role/harumi-us-east-2-github-cicd-role
-          aws-region: ${{ env.AWS_REGION }}
-          role-skip-session-tagging: true
+        1. **Security**: Exposed secrets, and especially credential handling.
+           `~/.harumi` holds JWTs plus a Gitea token and must stay mode 0600;
+           tokens must never be printed, logged, or interpolated into a URL that
+           could land in `git remote -v`, shell history, or an error message
+           (`src/harumi/git.py` builds authenticated URLs — check escaping).
+           Also: command injection via `subprocess`, unvalidated server responses,
+           and TLS/verification being disabled.
+        2. **Bugs & Edge Cases**: Logic errors, unhandled errors/nulls, incorrect
+           assumptions about API response shape, paths with spaces or non-ASCII,
+           partially-written config files, and network failures midway through a
+           multi-step command (`projects create` and `import` both create a
+           project, then provision a repo, then push — consider what a failure
+           between those steps leaves behind).
+        3. **CLI contract**: Flags and commands are a public interface. Watch for
+           breaking renames or removals, changed defaults, and mutually exclusive
+           flags that aren't actually rejected. `cli-surface.json` must be
+           regenerated (`python scripts/emit_cli_surface.py > cli-surface.json`)
+           whenever the command tree or any flag changes — `test_every_command_builds`
+           enforces this, and harumi-docs' weekly drift check reads that file.
+        4. **API/CLI alignment**: A setting that scopes reads does not necessarily
+           scope writes. The `X-Organization` header is honored only by harumi-api's
+           read endpoints; creation reads the owning workspace from `customer_id`
+           in the request body. Flag anything that assumes a header alone changes
+           what the server writes.
+        5. **Python & typing**: `requires-python = ">=3.9"` — no `match`, no
+           `X | Y` annotations at runtime outside `from __future__ import
+           annotations`, no 3.10+ stdlib. Also mutable default arguments, bare
+           `except`, swallowed exceptions, and Pydantic models that would reject
+           an unknown field the server started sending.
+        6. **Tests**: Non-trivial logic should leave a runnable check behind. Tests
+           here are offline by design (`httpx.MockTransport`, isolated
+           `HARUMI_HOME`) — flag anything that would hit the real network or touch
+           the developer's real `~/.harumi`. A new test that would pass equally
+           well against the unfixed code is worth calling out.
+        7. **Maintainability**: Code clarity, naming, duplication, missing or
+           misleading comments, and prose in `README.md` /
+           `.agents/skills/**` that no longer matches the code it describes.
 
-      # Choose between a full review (first run / cache miss) and an
-      # incremental review (subsequent push with a warm session).
-      - name: Load review prompt
-        id: load_prompt
-        shell: bash
-        run: |
-          COMMIT_FILE=~/.claude/projects/.last-reviewed-commit
-          LAST_COMMIT=""
+        For each finding provide: the file and line, a clear explanation of the issue,
+        its potential impact, and a concrete recommended fix (with a code snippet where
+        it helps clarify the solution).
+      # Used for a later push, when a session cache exists. {LAST_COMMIT} is substituted at
+      # runtime with the previously reviewed SHA.
+      prompt_simple: |
+        REPO: ${{ github.repository }}
+        PR NUMBER: ${{ github.event.pull_request.number }}
+        LAST REVIEWED COMMIT: {LAST_COMMIT}
 
-          if [ -f "$COMMIT_FILE" ]; then
-            LAST_COMMIT=$(cat "$COMMIT_FILE")
-          fi
+        New commits have been pushed to this PR since your last review at {LAST_COMMIT}.
+        Review ONLY the changes introduced since that commit — use `git diff` and
+        `git log` to scope exactly what is new. Do NOT re-review code already present
+        at {LAST_COMMIT}.
 
-          # A restored cache can name a commit that is no longer reachable here:
-          # `restore-keys` deliberately falls back to an earlier run on this PR,
-          # and a rebase onto dev or a force-push strands the SHA that run
-          # recorded. Scoping the review to a ref that every `git diff` rejects
-          # would silently yield an empty incremental review, so fall back to a
-          # full one instead.
-          if [ -n "$LAST_COMMIT" ] && git rev-parse --verify --quiet "${LAST_COMMIT}^{commit}" >/dev/null; then
-            echo "Previous session found. Last reviewed commit: $LAST_COMMIT"
-            echo "HAS_PREVIOUS_SESSION=true" >> "$GITHUB_OUTPUT"
+        For issues raised in your previous review: if a finding has been fixed,
+        acknowledge it briefly; if it is still present, reference it in one line rather
+        than restating it in full.
 
-            # Read from the environment (not interpolated into the script) so
-            # backticks and $() in the prompt are treated as data, not code.
-            PROMPT="${PROMPT_SIMPLE//\{LAST_COMMIT\}/$LAST_COMMIT}"
-          else
-            if [ -n "$LAST_COMMIT" ]; then
-              echo "Cached commit $LAST_COMMIT is unreachable (rebase or force-push?). Running full review."
-            else
-              echo "No previous session found. Running full review."
-            fi
-            echo "HAS_PREVIOUS_SESSION=false" >> "$GITHUB_OUTPUT"
+        For new findings apply the same depth as a full review. This repo is the
+        `harumi` CLI: a Typer-based Python package published to PyPI that talks to
+        harumi-api over HTTP and drives git against Harumi Git (Gitea).
 
-            PROMPT="$PROMPT_FULL"
-          fi
+        1. **Security**: Exposed secrets, and especially credential handling.
+           `~/.harumi` holds JWTs plus a Gitea token and must stay mode 0600;
+           tokens must never be printed, logged, or interpolated into a URL that
+           could land in `git remote -v`, shell history, or an error message.
+           Also: command injection via `subprocess`, unvalidated server responses,
+           and TLS/verification being disabled.
+        2. **Bugs & Edge Cases**: Logic errors, unhandled errors/nulls, incorrect
+           assumptions about API response shape, paths with spaces or non-ASCII,
+           partially-written config files, and network failures midway through a
+           multi-step command.
+        3. **CLI contract**: Flags and commands are a public interface. Watch for
+           breaking renames or removals, changed defaults, and mutually exclusive
+           flags that aren't actually rejected. `cli-surface.json` must be
+           regenerated whenever the command tree or any flag changes.
+        4. **API/CLI alignment**: A setting that scopes reads does not necessarily
+           scope writes — `X-Organization` is honored only by harumi-api's read
+           endpoints, while creation reads `customer_id` from the request body.
+        5. **Python & typing**: `requires-python = ">=3.9"` — no 3.10+ syntax or
+           stdlib. Also mutable default arguments, bare `except`, swallowed
+           exceptions, and Pydantic models that would reject a new server field.
+        6. **Tests**: Non-trivial logic should leave a runnable check behind. Tests
+           are offline by design — flag anything that would hit the real network or
+           the developer's real `~/.harumi`, or a test that would pass equally well
+           against the unfixed code.
+        7. **Maintainability**: Code clarity, naming, duplication, and prose in
+           `README.md` / `.agents/skills/**` that no longer matches the code.
 
-          # Export multi-line prompt safely via GITHUB_ENV heredoc.
-          {
-            echo "REVIEW_PROMPT<<PROMPT_EOF"
-            echo "$PROMPT"
-            echo "PROMPT_EOF"
-          } >> "$GITHUB_ENV"
+        For each finding provide: the file and line, a clear explanation of the issue,
+        its potential impact, and a concrete recommended fix (with a code snippet where
+        it helps clarify the solution).
+      is_public_repo: true
 
-      - name: Run Claude Code Review
-        uses: anthropics/claude-code-action@v1
-        # A thorough review of a large PR runs well past 30 turns, and the
-        # action fails the job when the reported turn count exceeds
-        # `--max-turns` even though the review itself completed and posted.
-        # Keep the ceiling well clear of that so only a genuinely runaway
-        # session trips it.
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          use_bedrock: 'true'
-          prompt: ${{ env.REVIEW_PROMPT }}
-          claude_args: |
-            --model us.anthropic.claude-sonnet-5
-            --max-turns 80
-            --allowedTools "Read,Grep,Glob,Bash(gh pr comment:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(git diff:*),Bash(git log:*),Bash(git cat-file:*)"
-            ${{ steps.load_prompt.outputs.HAS_PREVIOUS_SESSION == 'true' && '--continue' || '' }}
-
-      # Record the current commit so the next run knows where to diff from.
-      # Only on success: a failed or cancelled run has not reviewed this SHA, so
-      # advancing the marker would make the next run skip those changes. The
-      # session cache still saves (Actions does that on exit regardless), but
-      # `Load review prompt` falls back to a full review whenever the marker is
-      # missing or names an unreachable commit, so a stale cache alone cannot
-      # produce a silently-empty review.
-      - name: Save last reviewed commit
-        if: success()
-        shell: bash
-        run: |
-          mkdir -p ~/.claude/projects
-          echo "${{ github.event.pull_request.head.sha }}" > ~/.claude/projects/.last-reviewed-commit
