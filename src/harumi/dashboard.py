@@ -11,10 +11,22 @@ It's read on first use rather than at import, because ``cli.py`` imports this
 module at module level — an eager load would let a corrupt artifact break every
 command, including ones that never touch a dashboard.
 
-Refreshing it is a copy: ``cp <harumi-platform>/packages/ui/dashboard-schema.json
-src/harumi/dashboard-schema.json``. ``tests/test_dashboard.py`` pins the
-contract the CLI needs out of it, so a platform change that removes a field the
-CLI depends on fails here rather than silently degrading validation.
+Refreshing it is a copy from a harumi-platform checkout::
+
+    cp <harumi-platform>/packages/ui/dashboard-schema.json src/harumi/dashboard-schema.json
+
+or, without one, from a running deployment (harumi-api ≥ the release that added
+``GET /api/public/dashboard-schema``; older ones 404, in which case use the
+``cp`` above)::
+
+    curl -fsSL https://api.harumi.io/api/public/dashboard-schema \
+      -o src/harumi/dashboard-schema.json
+
+Either way the result is checked, not trusted: ``tests/test_dashboard.py`` pins
+the contract the CLI needs out of it — including the ``discovery`` block and the
+fields the validator reads — so a refresh that fetched something unusable, or a
+platform change that removed a field the CLI depends on, fails here rather than
+silently degrading validation.
 
 Only the machine-checkable contract is used here (toml key, required, enum
 values, and which fields are dot-paths into ``output.json``). The artifact also
@@ -276,6 +288,14 @@ class DashboardTomlError(ValueError):
 # unreadable, and this file's import can't fail. The artifact publishes the same
 # two values under `discovery` for consumers that have no copy of their own;
 # harumi-platform's packages/ui/src/dashboard/discovery.ts is the source.
+#
+# Deliberately not read from the artifact at runtime, even though it carries the
+# values: that would either move the read to import (breaking the guarantee
+# above) or add a lazy accessor whose fallback branch is the only one that ever
+# behaves differently. Instead `tests/test_dashboard.py` pins these two against
+# the vendored artifact's `discovery` block, so re-vendoring an artifact that
+# moved the rule fails there rather than leaving the CLI quietly enumerating the
+# old location. The copy is a fallback, not a second definition.
 DASHBOARD_DIR = "dashboard"
 ROOT_DASHBOARD_PATH = "dashboard.toml"
 
@@ -293,9 +313,15 @@ def is_dashboard_path(path: str) -> bool:
 
 def pick_dashboard_paths(paths: Iterable[str]) -> List[str]:
     """The dashboard specs in a flat repo listing, in the order the platform's
-    picker shows them: `dashboard/*.toml` (alphabetical) then the legacy root
-    `dashboard.toml`. Mirrors `pickDashboardPaths` in harumi-platform's
-    `apps/web/src/lib/dashboard-files.ts`."""
+    picker shows them: ``dashboard/*.toml`` (code-point sorted) then the legacy
+    root ``dashboard.toml``. Mirrors ``pickDashboardPaths`` in harumi-platform's
+    ``packages/ui/src/dashboard/discovery.ts``.
+
+    Plain ``sorted()`` is the shared order. The frontend used ``localeCompare``
+    until it was aligned to code point, which disagreed for names like
+    ``costs-v2.toml`` / ``costs_v2.toml``, so ``harumi dashboard list`` could
+    number specs differently from the browser's picker.
+    """
     all_paths = list(paths)
     in_dir = sorted(p for p in all_paths if p != ROOT_DASHBOARD_PATH and is_dashboard_path(p))
     if ROOT_DASHBOARD_PATH in all_paths:
