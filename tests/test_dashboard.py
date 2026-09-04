@@ -452,6 +452,53 @@ class TestPickDashboardPaths:
             ]
         ) == ["dashboard/costs.toml", "dashboard/schedule.toml", "dashboard.toml"]
 
+    def test_orders_by_code_point_like_the_platform_picker(self):
+        """`discovery.ts` sorts by code point, matching `sorted()`.
+
+        It used `localeCompare` until that was aligned, and these are exactly
+        the names the two disagreed on — a leading underscore, and a `-`/`_`
+        pair. `harumi dashboard list` numbers specs in this order, so a
+        disagreement meant `harumi dashboard show 1` and the browser's first tab
+        could be different files.
+        """
+        assert pick_dashboard_paths(
+            [
+                "dashboard/costs_v2.toml",
+                "dashboard/Alpha.toml",
+                "dashboard/costs-v2.toml",
+                "dashboard/_draft.toml",
+                "dashboard/beta.toml",
+            ]
+        ) == [
+            "dashboard/Alpha.toml",
+            "dashboard/_draft.toml",
+            "dashboard/beta.toml",
+            "dashboard/costs-v2.toml",
+            "dashboard/costs_v2.toml",
+        ]
+
+    def test_local_working_copy_discovery_agrees_on_those_names(self, tmp_path):
+        """`local_dashboard_paths` sorts `Path` objects while
+        `pick_dashboard_paths` sorts strings. Equivalent only because the
+        directory prefix is constant, which is worth pinning rather than
+        assuming — `harumi dashboard validate` uses the local path and
+        `harumi dashboard list` the remote one, and they're expected to line up.
+        """
+        (tmp_path / "dashboard").mkdir()
+        names = [
+            "costs_v2.toml",
+            "Alpha.toml",
+            "costs-v2.toml",
+            "_draft.toml",
+            "beta.toml",
+        ]
+        for name in names:
+            (tmp_path / "dashboard" / name).write_text("", encoding="utf-8")
+
+        assert local_dashboard_paths(tmp_path) == pick_dashboard_paths(
+            f"dashboard/{name}" for name in names
+        )
+
     def test_ignores_non_toml_nested_and_unrelated_paths(self):
         assert pick_dashboard_paths(
             [

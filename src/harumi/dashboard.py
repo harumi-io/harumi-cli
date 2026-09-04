@@ -11,10 +11,18 @@ It's read on first use rather than at import, because ``cli.py`` imports this
 module at module level — an eager load would let a corrupt artifact break every
 command, including ones that never touch a dashboard.
 
-Refreshing it is a copy: ``cp <harumi-platform>/packages/ui/dashboard-schema.json
-src/harumi/dashboard-schema.json``. ``tests/test_dashboard.py`` pins the
-contract the CLI needs out of it, so a platform change that removes a field the
-CLI depends on fails here rather than silently degrading validation.
+Refreshing it is a copy from a harumi-platform checkout::
+
+    cp <harumi-platform>/packages/ui/dashboard-schema.json src/harumi/dashboard-schema.json
+
+or, without one, from a running deployment::
+
+    curl -fsSL https://api.harumi.io/api/public/dashboard-schema \
+      -o src/harumi/dashboard-schema.json
+
+``tests/test_dashboard.py`` pins the contract the CLI needs out of it, so a
+platform change that removes a field the CLI depends on fails here rather than
+silently degrading validation.
 
 Only the machine-checkable contract is used here (toml key, required, enum
 values, and which fields are dot-paths into ``output.json``). The artifact also
@@ -301,9 +309,15 @@ def is_dashboard_path(path: str) -> bool:
 
 def pick_dashboard_paths(paths: Iterable[str]) -> List[str]:
     """The dashboard specs in a flat repo listing, in the order the platform's
-    picker shows them: `dashboard/*.toml` (alphabetical) then the legacy root
-    `dashboard.toml`. Mirrors `pickDashboardPaths` in harumi-platform's
-    `packages/ui/src/dashboard/discovery.ts`."""
+    picker shows them: ``dashboard/*.toml`` (code-point sorted) then the legacy
+    root ``dashboard.toml``. Mirrors ``pickDashboardPaths`` in harumi-platform's
+    ``packages/ui/src/dashboard/discovery.ts``.
+
+    Plain ``sorted()`` is the shared order. The frontend used ``localeCompare``
+    until it was aligned to code point, which disagreed for names like
+    ``costs-v2.toml`` / ``costs_v2.toml``, so ``harumi dashboard list`` could
+    number specs differently from the browser's picker.
+    """
     all_paths = list(paths)
     in_dir = sorted(p for p in all_paths if p != ROOT_DASHBOARD_PATH and is_dashboard_path(p))
     if ROOT_DASHBOARD_PATH in all_paths:
