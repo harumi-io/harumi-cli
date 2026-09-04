@@ -78,6 +78,25 @@ def test_widget_contract_matches_the_vendored_schema_artifact():
     assert contract == _EXPECTED_WIDGET_CONTRACT
 
 
+def test_discovery_rule_matches_the_vendored_schema_artifact():
+    """The discovery constants stay hardcoded so `harumi dashboard list` survives
+    an unreadable artifact (see `test_schema_artifact_is_loaded_not_hardcoded`),
+    which means they're a copy — and until this test existed, an unchecked one.
+
+    The artifact carries the same two values under `discovery`, generated from
+    harumi-platform's `packages/ui/src/dashboard/discovery.ts`. Pinning them
+    against each other turns the copy into a fallback: re-vendoring an artifact
+    that moved the rule fails here instead of leaving the CLI enumerating the
+    old location while every other suite stays green.
+    """
+    from harumi.dashboard import DASHBOARD_DIR, ROOT_DASHBOARD_PATH, _artifact
+
+    discovery = _artifact().get("discovery")
+    assert isinstance(discovery, dict), "the artifact publishes the discovery rule"
+    assert discovery["dashboardDir"] == DASHBOARD_DIR
+    assert discovery["rootPath"] == ROOT_DASHBOARD_PATH
+
+
 def test_schema_artifact_is_loaded_not_hardcoded():
     """The whole point of vendoring: an unusable artifact must fail loudly
     rather than fall back to a stale built-in contract that reports a broken

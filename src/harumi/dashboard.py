@@ -276,6 +276,14 @@ class DashboardTomlError(ValueError):
 # unreadable, and this file's import can't fail. The artifact publishes the same
 # two values under `discovery` for consumers that have no copy of their own;
 # harumi-platform's packages/ui/src/dashboard/discovery.ts is the source.
+#
+# Deliberately not read from the artifact at runtime, even though it carries the
+# values: that would either move the read to import (breaking the guarantee
+# above) or add a lazy accessor whose fallback branch is the only one that ever
+# behaves differently. Instead `tests/test_dashboard.py` pins these two against
+# the vendored artifact's `discovery` block, so re-vendoring an artifact that
+# moved the rule fails there rather than leaving the CLI quietly enumerating the
+# old location. The copy is a fallback, not a second definition.
 DASHBOARD_DIR = "dashboard"
 ROOT_DASHBOARD_PATH = "dashboard.toml"
 
@@ -295,7 +303,7 @@ def pick_dashboard_paths(paths: Iterable[str]) -> List[str]:
     """The dashboard specs in a flat repo listing, in the order the platform's
     picker shows them: `dashboard/*.toml` (alphabetical) then the legacy root
     `dashboard.toml`. Mirrors `pickDashboardPaths` in harumi-platform's
-    `apps/web/src/lib/dashboard-files.ts`."""
+    `packages/ui/src/dashboard/discovery.ts`."""
     all_paths = list(paths)
     in_dir = sorted(p for p in all_paths if p != ROOT_DASHBOARD_PATH and is_dashboard_path(p))
     if ROOT_DASHBOARD_PATH in all_paths:
