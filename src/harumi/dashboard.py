@@ -15,13 +15,17 @@ Refreshing it is a copy from a harumi-platform checkout::
 
     cp <harumi-platform>/packages/ui/dashboard-schema.json src/harumi/dashboard-schema.json
 
-or, without one, from a running deployment::
+or, without one, from a running deployment (harumi-api ≥ the release that added
+``GET /api/public/dashboard-schema``; older ones 404, in which case use the
+``cp`` above)::
 
     curl -fsSL https://api.harumi.io/api/public/dashboard-schema \
       -o src/harumi/dashboard-schema.json
 
-``tests/test_dashboard.py`` pins the contract the CLI needs out of it, so a
-platform change that removes a field the CLI depends on fails here rather than
+Either way the result is checked, not trusted: ``tests/test_dashboard.py`` pins
+the contract the CLI needs out of it — including the ``discovery`` block and the
+fields the validator reads — so a refresh that fetched something unusable, or a
+platform change that removed a field the CLI depends on, fails here rather than
 silently degrading validation.
 
 Only the machine-checkable contract is used here (toml key, required, enum

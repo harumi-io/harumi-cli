@@ -93,6 +93,10 @@ def test_discovery_rule_matches_the_vendored_schema_artifact():
 
     discovery = _artifact().get("discovery")
     assert isinstance(discovery, dict), "the artifact publishes the discovery rule"
+    # Named explicitly so a renamed key reads as "the artifact stopped publishing
+    # dashboardDir" rather than a bare KeyError from the comparison below.
+    assert "dashboardDir" in discovery, "artifact's discovery block lost dashboardDir"
+    assert "rootPath" in discovery, "artifact's discovery block lost rootPath"
     assert discovery["dashboardDir"] == DASHBOARD_DIR
     assert discovery["rootPath"] == ROOT_DASHBOARD_PATH
 
