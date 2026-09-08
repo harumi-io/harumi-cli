@@ -33,12 +33,14 @@ from harumi.models import (
     Project,
     ProjectExecuteResponse,
     ProjectFileList,
+    ProjectReadiness,
     ProjectRun,
     ProjectShareLink,
     ProjectWithRepo,
     PromoteResult,
     QueryResult,
     RepoChangesResult,
+    RepoCommitList,
     RepoDirListing,
     RepoFileContent,
     RepoFileEntry,
@@ -356,6 +358,37 @@ class Client:
             "GET", f"/projects/{project_id}/repo/dir", params=params
         )
         return RepoDirListing.model_validate(response.json())
+
+    def list_repo_commits(
+        self,
+        project_id: str,
+        ref: Optional[str] = None,
+        path: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 30,
+    ) -> RepoCommitList:
+        """A page of commit history on `ref` — the whole branch when `path`
+        is omitted, or one file/folder's history when it isn't."""
+        params: dict[str, Any] = {"page": page, "per_page": per_page}
+        if ref:
+            params["ref"] = ref
+        if path:
+            params["path"] = path
+        response = self.api.request(
+            "GET", f"/projects/{project_id}/repo/commits", params=params
+        )
+        return RepoCommitList.model_validate(response.json())
+
+    def get_project_readiness(
+        self, project_id: str, ref: Optional[str] = None
+    ) -> ProjectReadiness:
+        """Everything blocking this project from running, answered up front
+        instead of surfacing as a 4xx from `run`/`schedules add`."""
+        params = {"ref": ref} if ref else None
+        response = self.api.request(
+            "GET", f"/projects/{project_id}/readiness", params=params
+        )
+        return ProjectReadiness.model_validate(response.json())
 
     def get_repo_file(
         self, project_id: str, path: str, ref: Optional[str] = None

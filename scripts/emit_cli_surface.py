@@ -59,8 +59,19 @@ def _leaves(command: Any, path: list[str]):
 def _param_info(param: Any) -> dict:
     return {
         "opts": list(param.opts),
+        # click stores a boolean pair's negative flag (e.g. "--no-chat" for
+        # "--chat/--no-chat") separately from `opts`, so a naive reader of
+        # this file that only looks at `opts` loses every "--no-*"/"--disable"
+        # flag the CLI actually accepts. Recorded explicitly so a consumer
+        # doesn't have to special-case boolean options to find them.
+        "secondary_opts": list(getattr(param, "secondary_opts", [])),
+        # "argument" (positional) or "option" (flagged). Distinguishing by
+        # opts[0].startswith("--") breaks on short-only or positional params,
+        # so the click-assigned kind is recorded directly.
+        "kind": param.param_type_name,
         "type": _TYPE_ALIASES.get(param.type.name, param.type.name),
         "required": bool(param.required),
+        "multiple": bool(getattr(param, "multiple", False)),
         "default": param.default if isinstance(param.default, (str, int, float, bool, type(None))) else None,
         "help": param.help or None,
     }

@@ -1588,6 +1588,60 @@ def repo_dir(
     console.print(table)
 
 
+@repo_app.command("commits")
+@_handle_errors
+def repo_commits(
+    path: Optional[str] = typer.Argument(None, help="File or folder to filter history to (default: the whole branch)."),
+    ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to read history on (defaults to the default branch)."),
+    page: int = typer.Option(1, "--page", help="Page number, 1-indexed."),
+    per_page: int = typer.Option(30, "--per-page", help="Commits per page (max 100)."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Show recent commit history. Pass a file or folder to see just its history."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    result = client.list_repo_commits(project_id, ref=ref, path=path, page=page, per_page=per_page)
+    if not result.commits:
+        console.print(f"No commits on {result.ref!r}.")
+        return
+
+    table = Table("sha", "message", "author", "date")
+    for c in result.commits:
+        table.add_row(
+            c.sha[:8],
+            c.message.splitlines()[0] if c.message else "",
+            c.author_name or c.author_login or "",
+            str(c.committed_at) if c.committed_at else "",
+        )
+    console.print(table)
+
+
+@repo_app.command("readiness")
+@_handle_errors
+def repo_readiness(
+    ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to check (defaults to the default branch)."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Report everything blocking this project from running, before you run it."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    readiness = client.get_project_readiness(project_id, ref=ref)
+    state = "[bold green]ready[/bold green]" if readiness.ready else "[bold red]not ready[/bold red]"
+    console.print(f"Project {readiness.project_id!r} on {readiness.ref!r} is {state}.")
+
+    table = Table("check", "ok", "detail")
+    for c in readiness.checks:
+        mark = "[green]yes[/green]" if c.ok else "[red]no[/red]"
+        table.add_row(c.id, mark, c.detail or "")
+    console.print(table)
+
+
 # ---------------------------------------------------------------------------
 # harumi files
 # ---------------------------------------------------------------------------
@@ -1868,6 +1922,7 @@ def _print_share_link(link: ProjectShareLink) -> None:
     console.print(f"Password protected: {'yes' if link.password_set else 'no'}")
     console.print(
         "Permissions: "
+        f"app={'on' if link.app_enabled else 'off'}, "
         f"assistant={'on' if link.chat_enabled else 'off'}, "
         f"run history={'on' if link.run_history_enabled else 'off'}, "
         f"run control={'on' if link.run_control_enabled else 'off'}, "
@@ -1938,6 +1993,7 @@ def share_get(
 @_handle_errors
 def share_add(
     label: Optional[str] = typer.Option(None, "--label", help="Optional name to tell links apart, e.g. 'Client dashboard'."),
+    app: bool = typer.Option(False, "--app/--no-app", help="Let visitors open the project's deployed Streamlit app."),
     chat: bool = typer.Option(False, "--chat/--no-chat", help="Let signed-in visitors ask the read-only assistant about this project."),
     run_history: bool = typer.Option(False, "--run-history/--no-run-history", help="Let visitors browse past runs, not just the latest one."),
     run_control: bool = typer.Option(False, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
@@ -1951,6 +2007,7 @@ def share_add(
     client = _get_client(api_url=api_url, org=org)
 
     body: dict = {
+        "app_enabled": app,
         "chat_enabled": chat,
         "run_history_enabled": run_history,
         "run_control_enabled": run_control,
@@ -1970,6 +2027,7 @@ def share_update(
     link_id: str = typer.Argument(..., help="Share link id."),
     label: Optional[str] = typer.Option(None, "--label", help="Rename the link."),
     enabled: Optional[bool] = typer.Option(None, "--enable/--disable", help="Turn the link on or off. The old URL stops working immediately when disabled."),
+    app: Optional[bool] = typer.Option(None, "--app/--no-app", help="Let visitors open the project's deployed Streamlit app."),
     chat: Optional[bool] = typer.Option(None, "--chat/--no-chat", help="Let signed-in visitors ask the read-only assistant about this project."),
     run_history: Optional[bool] = typer.Option(None, "--run-history/--no-run-history", help="Let visitors browse past runs, not just the latest one."),
     run_control: Optional[bool] = typer.Option(None, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
@@ -1987,6 +2045,8 @@ def share_update(
         body["label"] = label
     if enabled is not None:
         body["enabled"] = enabled
+    if app is not None:
+        body["app_enabled"] = app
     if chat is not None:
         body["chat_enabled"] = chat
     if run_history is not None:

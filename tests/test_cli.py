@@ -97,8 +97,11 @@ def test_cli_surface_normalizes_click_builtin_type_names():
         return _param_info(
             SimpleNamespace(
                 opts=["--x"],
+                secondary_opts=[],
+                param_type_name="option",
                 type=SimpleNamespace(name=name),
                 required=False,
+                multiple=False,
                 default=None,
                 help=None,
             )
@@ -486,6 +489,110 @@ def test_repo_branch_rm_aborts_without_confirmation(api):
     assert api.requests == []
 
 
+def test_repo_commits_lists_history_and_forwards_params(api):
+    api.route(
+        "GET",
+        "/api/projects/proj-1/repo/commits",
+        {
+            "ref": "dev",
+            "path": "main.py",
+            "page": 2,
+            "per_page": 10,
+            "total": 1,
+            "commits": [
+                {
+                    "sha": "abcdef1234",
+                    "message": "Fix the thing\n\nlonger body",
+                    "author_name": "Ada",
+                    "committed_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        },
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "repo",
+            "commits",
+            "main.py",
+            "--ref",
+            "dev",
+            "--page",
+            "2",
+            "--per-page",
+            "10",
+            "--project",
+            "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    # Sha truncated to 8 chars; only the message's first line is shown.
+    assert "abcdef12" in result.output
+    assert "abcdef1234" not in result.output
+    assert "Fix the thing" in result.output
+    assert "longer body" not in result.output
+    params = api.params_for("GET", "/api/projects/proj-1/repo/commits")
+    assert params == {"page": "2", "per_page": "10", "ref": "dev", "path": "main.py"}
+
+
+def test_repo_commits_reports_empty_history(api):
+    api.route(
+        "GET",
+        "/api/projects/proj-1/repo/commits",
+        {"ref": "main", "page": 1, "per_page": 30, "commits": []},
+    )
+
+    result = runner.invoke(cli.app, ["repo", "commits", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "No commits on 'main'." in result.output
+
+
+def test_repo_readiness_reports_ready(api):
+    api.route(
+        "GET",
+        "/api/projects/proj-1/readiness",
+        {
+            "project_id": "proj-1",
+            "ref": "main",
+            "ready": True,
+            "checks": [{"id": "repo", "ok": True, "detail": None}],
+        },
+    )
+
+    result = runner.invoke(cli.app, ["repo", "readiness", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "is ready" in result.output
+    assert "repo" in result.output
+
+
+def test_repo_readiness_reports_not_ready_and_forwards_ref(api):
+    api.route(
+        "GET",
+        "/api/projects/proj-1/readiness",
+        {
+            "project_id": "proj-1",
+            "ref": "dev",
+            "ready": False,
+            "checks": [
+                {"id": "manifest_valid", "ok": False, "detail": "missing entrypoint"}
+            ],
+        },
+    )
+
+    result = runner.invoke(
+        cli.app, ["repo", "readiness", "--ref", "dev", "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "not ready" in result.output
+    assert "missing entrypoint" in result.output
+    assert api.params_for("GET", "/api/projects/proj-1/readiness")["ref"] == "dev"
+
+
 # ---------------------------------------------------------------------------
 # harumi files
 # ---------------------------------------------------------------------------
@@ -796,6 +903,7 @@ def test_share_add_defaults_every_flag_to_false(api):
     assert result.exit_code == 0, result.output
     body = api.body_for("POST", "/api/projects/proj-1/share-links")
     assert body == {
+        "app_enabled": False,
         "chat_enabled": False,
         "run_history_enabled": False,
         "run_control_enabled": False,
@@ -811,6 +919,7 @@ def test_share_add_forwards_label_and_permission_flags(api):
         [
             "share", "add",
             "--label", "Internal",
+            "--app",
             "--chat",
             "--run-history",
             "--run-control",
@@ -821,6 +930,7 @@ def test_share_add_forwards_label_and_permission_flags(api):
     assert result.exit_code == 0, result.output
     body = api.body_for("POST", "/api/projects/proj-1/share-links")
     assert body["label"] == "Internal"
+    assert body["app_enabled"] is True
     assert body["chat_enabled"] is True
     assert body["run_history_enabled"] is True
     assert body["run_control_enabled"] is True
@@ -838,6 +948,28 @@ def test_share_update_only_sends_provided_fields(api):
     assert result.exit_code == 0, result.output
     body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
     assert body == {"run_control_enabled": True}
+
+
+def test_share_update_forwards_app_flag(api):
+    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
+
+    result = runner.invoke(
+        cli.app,
+        ["share", "update", "link-1", "--app", "--project", "proj-1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
+    assert body == {"app_enabled": True}
+
+    result = runner.invoke(
+        cli.app,
+        ["share", "update", "link-1", "--no-app", "--project", "proj-1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
+    assert body == {"app_enabled": False}
 
 
 def test_share_update_with_no_flags_fails_without_a_request(api):
