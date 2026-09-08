@@ -1888,7 +1888,10 @@ def dashboard_validate(
             console.print("No widgets would render.")
 
         if not issues:
-            console.print("[bold green]OK[/bold green] — every widget is valid" + (" and every dot-path resolves." if output is not None else "."))
+            console.print(
+                "[bold green]OK[/bold green] — every widget, dataset, metric, and clock entry is valid"
+                + (" and every dot-path resolves." if output is not None else ".")
+            )
             continue
 
         for issue in issues:
