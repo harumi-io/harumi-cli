@@ -109,6 +109,8 @@ TIERS: dict[str, tuple[str, str]] = {
     # -- repo -----------------------------------------------------------------
     "repo ls": (READ, ""),
     "repo dir": (READ, ""),
+    "repo commits": (READ, ""),
+    "repo readiness": (READ, ""),
     "repo cat": (READ, ""),
     "repo download": (READ, ""),
     "repo branches": (READ, ""),
@@ -229,6 +231,8 @@ PLAN: tuple[Step, ...] = (
     Step("repo put", ("{seed}", "livecheck/hello.py", "--project", "{project}", "-m", "livecheck: add")),
     Step("repo cat", ("livecheck/hello.py", "--project", "{project}")),
     Step("repo dir", ("livecheck", "--project", "{project}")),
+    Step("repo commits", ("--project", "{project}")),
+    Step("repo readiness", ("--project", "{project}")),
     Step("repo mv", ("livecheck/hello.py", "livecheck/renamed.py", "--project", "{project}", "-m", "livecheck: mv")),
     Step("repo branch-create", ("livecheck-branch", "--project", "{project}")),
     # Give the branch a commit of its own, so `promote` has a real diff to

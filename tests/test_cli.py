@@ -97,8 +97,11 @@ def test_cli_surface_normalizes_click_builtin_type_names():
         return _param_info(
             SimpleNamespace(
                 opts=["--x"],
+                secondary_opts=[],
+                param_type_name="option",
                 type=SimpleNamespace(name=name),
                 required=False,
+                multiple=False,
                 default=None,
                 help=None,
             )
@@ -796,6 +799,7 @@ def test_share_add_defaults_every_flag_to_false(api):
     assert result.exit_code == 0, result.output
     body = api.body_for("POST", "/api/projects/proj-1/share-links")
     assert body == {
+        "app_enabled": False,
         "chat_enabled": False,
         "run_history_enabled": False,
         "run_control_enabled": False,
@@ -811,6 +815,7 @@ def test_share_add_forwards_label_and_permission_flags(api):
         [
             "share", "add",
             "--label", "Internal",
+            "--app",
             "--chat",
             "--run-history",
             "--run-control",
@@ -821,6 +826,7 @@ def test_share_add_forwards_label_and_permission_flags(api):
     assert result.exit_code == 0, result.output
     body = api.body_for("POST", "/api/projects/proj-1/share-links")
     assert body["label"] == "Internal"
+    assert body["app_enabled"] is True
     assert body["chat_enabled"] is True
     assert body["run_history_enabled"] is True
     assert body["run_control_enabled"] is True
@@ -838,6 +844,28 @@ def test_share_update_only_sends_provided_fields(api):
     assert result.exit_code == 0, result.output
     body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
     assert body == {"run_control_enabled": True}
+
+
+def test_share_update_forwards_app_flag(api):
+    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
+
+    result = runner.invoke(
+        cli.app,
+        ["share", "update", "link-1", "--app", "--project", "proj-1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
+    assert body == {"app_enabled": True}
+
+    result = runner.invoke(
+        cli.app,
+        ["share", "update", "link-1", "--no-app", "--project", "proj-1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
+    assert body == {"app_enabled": False}
 
 
 def test_share_update_with_no_flags_fails_without_a_request(api):

@@ -47,6 +47,26 @@ def main() -> None:
         for param in command["params"]:
             if not param["opts"]:
                 failures.append(f"{command['path']}: a param has empty opts")
+            if param.get("kind") not in ("argument", "option"):
+                failures.append(
+                    f"{command['path']}: param {param['opts']} has an invalid kind {param.get('kind')!r}"
+                )
+
+    # Pins the boolean-pair round trip: `share update --chat/--no-chat` must
+    # keep "--no-chat" recoverable from the contract. A reader of `opts`
+    # alone loses it, which is exactly the regression this guards.
+    share_update = next((c for c in commands if c["path"] == "share update"), None)
+    if share_update is None:
+        failures.append("share update is missing from the surface")
+    else:
+        chat_param = next((p for p in share_update["params"] if p["opts"] == ["--chat"]), None)
+        if chat_param is None:
+            failures.append("share update: --chat param not found")
+        elif "--no-chat" not in chat_param.get("secondary_opts", []):
+            failures.append(
+                "share update: --chat lost its --no-chat secondary_opts — "
+                "boolean-pair flags are being dropped from the contract"
+            )
 
     if failures:
         print("FAILED:")
