@@ -58,7 +58,7 @@ SCHEMA_ARTIFACT_PATH = Path(__file__).with_name("dashboard-schema.json")
 class WidgetField:
     toml_key: str
     required: bool = False
-    kind: str = "string"  # "string" | "number" | "enum" | "columns" | "series"
+    kind: str = "string"  # "string" | "number" | "enum" | "columns" | "series" | "kpiItems"
     values: Optional[Tuple[str, ...]] = None
     # True for fields that are a dot-path into the run's output.json (as
     # opposed to a field name *within* an already-resolved array item, e.g.
@@ -81,7 +81,7 @@ class DashboardSchemaError(RuntimeError):
 # set would fall through to "no value is ever valid", quietly making a required
 # field impossible to satisfy and an optional one impossible to use — so a typo
 # in the artifact is rejected at load rather than silently weakening validation.
-_KNOWN_FIELD_KINDS = frozenset({"string", "number", "enum", "columns", "series"})
+_KNOWN_FIELD_KINDS = frozenset({"string", "number", "enum", "columns", "series", "kpiItems"})
 
 
 @lru_cache(maxsize=1)
@@ -190,6 +190,36 @@ def _coerce_series(value: Any) -> Optional[List[Dict[str, str]]]:
     return series or None
 
 
+_KPI_ITEM_FORMATS = ("number", "currency", "percent")
+
+
+def _coerce_kpi_items(value: Any) -> Optional[List[Dict[str, str]]]:
+    """Mirrors `coerceKpiItems` in schema.ts: each entry is a `metric`-shaped
+    dict (`label`, `value_key`, optional `delta_key`/`format`/`unit`), minus
+    `id`/`type`/`title` since a rail item isn't its own widget. An item
+    missing `label` or `value_key` is dropped rather than failing the whole
+    rail — one bad item shouldn't blank the others.
+    """
+    if not isinstance(value, list):
+        return None
+    items = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            continue
+        label, value_key = raw.get("label"), raw.get("value_key")
+        if not isinstance(label, str) or not isinstance(value_key, str):
+            continue
+        item = {"label": label, "value_key": value_key}
+        if isinstance(raw.get("delta_key"), str):
+            item["delta_key"] = raw["delta_key"]
+        if raw.get("format") in _KPI_ITEM_FORMATS:
+            item["format"] = raw["format"]
+        if isinstance(raw.get("unit"), str):
+            item["unit"] = raw["unit"]
+        items.append(item)
+    return items or None
+
+
 def _coerce_field(value: Any, field: WidgetField) -> Any:
     if value is None:
         return None
@@ -202,6 +232,8 @@ def _coerce_field(value: Any, field: WidgetField) -> Any:
         return value if isinstance(value, str) and field.values and value in field.values else None
     if field.kind == "columns":
         return _coerce_columns(value)
+    if field.kind == "kpiItems":
+        return _coerce_kpi_items(value)
     if field.kind == "series":
         return _coerce_series(value)
     return None

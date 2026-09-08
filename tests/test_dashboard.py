@@ -29,9 +29,14 @@ from harumi.dashboard import (
 # validating less than it used to.
 _EXPECTED_WIDGET_CONTRACT = {
     "metric": ["value_key!*", "delta_key*", "format[number|currency|percent]", "unit"],
+    "kpi-rail": ["items!"],
     "table": ["rows_key!*", "columns!"],
+    "detail": ["items_key!*", "id_key!", "fields"],
+    "filter": ["items_key!*", "id_key!", "label_key"],
+    "treemap": ["items_key!*", "value_key!", "name_key!", "color_key"],
     "line-chart": ["data_key!*", "x_key!", "series!"],
     "bar-chart": ["data_key!*", "x_key!", "series!"],
+    "chart": ["variant![line|bar]", "data_key!*", "x_key!", "series!"],
     "gantt-chart": [
         "tasks_key!*",
         "resource_key",
@@ -239,12 +244,28 @@ class TestParseWidgetEntry:
     def test_parses_a_minimal_valid_entry_for_every_type(self):
         entries = {
             "metric": {"type": "metric", "id": "m", "title": "M", "value_key": "totals.x"},
+            "kpi-rail": {
+                "type": "kpi-rail",
+                "id": "k",
+                "title": "K",
+                "items": [{"label": "Cost", "value_key": "totals.cost"}],
+            },
             "table": {
                 "type": "table",
                 "id": "t",
                 "title": "T",
                 "rows_key": "rows",
                 "columns": [{"key": "name", "label": "Name"}],
+            },
+            "detail": {"type": "detail", "id": "d", "title": "D", "items_key": "jobs", "id_key": "id"},
+            "filter": {"type": "filter", "id": "f", "title": "F", "items_key": "jobs", "id_key": "id"},
+            "treemap": {
+                "type": "treemap",
+                "id": "tm",
+                "title": "TM",
+                "items_key": "categories",
+                "value_key": "cost",
+                "name_key": "name",
             },
             "line-chart": {
                 "type": "line-chart",
@@ -262,12 +283,27 @@ class TestParseWidgetEntry:
                 "x_key": "label",
                 "series": [{"key": "value"}],
             },
+            "chart": {
+                "type": "chart",
+                "id": "c",
+                "title": "C",
+                "variant": "line",
+                "data_key": "series",
+                "x_key": "label",
+                "series": [{"key": "value"}],
+            },
             "gantt-chart": {"type": "gantt-chart", "id": "g", "title": "G", "tasks_key": "schedule"},
+            "timeline": {"type": "timeline", "id": "tl", "title": "TL", "items_key": "schedule"},
         }
         for type_, entry in entries.items():
             widget, issue = parse_widget_entry(entry)
             assert issue is None, f"{type_} should parse cleanly"
             assert widget is not None and widget["type"] == type_
+        # Every type the artifact declares must have a minimal entry above —
+        # missing one here would mean this "every type" test silently stopped
+        # covering a type without anyone noticing, the same drift the
+        # re-vendor step above exists to catch.
+        assert set(entries) == set(widget_schemas())
 
     def test_rejects_unknown_widget_type(self):
         widget, issue = parse_widget_entry({"type": "pie-chart", "id": "p", "title": "P"})
