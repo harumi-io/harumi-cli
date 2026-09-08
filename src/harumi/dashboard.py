@@ -409,7 +409,19 @@ def parse_clock_entry(
     if kind != "intervals":
         return None, f'clock: dataset "{dataset}" is {kind}, but a clock needs an intervals dataset'
 
-    if speed is not None and (isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed) or speed <= 0):
+    if speed is not None and (
+        isinstance(speed, bool)
+        or not isinstance(speed, (int, float))
+        # `tomllib` parses a TOML integer into an arbitrary-precision Python
+        # int with no 64-bit bound check, so `speed = 10**400` parses fine.
+        # `math.isfinite()` converts its argument to a C double and raises
+        # OverflowError for anything outside float range instead of
+        # returning False — bound it first so a huge literal is reported as
+        # invalid input instead of crashing this validator.
+        or abs(speed) > 1e308
+        or not math.isfinite(speed)
+        or speed <= 0
+    ):
         return None, f'clock: "speed" must be a positive finite number, got {speed!r}'
 
     clock: Dict[str, Any] = {"dataset": dataset}

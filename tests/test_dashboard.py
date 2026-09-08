@@ -428,6 +428,17 @@ class TestParseClockEntry:
         assert clock is None
         assert message is not None and '"speed" must be a positive finite number' in message
 
+    def test_an_oversized_integer_speed_is_rejected_not_a_crash(self):
+        # tomllib parses a TOML integer into an arbitrary-precision Python int
+        # with no 64-bit bound check, so `speed = 10**400` parses fine.
+        # math.isfinite() converts its argument to a C double and raises
+        # OverflowError for anything outside float range instead of
+        # returning False — this used to crash instead of reporting a
+        # rejection.
+        clock, message = parse_clock_entry({"dataset": "schedule", "speed": 10**400}, {"schedule": "intervals"})
+        assert clock is None
+        assert message is not None and '"speed" must be a positive finite number' in message
+
 
 class TestValidateDashboardTomlDatasetsMetricsClock:
     """`validate_dashboard_toml` used to only look at `[[widgets]]` — a bad
