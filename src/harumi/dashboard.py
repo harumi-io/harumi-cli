@@ -557,6 +557,8 @@ def validate_dashboard_toml(
         _, clock_message = parse_clock_entry(raw_clock, dataset_kinds)
         if clock_message is not None:
             issues.append(WidgetIssue(None, clock_message))
+    elif raw_clock is not None:
+        issues.append(WidgetIssue(None, "clock entry is not a table"))
 
     if output is not None:
         for widget in widgets:

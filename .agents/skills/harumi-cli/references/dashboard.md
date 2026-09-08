@@ -118,6 +118,33 @@ Semantics worth knowing:
 - Set either `end_key` or `duration_key` (added to the start). If both are set, `end_key` wins. A task resolving neither is dropped from the chart.
 - `color_key` names a field grouping tasks into a categorical color (e.g. tasks belonging to the same job).
 
+## Datasets, metrics, and the clock
+
+Beyond `[[widgets]]`, a spec can declare three more top-level sections, all checked by `harumi dashboard validate` the same way a widget is — an invalid entry is reported and dropped, not silently rendered wrong:
+
+- **`[[datasets]]`** — names a dataset's shape once instead of restating it per widget. Needs `id`, `kind` (`intervals`\|`records`\|`timeline`\|`scalars`), `source_key` (a dot-path into `output.json`), and a `[datasets.roles]` sub-table naming which fields play which role: `intervals` needs `start` plus `end` or `duration`; `timeline` needs `at` or `start` plus `value`; `records`/`scalars` need no roles at all.
+- **`[[metrics]]`** — a KPI as a single read-only SQL query, run against the declared datasets and exposed to any widget under `metrics.<id>`. `sql` must be exactly one `SELECT`/`WITH`/`FROM`/`DESCRIBE`/`SUMMARIZE` statement — no writes, no `ATTACH`/`COPY`/`INSTALL`/`LOAD`/`PRAGMA`, and no table function that reads a path or URL (`read_csv`, `read_parquet`, `postgres_scan`, ...).
+- **`[clock]`** — turns one `intervals` dataset into a play/pause/scrub transport bar over the schedule chart. `dataset` must name a declared `intervals` dataset, or (with no `[[datasets]]` entry needed) a `gantt-chart`/`timeline` widget's own id, suffixed `__source` (e.g. `dataset = "schedule__source"` for `id = "schedule"`) — its rendered schedule counts as an implicit `intervals` dataset. `speed` is optional and, if set, must be a positive finite number.
+
+```toml
+[[datasets]]
+id = "schedule"
+kind = "intervals"
+source_key = "schedule"
+
+[datasets.roles]
+start = "start"
+end = "end"
+
+[[metrics]]
+id = "makespan"
+sql = "SELECT max(end) - min(start) AS value FROM schedule"
+
+[clock]
+dataset = "schedule"
+speed = 30
+```
+
 ## Layout
 
 Both keys below are per-dashboard, at the top level of each spec:
@@ -143,4 +170,4 @@ harumi dashboard validate --latest                 # + check dot-paths against t
 harumi dashboard validate --run <RUN_ID>           # + a specific run
 ```
 
-With no `PATH` it validates **every** spec it finds (locally, or in the repo with `--ref`), printing each filename as a heading, and exits non-zero if any spec would drop a widget, isn't valid TOML, or (when checking dot-paths) would render a widget empty.
+With no `PATH` it validates **every** spec it finds (locally, or in the repo with `--ref`), printing each filename as a heading, and exits non-zero if any spec would drop a widget, dataset, metric, or clock entry, isn't valid TOML, or (when checking dot-paths) would render a widget empty.

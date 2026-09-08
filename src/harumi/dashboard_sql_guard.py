@@ -11,8 +11,9 @@ etc.) — not repeated here to avoid the two copies drifting in prose.
 Unlike the widget contract, there's no generated JSON artifact for this — the
 forbidden-keyword/function lists aren't exported by `dashboard-schema.json` —
 so this file is a hand-ported second copy, not a consumer of a shared source.
-`tests/test_dashboard.py` pins a same-behavior contract (a table of queries and
-expected accept/reject) so a rule ported wrong fails a test here, but a
+`tests/test_dashboard_sql_guard.py` pins a same-behavior contract (a table of
+queries and expected accept/reject, ported case-for-case from
+`sql-guard.test.ts`) so a rule ported wrong fails a test here, but a
 `sql-guard.ts` change that isn't ported at all is only caught by a human
 reading the diff.
 

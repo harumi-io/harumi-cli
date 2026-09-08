@@ -540,6 +540,19 @@ dataset = "schedule__source"
         _, issues = validate_dashboard_toml(raw)
         assert issues == []
 
+    def test_a_non_table_clock_is_reported_not_silently_skipped(self):
+        """`[[clock]]` (double-bracketed, an easy slip since every other
+        section here — widgets, datasets, metrics — really is a list) parses
+        as a list, and `clock = "off"` parses as a string; either way this
+        used to hit `isinstance(raw_clock, dict)` as False and vanish with no
+        issue, unlike every other malformed-shape case in this file."""
+        raw = """
+[[clock]]
+dataset = "schedule"
+"""
+        _, issues = validate_dashboard_toml(raw)
+        assert len(issues) == 1 and "clock entry is not a table" in issues[0].message
+
 
 
     def test_resolves_nested_dot_path(self):
