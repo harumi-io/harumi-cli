@@ -411,6 +411,29 @@ def validate_dashboard_toml(
         for widget in widgets:
             schema = widget_schemas()[widget["type"]]
             for field in schema:
+                if field.kind == "kpiItems":
+                    # `items` itself isn't a dot-path (it's a list), but each
+                    # item's `value_key`/`delta_key` is — the doc's own claim
+                    # that a rail item has "the same value/delta/format/unit
+                    # contract as a metric widget" means it needs the same
+                    # check a standalone metric's `value_key` gets below.
+                    for index, item in enumerate(widget.get(field.toml_key) or [], start=1):
+                        for item_field in ("value_key", "delta_key"):
+                            path = item.get(item_field)
+                            if not isinstance(path, str):
+                                continue
+                            resolved = resolve_path(output, path)
+                            if resolved is None:
+                                issues.append(
+                                    WidgetIssue(
+                                        widget["id"],
+                                        f'widget "{widget["id"]}" ({widget["type"]}): '
+                                        f"{describe_missing_key(output, path)} "
+                                        f'(from "{field.toml_key}[{index}].{item_field}")',
+                                        dropped=False,
+                                    )
+                                )
+                    continue
                 if not field.is_output_path:
                     continue
                 path = widget.get(field.toml_key)

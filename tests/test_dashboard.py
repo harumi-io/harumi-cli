@@ -344,6 +344,41 @@ class TestParseWidgetEntry:
         assert widget is not None
         assert widget["columns"] == [{"key": "name", "label": "name"}]
 
+    def test_kpi_rail_drops_invalid_items_but_keeps_valid_ones(self):
+        entry = {
+            "type": "kpi-rail",
+            "id": "k",
+            "title": "K",
+            "items": [
+                {"label": "Cost", "value_key": "totals.cost", "format": "currency"},
+                {"label": "Bad"},  # missing value_key
+                {"value_key": "totals.x"},  # missing label
+                {"label": "Not a dict"},  # placeholder to keep list realistic
+            ],
+        }
+        widget, issue = parse_widget_entry(entry)
+        assert issue is None
+        assert widget is not None
+        assert widget["items"] == [{"label": "Cost", "value_key": "totals.cost", "format": "currency"}]
+
+    def test_kpi_rail_with_only_invalid_items_is_dropped(self):
+        entry = {"type": "kpi-rail", "id": "k", "title": "K", "items": [{"label": "Bad"}]}
+        widget, issue = parse_widget_entry(entry)
+        assert widget is None
+        assert issue is not None and issue.dropped is True
+
+    def test_kpi_rail_item_ignores_unknown_format_but_keeps_item(self):
+        entry = {
+            "type": "kpi-rail",
+            "id": "k",
+            "title": "K",
+            "items": [{"label": "Cost", "value_key": "totals.cost", "format": "scientific-notation"}],
+        }
+        widget, issue = parse_widget_entry(entry)
+        assert issue is None
+        assert widget is not None
+        assert widget["items"] == [{"label": "Cost", "value_key": "totals.cost"}]
+
 
 class TestResolvePath:
     def test_resolves_nested_dot_path(self):
@@ -399,6 +434,40 @@ value_key = "totals.objective"
         assert len(widgets) == 1
         assert len(issues) == 1 and issues[0].dropped is False
         assert "totals.objective" in issues[0].message
+
+    def test_kpi_rail_item_with_unresolved_value_key_is_reported_but_not_dropped(self):
+        # kpi-rail items get the same value_key/delta_key contract as a
+        # standalone metric — a typo here used to pass validate cleanly and
+        # only show up as a blank tile in the browser.
+        raw = """
+[[widgets]]
+type = "kpi-rail"
+id = "summary"
+title = "Summary"
+items = [
+  { label = "Cost", value_key = "totals.cost" },
+  { label = "Makespan", value_key = "totals.makespan", delta_key = "deltas.makespan" },
+]
+"""
+        widgets, issues = validate_dashboard_toml(raw, output={"totals": {"cost": 1}})
+        assert len(widgets) == 1
+        messages = [issue.message for issue in issues]
+        assert len(issues) == 2
+        assert all(issue.dropped is False for issue in issues)
+        assert any("totals.makespan" in m and "items[2].value_key" in m for m in messages)
+        assert any("deltas.makespan" in m and "items[2].delta_key" in m for m in messages)
+
+    def test_kpi_rail_item_with_resolved_value_key_has_no_issues(self):
+        raw = """
+[[widgets]]
+type = "kpi-rail"
+id = "summary"
+title = "Summary"
+items = [{ label = "Cost", value_key = "totals.cost" }]
+"""
+        widgets, issues = validate_dashboard_toml(raw, output={"totals": {"cost": 1}})
+        assert len(widgets) == 1
+        assert issues == []
 
     def test_resolved_dot_path_has_no_issues(self):
         raw = """
