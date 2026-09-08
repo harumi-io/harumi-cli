@@ -1,0 +1,15 @@
+name: Auto-add to Project
+on:
+  issues:
+    types: [opened, labeled]
+  pull_request:
+    types: [opened, labeled]
+
+jobs:
+  add-to-project:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/add-to-project@v2
+        with:
+          project-url: https://github.com/orgs/harumi-io/projects/4
+          github-token: ${{ secrets.ORG_PROJECT_PAT }}
