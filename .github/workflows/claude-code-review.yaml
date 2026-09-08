@@ -180,7 +180,14 @@ jobs:
             it helps clarify the solution).
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          MAX_DIFF_BYTES: 150000
+          # Below Linux's MAX_ARG_STRLEN (32 pages = 131072 bytes): the assembled prompt below
+          # is written into $GITHUB_ENV and inherited as a single environment-variable string
+          # by every later process in the job. A value that reaches that ceiling makes bash
+          # itself fail to start with "Argument list too long" — not just this action's Claude
+          # invocation but the run's post-job cleanup steps too, since they inherit the same
+          # oversized env block. 150000 sat above the ceiling with no headroom for the prompt
+          # text wrapped around the diff; 100000 leaves enough margin for that text.
+          MAX_DIFF_BYTES: 100000
         run: |
           set -euo pipefail
 
