@@ -439,6 +439,16 @@ class TestParseClockEntry:
         assert clock is None
         assert message is not None and '"speed" must be a positive finite number' in message
 
+    def test_a_speed_just_under_float_max_is_accepted_not_rejected_by_an_imprecise_bound(self):
+        # A guard against OverflowError that used a round-number threshold
+        # below the real float ceiling (~1.7976931348623157e308) would wrongly
+        # reject this legitimately finite value.
+        speed = 15 * 10**307
+        assert speed < 1.8e308  # still comfortably finite as a float
+        clock, message = parse_clock_entry({"dataset": "schedule", "speed": speed}, {"schedule": "intervals"})
+        assert message is None
+        assert clock == {"dataset": "schedule", "speed": speed}
+
 
 class TestValidateDashboardTomlDatasetsMetricsClock:
     """`validate_dashboard_toml` used to only look at `[[widgets]]` — a bad
