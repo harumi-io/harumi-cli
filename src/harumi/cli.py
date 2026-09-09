@@ -182,18 +182,28 @@ _BANNER = r"""
 
 
 def _print_banner_if_bare_entrypoint() -> None:
-    """Show the banner only for the three read-only, no-side-effect
-    invocations: bare `harumi`, `harumi --help`, `harumi --version`.
+    """Show the banner only for the two purely-decorative invocations: bare
+    `harumi` and `harumi --help`.
 
-    Deliberately narrow: `harumi <command> --help` (e.g. `harumi login
-    --help`) does NOT match, so the banner decorates the entry point once
-    rather than prepending itself to every command's help text. Checked
-    against raw argv in `main()` (the actual process entry point) rather than
-    as a Typer/Click callback, so it can't interfere with Click's own eager
-    `--help`/`--version` handling — and `tests/test_cli.py` invokes `app()`
-    directly via `CliRunner`, never `main()`, so this never touches test output.
+    Deliberately excludes `--version`: `.agents/skills/harumi-cli-setup/
+    SKILL.md` documents `harumi --version` as printing *exactly* `harumi
+    <x.y.z>` and uses that exact shape both to verify a fresh install and to
+    disambiguate the real CLI from an unrelated same-named `harumi` shadowing
+    it on PATH. Prepending ASCII art would silently break that machine-parsed
+    contract (and anything scripted against it) for no benefit — the banner
+    is decoration for a human looking at help text, not something `--version`
+    callers expect.
+
+    Also deliberately narrow the other way: `harumi <command> --help` (e.g.
+    `harumi login --help`) does NOT match, so the banner decorates the entry
+    point once rather than prepending itself to every command's help text.
+    Checked against raw argv in `main()` (the actual process entry point)
+    rather than as a Typer/Click callback, so it can't interfere with
+    Click's own eager `--help` handling — and `tests/test_cli.py` invokes
+    `app()` directly via `CliRunner`, never `main()`, so this never touches
+    test output.
     """
-    if sys.argv[1:] in ([], ["--help"], ["--version"]):
+    if sys.argv[1:] in ([], ["--help"]):
         console.print(f"[bold magenta]{_BANNER}[/bold magenta]")
 
 

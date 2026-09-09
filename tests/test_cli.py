@@ -81,9 +81,9 @@ def test_every_command_builds():
 
 @pytest.mark.parametrize(
     "argv",
-    [[], ["--help"], ["--version"]],
+    [[], ["--help"]],
 )
-def test_banner_shown_for_bare_help_and_version(argv, monkeypatch, capsys):
+def test_banner_shown_for_bare_and_help(argv, monkeypatch, capsys):
     """The banner is an entry-point decoration (see `main()`), not a Click
     callback, so it's checked against raw argv rather than through
     `CliRunner` — this pins that argv match directly."""
@@ -94,9 +94,13 @@ def test_banner_shown_for_bare_help_and_version(argv, monkeypatch, capsys):
 
 @pytest.mark.parametrize(
     "argv",
-    [["login"], ["login", "--help"], ["whoami"], ["--env", "staging"]],
+    [["--version"], ["login"], ["login", "--help"], ["whoami"], ["--env", "staging"]],
 )
-def test_banner_not_shown_for_real_commands(argv, monkeypatch, capsys):
+def test_banner_not_shown_for_version_and_real_commands(argv, monkeypatch, capsys):
+    """`--version` is deliberately excluded: harumi-cli-setup/SKILL.md
+    documents its output as an exact-match `harumi <x.y.z>` contract used to
+    verify installs and disambiguate a shadowing same-named binary — banner
+    art would break that machine-parsed shape."""
     monkeypatch.setattr("sys.argv", ["harumi"] + argv)
     cli._print_banner_if_bare_entrypoint()
     assert capsys.readouterr().out == ""
