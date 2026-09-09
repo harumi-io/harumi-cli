@@ -1,0 +1,21 @@
+name: Auto-add to Project
+on:
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  add-to-project:
+    runs-on: ubuntu-latest
+    # This job never touches GITHUB_TOKEN -- actions/add-to-project authenticates every API
+    # call with secrets.ORG_PROJECT_PAT instead. Declared empty so this workflow doesn't
+    # inherit write access to contents/issues/PRs it has no use for.
+    permissions: {}
+    steps:
+      # Pinned to a commit SHA, not the mutable @v2 tag: this step is handed an org-scoped
+      # PAT, so a tag re-point (legitimate or via a compromised maintainer account) would
+      # otherwise pull in new code with no review. Matches the pin used in the shared copy
+      # of this workflow in harumi-io/.github-private -- keep both in sync.
+      - uses: actions/add-to-project@5afcf98fcd03f1c2f92c3c83f58ae24323cc57fd # v2.0.0
+        with:
+          project-url: https://github.com/orgs/harumi-io/projects/4
+          github-token: ${{ secrets.ORG_PROJECT_PAT }}

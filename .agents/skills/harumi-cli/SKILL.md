@@ -111,6 +111,8 @@ harumi repo branches                                    # list versions; live br
 harumi repo branch-create <name> [--from BRANCH]
 harumi repo branch-rm <name>
 harumi repo promote <name> [--title T] [--delete-after]  # merge a version into live
+harumi repo commits [path] [--ref REF] [--page N] [--per-page N]  # commit history, whole repo or one path
+harumi repo readiness [--ref REF]                       # everything blocking this project from running
 ```
 
 All `repo` subcommands accept `--project` to override the `.harumi` binding.

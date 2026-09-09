@@ -1,5 +1,5 @@
 {
-  "cli_version": "0.5.0",
+  "cli_version": "0.6.0",
   "commands": [
     {
       "path": "config set-org",
@@ -9,8 +9,11 @@
           "opts": [
             "org_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Organization id to persist as X-Organization."
         }
@@ -24,8 +27,11 @@
           "opts": [
             "path"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "A single dashboard spec to validate (default: every ./dashboard/*.toml, else ./dashboard.toml)."
         },
@@ -33,8 +39,11 @@
           "opts": [
             "--ref"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Validate the repo's specs on this branch/commit instead of local files."
         },
@@ -42,8 +51,11 @@
           "opts": [
             "--against"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Check widget dot-paths against this local output.json."
         },
@@ -51,8 +63,11 @@
           "opts": [
             "--run"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Check widget dot-paths against this run's output.json."
         },
@@ -60,8 +75,11 @@
           "opts": [
             "--latest"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Check widget dot-paths against the most recent run's output.json."
         },
@@ -70,8 +88,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -79,8 +100,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -88,8 +112,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -103,8 +130,11 @@
           "opts": [
             "--type"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Only show this widget type."
         }
@@ -118,8 +148,11 @@
           "opts": [
             "name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Datasource name (unique per project)."
         },
@@ -127,8 +160,11 @@
           "opts": [
             "--type"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "postgresql | mysql | sqlserver | oracle"
         },
@@ -136,8 +172,11 @@
           "opts": [
             "--host"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Database host."
         },
@@ -145,8 +184,11 @@
           "opts": [
             "--port"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "int",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Database port."
         },
@@ -154,8 +196,11 @@
           "opts": [
             "--database"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Database name."
         },
@@ -163,8 +208,11 @@
           "opts": [
             "--username"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Database username."
         },
@@ -172,8 +220,11 @@
           "opts": [
             "--use-proxy"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Route traffic via the mTLS proxy."
         },
@@ -181,8 +232,11 @@
           "opts": [
             "--proxy-host"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Proxy target host. Used when --use-proxy is set."
         },
@@ -190,8 +244,11 @@
           "opts": [
             "--proxy-port"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "int",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Proxy target port. Used when --use-proxy is set."
         },
@@ -199,8 +256,11 @@
           "opts": [
             "--proxy-server-name"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Proxy TLS server name. Used when --use-proxy is set."
         },
@@ -208,8 +268,11 @@
           "opts": [
             "--proxy-tls-ca-cert"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Path to the proxy CA certificate PEM. Required with --use-proxy."
         },
@@ -217,8 +280,11 @@
           "opts": [
             "--proxy-tls-client-cert"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Path to the client certificate PEM. Required with --use-proxy."
         },
@@ -226,8 +292,11 @@
           "opts": [
             "--proxy-tls-client-key"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Path to the client private key PEM. Required with --use-proxy."
         },
@@ -236,8 +305,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -245,8 +317,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -254,8 +329,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -269,8 +347,11 @@
           "opts": [
             "name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Datasource name."
         },
@@ -279,8 +360,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -288,8 +372,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -297,8 +384,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -313,8 +403,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -322,8 +415,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -331,8 +427,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -346,8 +445,11 @@
           "opts": [
             "name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Datasource name."
         },
@@ -355,8 +457,11 @@
           "opts": [
             "--sql"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "SELECT/WITH-only SQL to run."
         },
@@ -364,8 +469,11 @@
           "opts": [
             "--limit"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "int",
           "required": false,
+          "multiple": false,
           "default": 10000,
           "help": "Max rows to return (server-capped at 100000)."
         },
@@ -373,8 +481,11 @@
           "opts": [
             "--csv"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Write results to this CSV path instead of printing a table."
         },
@@ -383,8 +494,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -392,8 +506,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -401,8 +518,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -416,8 +536,11 @@
           "opts": [
             "name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Datasource name."
         },
@@ -426,8 +549,11 @@
             "--yes",
             "-y"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
         },
@@ -436,8 +562,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -445,8 +574,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -454,8 +586,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -469,8 +604,11 @@
           "opts": [
             "--type"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "postgresql | mysql | sqlserver | oracle"
         },
@@ -478,8 +616,11 @@
           "opts": [
             "--host"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Database host."
         },
@@ -487,8 +628,11 @@
           "opts": [
             "--port"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "int",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Database port."
         },
@@ -496,8 +640,11 @@
           "opts": [
             "--database"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Database name."
         },
@@ -505,8 +652,11 @@
           "opts": [
             "--username"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Database username."
         },
@@ -514,8 +664,11 @@
           "opts": [
             "--use-proxy"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Route traffic via the mTLS proxy."
         },
@@ -523,8 +676,11 @@
           "opts": [
             "--proxy-host"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Proxy target host. Used when --use-proxy is set."
         },
@@ -532,8 +688,11 @@
           "opts": [
             "--proxy-port"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "int",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Proxy target port. Used when --use-proxy is set."
         },
@@ -541,8 +700,11 @@
           "opts": [
             "--proxy-server-name"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Proxy TLS server name. Used when --use-proxy is set."
         },
@@ -550,8 +712,11 @@
           "opts": [
             "--proxy-tls-ca-cert"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Path to the proxy CA certificate PEM. Required with --use-proxy."
         },
@@ -559,8 +724,11 @@
           "opts": [
             "--proxy-tls-client-cert"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Path to the client certificate PEM. Required with --use-proxy."
         },
@@ -568,8 +736,11 @@
           "opts": [
             "--proxy-tls-client-key"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Path to the client private key PEM. Required with --use-proxy."
         },
@@ -577,8 +748,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -586,8 +760,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -601,8 +778,11 @@
           "opts": [
             "name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Datasource name."
         },
@@ -610,8 +790,11 @@
           "opts": [
             "--name"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Rename the datasource."
         },
@@ -619,8 +802,11 @@
           "opts": [
             "--type"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "postgresql | mysql | sqlserver | oracle"
         },
@@ -628,8 +814,11 @@
           "opts": [
             "--host"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Database host."
         },
@@ -637,8 +826,11 @@
           "opts": [
             "--port"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "int",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Database port."
         },
@@ -646,8 +838,11 @@
           "opts": [
             "--database"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Database name."
         },
@@ -655,8 +850,11 @@
           "opts": [
             "--username"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Database username."
         },
@@ -664,8 +862,11 @@
           "opts": [
             "--set-credentials"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Prompt to replace the stored credentials."
         },
@@ -673,8 +874,13 @@
           "opts": [
             "--use-proxy"
           ],
+          "secondary_opts": [
+            "--no-use-proxy"
+          ],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Route traffic via the mTLS proxy."
         },
@@ -682,8 +888,11 @@
           "opts": [
             "--proxy-host"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Proxy target host. Used when --use-proxy is set."
         },
@@ -691,8 +900,11 @@
           "opts": [
             "--proxy-port"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "int",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Proxy target port. Used when --use-proxy is set."
         },
@@ -700,8 +912,11 @@
           "opts": [
             "--proxy-server-name"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Proxy TLS server name. Used when --use-proxy is set."
         },
@@ -709,8 +924,11 @@
           "opts": [
             "--proxy-tls-ca-cert"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Path to a new proxy CA certificate PEM."
         },
@@ -718,8 +936,11 @@
           "opts": [
             "--proxy-tls-client-cert"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Path to a new client certificate PEM."
         },
@@ -727,8 +948,11 @@
           "opts": [
             "--proxy-tls-client-key"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Path to a new client private key PEM."
         },
@@ -737,8 +961,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -746,8 +973,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -755,8 +985,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -776,8 +1009,11 @@
             "--all",
             "-a"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Include internal (VPN-only) environments."
         }
@@ -791,8 +1027,11 @@
           "opts": [
             "name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Environment to make the default (e.g. production, staging)."
         }
@@ -806,8 +1045,11 @@
           "opts": [
             "remote_path"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "File path within the project's files."
         },
@@ -816,8 +1058,11 @@
             "--output",
             "-o"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Local path to write to (default: the remote file's name)."
         },
@@ -826,8 +1071,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -835,8 +1083,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -844,8 +1095,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -860,8 +1114,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -869,8 +1126,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -878,8 +1138,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -893,8 +1156,11 @@
           "opts": [
             "local_path"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "path",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Local file to upload."
         },
@@ -902,8 +1168,11 @@
           "opts": [
             "remote_path"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Destination path within the project's files (default: the local file's name)."
         },
@@ -912,8 +1181,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -921,8 +1193,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -930,8 +1205,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -945,8 +1223,11 @@
           "opts": [
             "remote_path"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "File path within the project's files."
         },
@@ -955,8 +1236,11 @@
             "--yes",
             "-y"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
         },
@@ -965,8 +1249,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -974,8 +1261,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -983,8 +1273,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -998,8 +1291,11 @@
           "opts": [
             "path"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Folder to import (an unzipped project export). Defaults to the current directory."
         },
@@ -1007,8 +1303,11 @@
           "opts": [
             "--project-name"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Name for the new project (defaults to the folder name)."
         },
@@ -1016,8 +1315,11 @@
           "opts": [
             "--from-git"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Also clone this git URL (the project's old GitHub repo) flat into the folder before importing."
         },
@@ -1025,8 +1327,13 @@
           "opts": [
             "--bind"
           ],
+          "secondary_opts": [
+            "--no-bind"
+          ],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": true,
           "help": "Bind the folder to the new project (like `harumi init`)."
         },
@@ -1034,8 +1341,11 @@
           "opts": [
             "--personal"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Create in your personal workspace, ignoring the configured org."
         },
@@ -1043,8 +1353,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1052,8 +1365,11 @@
           "opts": [
             "--git-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the Harumi Git base URL."
         },
@@ -1061,8 +1377,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1077,8 +1396,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Harumi project id to bind this directory to."
         },
@@ -1086,8 +1408,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1095,8 +1420,11 @@
           "opts": [
             "--git-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the Harumi Git base URL."
         },
@@ -1104,8 +1432,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1119,8 +1450,11 @@
           "opts": [
             "--email"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Account email. Prompted if omitted."
         },
@@ -1128,8 +1462,11 @@
           "opts": [
             "--signup"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Create a new account for this email before sending the code."
         },
@@ -1137,8 +1474,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override harumi-api base URL."
         },
@@ -1146,8 +1486,11 @@
           "opts": [
             "--git-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override Harumi Git base URL."
         }
@@ -1166,8 +1509,11 @@
           "opts": [
             "business_name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Organization name."
         },
@@ -1175,8 +1521,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         }
@@ -1190,8 +1539,11 @@
           "opts": [
             "organization_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Organization id."
         },
@@ -1200,8 +1552,11 @@
             "--yes",
             "-y"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
         },
@@ -1209,8 +1564,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         }
@@ -1224,8 +1582,11 @@
           "opts": [
             "organization_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Organization id."
         },
@@ -1233,8 +1594,11 @@
           "opts": [
             "--email"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Email of the person to invite."
         },
@@ -1242,8 +1606,11 @@
           "opts": [
             "--role"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": "member",
           "help": "owner | admin | member | viewer"
         },
@@ -1251,8 +1618,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         }
@@ -1266,8 +1636,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         }
@@ -1281,8 +1654,11 @@
           "opts": [
             "organization_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Organization id."
         },
@@ -1290,8 +1666,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         }
@@ -1305,8 +1684,11 @@
           "opts": [
             "organization_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Organization id."
         },
@@ -1314,8 +1696,11 @@
           "opts": [
             "user_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "User id."
         },
@@ -1324,8 +1709,11 @@
             "--yes",
             "-y"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
         },
@@ -1333,8 +1721,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         }
@@ -1348,8 +1739,11 @@
           "opts": [
             "organization_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Organization id."
         },
@@ -1357,8 +1751,11 @@
           "opts": [
             "business_name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "New organization name."
         },
@@ -1366,8 +1763,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         }
@@ -1381,8 +1781,11 @@
           "opts": [
             "organization_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Organization id."
         },
@@ -1390,8 +1793,11 @@
           "opts": [
             "user_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "User id."
         },
@@ -1399,8 +1805,11 @@
           "opts": [
             "--role"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "owner | admin | member | viewer"
         },
@@ -1408,8 +1817,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         }
@@ -1424,8 +1836,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id (uses .harumi binding if omitted)."
         },
@@ -1433,8 +1848,11 @@
           "opts": [
             "--latest"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Show only the most recent run."
         },
@@ -1442,8 +1860,11 @@
           "opts": [
             "--download"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Download this run id's committed output."
         },
@@ -1452,8 +1873,11 @@
             "--output-dir",
             "-o"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Directory to download into. Default: current directory."
         },
@@ -1461,8 +1885,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1470,8 +1897,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1485,8 +1915,11 @@
           "opts": [
             "--first-name"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "New first name."
         },
@@ -1494,8 +1927,11 @@
           "opts": [
             "--last-name"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "New last name."
         },
@@ -1503,8 +1939,11 @@
           "opts": [
             "--bio"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "New bio text."
         },
@@ -1512,8 +1951,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1521,8 +1963,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1536,8 +1981,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1545,8 +1993,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1560,8 +2011,11 @@
           "opts": [
             "name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Project name."
         },
@@ -1569,8 +2023,11 @@
           "opts": [
             "--customer-id"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Organization id to create the project under. Defaults to the configured org."
         },
@@ -1578,8 +2035,11 @@
           "opts": [
             "--personal"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Create in your personal workspace, ignoring the configured org."
         },
@@ -1587,8 +2047,11 @@
           "opts": [
             "--template-id"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Template id to pre-configure the project (optional)."
         },
@@ -1596,8 +2059,13 @@
           "opts": [
             "--bind"
           ],
+          "secondary_opts": [
+            "--no-bind"
+          ],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": true,
           "help": "Bind the current directory to the new project (like `harumi init`)."
         },
@@ -1605,8 +2073,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1614,8 +2085,11 @@
           "opts": [
             "--git-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the Harumi Git base URL."
         },
@@ -1623,8 +2097,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1638,8 +2115,11 @@
           "opts": [
             "project_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Project id."
         },
@@ -1648,8 +2128,11 @@
             "--yes",
             "-y"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
         },
@@ -1657,8 +2140,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1666,8 +2152,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1681,8 +2170,11 @@
           "opts": [
             "project_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Project id."
         },
@@ -1690,8 +2182,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1699,8 +2194,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1714,8 +2212,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1723,8 +2224,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1738,8 +2242,11 @@
           "opts": [
             "project_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Project id."
         },
@@ -1747,8 +2254,11 @@
           "opts": [
             "name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "New project name."
         },
@@ -1756,8 +2266,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1765,8 +2278,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1780,8 +2296,11 @@
           "opts": [
             "name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "New branch (version) name."
         },
@@ -1789,8 +2308,11 @@
           "opts": [
             "--from"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Base branch (defaults to the live branch)."
         },
@@ -1799,8 +2321,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -1808,8 +2333,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1817,8 +2345,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1832,8 +2363,11 @@
           "opts": [
             "name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Branch (version) name."
         },
@@ -1842,8 +2376,11 @@
             "--yes",
             "-y"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
         },
@@ -1852,8 +2389,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -1861,8 +2401,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1870,8 +2413,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1886,8 +2432,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -1895,8 +2444,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1904,8 +2456,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1919,8 +2474,11 @@
           "opts": [
             "path"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "File path within the repo."
         },
@@ -1928,8 +2486,11 @@
           "opts": [
             "--ref"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Branch/commit to read from."
         },
@@ -1938,8 +2499,11 @@
             "--output",
             "-o"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Write to this local path instead of stdout."
         },
@@ -1948,8 +2512,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -1957,8 +2524,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -1966,8 +2536,102 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "repo commits",
+      "help": "Show recent commit history.",
+      "params": [
+        {
+          "opts": [
+            "path"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "File or folder to filter history to (default: the whole branch)."
+        },
+        {
+          "opts": [
+            "--ref"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Branch/commit to read history on (defaults to the default branch)."
+        },
+        {
+          "opts": [
+            "--page"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "int",
+          "required": false,
+          "multiple": false,
+          "default": 1,
+          "help": "Page number, 1-indexed."
+        },
+        {
+          "opts": [
+            "--per-page"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "int",
+          "required": false,
+          "multiple": false,
+          "default": 30,
+          "help": "Commits per page (max 100)."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -1981,8 +2645,11 @@
           "opts": [
             "path"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": "",
           "help": "Folder within the repo (default: repo root)."
         },
@@ -1990,8 +2657,11 @@
           "opts": [
             "--ref"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Branch/commit to browse (defaults to the default branch)."
         },
@@ -2000,8 +2670,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2009,8 +2682,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2018,8 +2694,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2034,8 +2713,11 @@
             "--output",
             "-o"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Local zip path to write."
         },
@@ -2043,8 +2725,11 @@
           "opts": [
             "--path"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": "",
           "help": "Folder within the repo to download (default: whole repo)."
         },
@@ -2052,8 +2737,11 @@
           "opts": [
             "--ref"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Branch/commit to download from."
         },
@@ -2062,8 +2750,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2071,8 +2762,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2080,8 +2774,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2095,8 +2792,11 @@
           "opts": [
             "--ref"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Branch/commit to list (defaults to the default branch)."
         },
@@ -2105,8 +2805,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2114,8 +2817,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2123,8 +2829,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2138,8 +2847,11 @@
           "opts": [
             "from_path"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Source path (file or folder) within the repo."
         },
@@ -2147,8 +2859,11 @@
           "opts": [
             "to_path"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Destination path within the repo."
         },
@@ -2157,8 +2872,11 @@
             "--message",
             "-m"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Commit message."
         },
@@ -2166,8 +2884,11 @@
           "opts": [
             "--branch"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Target branch (defaults to the default branch)."
         },
@@ -2176,8 +2897,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2185,8 +2909,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2194,8 +2921,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2209,8 +2939,11 @@
           "opts": [
             "name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Version (branch) to promote into live."
         },
@@ -2218,8 +2951,11 @@
           "opts": [
             "--title"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "PR/merge title."
         },
@@ -2227,8 +2963,11 @@
           "opts": [
             "--delete-after"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Delete the version branch after a successful promote."
         },
@@ -2237,8 +2976,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2246,8 +2988,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2255,8 +3000,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2270,8 +3018,11 @@
           "opts": [
             "local_path"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "path",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Local file to upload."
         },
@@ -2279,8 +3030,11 @@
           "opts": [
             "repo_path"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Destination path within the repo."
         },
@@ -2289,8 +3043,11 @@
             "--message",
             "-m"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Commit message."
         },
@@ -2298,8 +3055,11 @@
           "opts": [
             "--branch"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Target branch (defaults to the default branch)."
         },
@@ -2308,8 +3068,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2317,8 +3080,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2326,8 +3092,66 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "repo readiness",
+      "help": "Report everything blocking this project from running, before you run it.",
+      "params": [
+        {
+          "opts": [
+            "--ref"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Branch/commit to check (defaults to the default branch)."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2341,8 +3165,11 @@
           "opts": [
             "path"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "File or folder path within the repo."
         },
@@ -2351,8 +3178,11 @@
             "--message",
             "-m"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Commit message."
         },
@@ -2360,8 +3190,11 @@
           "opts": [
             "--branch"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Target branch (defaults to the default branch)."
         },
@@ -2370,8 +3203,11 @@
             "--yes",
             "-y"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
         },
@@ -2380,8 +3216,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2389,8 +3228,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2398,8 +3240,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2414,8 +3259,11 @@
             "--branch",
             "-b"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Run a specific branch."
         },
@@ -2423,8 +3271,11 @@
           "opts": [
             "--commit"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Run a specific commit SHA."
         },
@@ -2433,8 +3284,11 @@
             "--command",
             "-c"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi.toml command."
         },
@@ -2443,8 +3297,11 @@
             "--kernel",
             "-k"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the kernel spec."
         },
@@ -2453,8 +3310,11 @@
             "--watch",
             "-w"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Block until the run finishes."
         },
@@ -2463,8 +3323,11 @@
             "--output-dir",
             "-o"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "path",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Download output artifacts here (requires --watch)."
         },
@@ -2472,8 +3335,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2481,8 +3347,11 @@
           "opts": [
             "--git-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the Harumi Git base URL."
         },
@@ -2490,8 +3359,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2505,8 +3377,11 @@
           "opts": [
             "run_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Run id."
         },
@@ -2515,8 +3390,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2524,8 +3402,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2533,8 +3414,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2548,8 +3432,11 @@
           "opts": [
             "run_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Run id."
         },
@@ -2558,8 +3445,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2567,8 +3457,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2576,8 +3469,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2592,8 +3488,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2601,8 +3500,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2610,8 +3512,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2625,8 +3530,11 @@
           "opts": [
             "--cron"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Raw 5-field cron expression, interpreted in UTC (e.g. \"0 9 * * *\")."
         },
@@ -2634,8 +3542,11 @@
           "opts": [
             "--start-at"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "ISO-8601 datetime. Defaults to now (UTC)."
         },
@@ -2643,8 +3554,11 @@
           "opts": [
             "--git-branch"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": "main",
           "help": "Branch to run on each fire."
         },
@@ -2652,8 +3566,11 @@
           "opts": [
             "--git-commit"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Pin to a specific commit instead of the branch tip."
         },
@@ -2661,8 +3578,11 @@
           "opts": [
             "--command"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi.toml command."
         },
@@ -2670,8 +3590,11 @@
           "opts": [
             "--kernel"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the kernel spec."
         },
@@ -2679,8 +3602,11 @@
           "opts": [
             "--output-format"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Output format for scheduled runs."
         },
@@ -2688,8 +3614,11 @@
           "opts": [
             "--email-to"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "only-me | everyone | comma-separated emails."
         },
@@ -2698,8 +3627,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2707,8 +3639,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2716,8 +3651,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2731,8 +3669,11 @@
           "opts": [
             "schedule_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Schedule id."
         },
@@ -2741,8 +3682,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2750,8 +3694,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2759,8 +3706,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2775,8 +3725,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2784,8 +3737,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2793,8 +3749,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2808,8 +3767,11 @@
           "opts": [
             "schedule_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Schedule id."
         },
@@ -2818,8 +3780,11 @@
             "--yes",
             "-y"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
         },
@@ -2828,8 +3793,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2837,8 +3805,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2846,8 +3817,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2861,8 +3835,11 @@
           "opts": [
             "schedule_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Schedule id."
         },
@@ -2870,8 +3847,11 @@
           "opts": [
             "--cron"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Raw 5-field cron expression, interpreted in UTC (e.g. \"0 9 * * *\")."
         },
@@ -2879,8 +3859,11 @@
           "opts": [
             "--start-at"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "ISO-8601 datetime."
         },
@@ -2888,8 +3871,11 @@
           "opts": [
             "--git-branch"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Branch to run on each fire."
         },
@@ -2897,8 +3883,11 @@
           "opts": [
             "--git-commit"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Pin to a specific commit instead of the branch tip."
         },
@@ -2906,8 +3895,11 @@
           "opts": [
             "--command"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi.toml command."
         },
@@ -2915,8 +3907,11 @@
           "opts": [
             "--kernel"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the kernel spec."
         },
@@ -2924,8 +3919,11 @@
           "opts": [
             "--output-format"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Output format for scheduled runs."
         },
@@ -2933,8 +3931,11 @@
           "opts": [
             "--email-to"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "only-me | everyone | comma-separated emails."
         },
@@ -2943,8 +3944,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2952,8 +3956,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2961,8 +3968,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -2977,8 +3987,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -2986,8 +3999,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -2995,8 +4011,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -3010,8 +4029,11 @@
           "opts": [
             "name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Secret name."
         },
@@ -3020,8 +4042,11 @@
             "--yes",
             "-y"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
         },
@@ -3030,8 +4055,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -3039,8 +4067,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -3048,8 +4079,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -3063,8 +4097,11 @@
           "opts": [
             "name"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Secret (env var) name."
         },
@@ -3073,8 +4110,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -3082,8 +4122,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -3091,8 +4134,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -3106,17 +4152,39 @@
           "opts": [
             "--label"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Optional name to tell links apart, e.g. 'Client dashboard'."
         },
         {
           "opts": [
-            "--chat"
+            "--app"
           ],
+          "secondary_opts": [
+            "--no-app"
+          ],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Let visitors open the project's deployed Streamlit app."
+        },
+        {
+          "opts": [
+            "--chat"
+          ],
+          "secondary_opts": [
+            "--no-chat"
+          ],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
           "default": false,
           "help": "Let signed-in visitors ask the read-only assistant about this project."
         },
@@ -3124,8 +4192,13 @@
           "opts": [
             "--run-history"
           ],
+          "secondary_opts": [
+            "--no-run-history"
+          ],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Let visitors browse past runs, not just the latest one."
         },
@@ -3133,8 +4206,13 @@
           "opts": [
             "--run-control"
           ],
+          "secondary_opts": [
+            "--no-run-control"
+          ],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Let signed-in visitors run now, override the kernel, and manage schedules."
         },
@@ -3142,8 +4220,13 @@
           "opts": [
             "--io-control"
           ],
+          "secondary_opts": [
+            "--no-io-control"
+          ],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Let visitors control/edit this project's inputs and outputs."
         },
@@ -3152,8 +4235,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -3161,8 +4247,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -3170,8 +4259,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -3185,8 +4277,11 @@
           "opts": [
             "link_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Share link id."
         },
@@ -3195,8 +4290,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -3204,8 +4302,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -3213,8 +4314,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -3229,8 +4333,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -3238,8 +4345,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -3247,8 +4357,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -3262,8 +4375,11 @@
           "opts": [
             "link_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Share link id."
         },
@@ -3272,8 +4388,11 @@
             "--yes",
             "-y"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
         },
@@ -3282,8 +4401,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -3291,8 +4413,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -3300,8 +4425,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -3315,8 +4443,11 @@
           "opts": [
             "link_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Share link id."
         },
@@ -3325,8 +4456,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -3334,8 +4468,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -3343,8 +4480,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -3358,8 +4498,11 @@
           "opts": [
             "link_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Share link id."
         },
@@ -3368,8 +4511,11 @@
             "--yes",
             "-y"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
         },
@@ -3378,8 +4524,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -3387,8 +4536,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -3396,8 +4548,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -3411,8 +4566,11 @@
           "opts": [
             "link_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Share link id."
         },
@@ -3421,8 +4579,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -3430,8 +4591,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -3439,8 +4603,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -3454,8 +4621,11 @@
           "opts": [
             "link_id"
           ],
+          "secondary_opts": [],
+          "kind": "argument",
           "type": "str",
           "required": true,
+          "multiple": false,
           "default": null,
           "help": "Share link id."
         },
@@ -3463,8 +4633,11 @@
           "opts": [
             "--label"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Rename the link."
         },
@@ -3472,17 +4645,41 @@
           "opts": [
             "--enable"
           ],
+          "secondary_opts": [
+            "--disable"
+          ],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Turn the link on or off. The old URL stops working immediately when disabled."
         },
         {
           "opts": [
-            "--chat"
+            "--app"
           ],
+          "secondary_opts": [
+            "--no-app"
+          ],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Let visitors open the project's deployed Streamlit app."
+        },
+        {
+          "opts": [
+            "--chat"
+          ],
+          "secondary_opts": [
+            "--no-chat"
+          ],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
           "default": null,
           "help": "Let signed-in visitors ask the read-only assistant about this project."
         },
@@ -3490,8 +4687,13 @@
           "opts": [
             "--run-history"
           ],
+          "secondary_opts": [
+            "--no-run-history"
+          ],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Let visitors browse past runs, not just the latest one."
         },
@@ -3499,8 +4701,13 @@
           "opts": [
             "--run-control"
           ],
+          "secondary_opts": [
+            "--no-run-control"
+          ],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Let signed-in visitors run now, override the kernel, and manage schedules."
         },
@@ -3508,8 +4715,13 @@
           "opts": [
             "--io-control"
           ],
+          "secondary_opts": [
+            "--no-io-control"
+          ],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Let visitors control/edit this project's inputs and outputs."
         },
@@ -3518,8 +4730,11 @@
             "--project",
             "-p"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Project id. Uses the .harumi binding if omitted."
         },
@@ -3527,8 +4742,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -3536,8 +4754,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -3552,8 +4773,11 @@
             "--agent",
             "-a"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": true,
           "default": null,
           "help": "Target agent(s): cursor, claude-code, codex, universal. Default: auto-detect."
         },
@@ -3561,8 +4785,11 @@
           "opts": [
             "--project"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Write to ./.agents/skills instead of a global agent directory."
         },
@@ -3570,8 +4797,11 @@
           "opts": [
             "--dry-run"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Print what would be written without writing it."
         },
@@ -3579,8 +4809,11 @@
           "opts": [
             "--force"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "boolean",
           "required": false,
+          "multiple": false,
           "default": false,
           "help": "Overwrite a destination even if it doesn't look like a skill."
         }
@@ -3599,8 +4832,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -3608,8 +4844,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -3623,8 +4862,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -3632,8 +4874,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }
@@ -3647,8 +4892,11 @@
           "opts": [
             "--api-url"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
         },
@@ -3656,8 +4904,11 @@
           "opts": [
             "--org"
           ],
+          "secondary_opts": [],
+          "kind": "option",
           "type": "str",
           "required": false,
+          "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
         }

@@ -30,17 +30,26 @@ The platform's parser (`parseDashboardConfig` in harumi-platform) is deliberatel
 
 Always run `harumi dashboard validate` before `harumi repo put` (or before telling the user a dashboard edit is done) — it's the only place in the toolchain that fails loudly.
 
-## The five widget types
+## The widget types
 
 Get the live, in-code reference with `harumi dashboard widgets` (add `--type metric` to filter to one). Summary:
 
 | type | required keys | optional keys |
 |---|---|---|
 | `metric` | `value_key` | `delta_key`, `format` (`number`\|`currency`\|`percent`), `unit` |
+| `kpi-rail` | `items` | — (each item optionally: `rows_key`, `progress_key`, `tone`) |
 | `table` | `rows_key`, `columns` | — |
+| `detail` | `items_key`, `id_key` | `fields` |
+| `filter` | `items_key`, `id_key` | `label_key` |
+| `treemap` | `items_key`, `value_key`, `name_key` | `color_key`, `capacity_key` |
+| `heatmap` | `items_key` | `resource_key`, `bucket_key`, `value_key`, `unit` |
+| `chart` | `variant` (`line`\|`bar`), `data_key`, `x_key`, `series` | — |
 | `line-chart` | `data_key`, `x_key`, `series` | — |
 | `bar-chart` | `data_key`, `x_key`, `series` | — |
 | `gantt-chart` | `tasks_key` | `resource_key`, `label_key`, `start_key`, `end_key`, `duration_key`, `color_key`, `time_unit` |
+| `timeline` | `items_key` | `resource_key`, `label_key`, `start_key`, `end_key`, `duration_key`, `color_key`, `id_key`, `regions_key`, `region_start_key`, `region_end_key`, `region_label_key`, `region_resource_key`, `time_unit` |
+
+`line-chart`/`bar-chart` and `gantt-chart` are deprecated in favor of `chart` (variant-based) and `timeline` respectively — kept only so a spec written before those existed keeps rendering; write new widgets against `chart`/`timeline` instead.
 
 Every widget entry also needs `type`, `id` (unique), and `title`. `*_key` fields (except chart `x_key`/gantt's per-task field names) are **dot-paths into `output.json`**, e.g. `"totals.revenue"`.
 
@@ -56,6 +65,29 @@ format = "currency"
 ```
 
 Matching `output.json`: `{"totals": {"revenue": 812300}}`.
+
+### `kpi-rail` — several KPI tiles in one row
+
+```toml
+[[widgets]]
+type = "kpi-rail"
+id = "summary"
+title = "Run summary"
+items = [
+  { label = "Cost", value_key = "totals.cost", format = "currency" },
+  { label = "Makespan", value_key = "totals.makespan" },
+]
+```
+
+Each item has its own `value_key`/`format`/`unit`, same as a standalone `metric`. Always renders in a pinned strip above every other widget, regardless of where it's declared in `[[widgets]]`.
+
+An item can instead use `rows_key` in place of `value_key` — a dot-path to an array of rows, rendered as a per-entity `label / meter / value` list within that one tile instead of a single number:
+
+```toml
+{ label = "Utilization", rows_key = "machines", progress_key = "utilization_pct", tone = "warn" }
+```
+
+`rows_key` and `value_key` are mutually exclusive on one item — set one or the other, not both. `progress_key` names a field within each resolved row holding a 0–100 progress value (not validated as a dot-path the way `rows_key` itself is), drawn as a meter under the row's label/value; a row missing it renders with no meter. `tone` is one of `good`\|`warn`\|`bad`\|`neutral` and colors the meter/value — set on the item as a fallback, or on a row itself (a `tone` field within the row) to vary per entity.
 
 ### `table` — a sortable grid
 
@@ -73,21 +105,82 @@ columns = [
 
 Matching `output.json`: `{"breakdown": [{"name": "Item A", "value": 52400}]}`. `columns[].key` is a field **within each row object**, not a dot-path.
 
-### `line-chart` / `bar-chart` — trend or comparison
+### `detail` — fields of the currently selected row
 
 ```toml
 [[widgets]]
-type = "line-chart"
+type = "detail"
+id = "job-detail"
+title = "Job details"
+items_key = "jobs"
+id_key = "id"
+```
+
+Shows the fields of whichever row is currently selected — via a `timeline` click, or a `filter` option — looked up by matching `id_key` against the selection id. Renders in a sidebar column, not the main grid.
+
+### `filter` — a selection producer
+
+```toml
+[[widgets]]
+type = "filter"
+id = "job-picker"
+title = "Pick a job"
+items_key = "jobs"
+id_key = "id"
+label_key = "name"
+```
+
+One option button per distinct `id_key` value in `items_key`; clicking one drives the same selection a `timeline` click would. An alternative entry point into selection, not a data filter on other widgets. Renders in the sidebar, same as `detail`.
+
+### `treemap` — proportional rectangles
+
+```toml
+[[widgets]]
+type = "treemap"
+id = "cost-breakdown"
+title = "Cost by category"
+items_key = "categories"
+value_key = "cost"
+name_key = "name"
+```
+
+Matching `output.json`: `{"categories": [{"name": "Materials", "cost": 41200}]}`. Rectangle area is proportional to `value_key`; `color_key` optionally groups rectangles into a categorical color. `capacity_key` is a dot-path to a total-capacity number — when the rows' summed `value_key` is less than this, a synthetic "Free" tile fills the remainder, so area doubles as a capacity gauge; omitted, or at/below the summed value, adds no tile.
+
+### `heatmap` — entity x time-bucket grid
+
+```toml
+[[widgets]]
+type = "heatmap"
+id = "hourly-cycles"
+title = "Cycles per hour"
+items_key = "hourly_cycles"
+resource_key = "resource"
+bucket_key = "bucket"
+value_key = "value"
+```
+
+Matching `output.json`: `{"hourly_cycles": [{"resource": "M1", "bucket": 8, "value": 42}]}`. One row per `(resource, bucket)` pair, shaded by `value_key` intensity; `resource_key`/`bucket_key`/`value_key` default to `resource`/`bucket`/`value` and are fields within each row, not dot-paths. A `(resource, bucket)` pair with no matching row renders as a distinct unavailable cell, not a zero — so a machine with no cycles logged for an hour looks different from one that logged zero.
+
+### `chart` — line or bar, by `variant`
+
+```toml
+[[widgets]]
+type = "chart"
 id = "trend"
 title = "Objective value over time"
+variant = "line"
 data_key = "timeseries"
 x_key = "label"
 series = [{ key = "value", label = "Objective value" }]
 ```
 
-Matching `output.json`: `{"timeseries": [{"label": "Mon", "value": 412}, {"label": "Tue", "value": 398}]}`. `x_key` and `series[].key` are fields within each data point, not dot-paths. Multiple `series` entries render as multiple lines/bars.
+Matching `output.json`: `{"timeseries": [{"label": "Mon", "value": 412}, {"label": "Tue", "value": 398}]}`. `x_key` and `series[].key` are fields within each data point, not dot-paths. Multiple `series` entries render as multiple lines/bars. `variant = "bar"` renders the same shape as a bar chart.
 
-### `gantt-chart` — resource-row schedule
+### `line-chart` / `bar-chart` — deprecated, use `chart`
+
+Same fields as `chart` minus `variant` — the variant is implied by `type` instead. Kept only for specs written before `chart` existed.
+
+### `gantt-chart` — deprecated, use `timeline`
 
 The shape for job-shop / scheduling solver output: one row per resource/machine, one bar per task.
 
@@ -118,6 +211,35 @@ Semantics worth knowing:
 - Set either `end_key` or `duration_key` (added to the start). If both are set, `end_key` wins. A task resolving neither is dropped from the chart.
 - `color_key` names a field grouping tasks into a categorical color (e.g. tasks belonging to the same job).
 
+`timeline` is the same shape plus more: fragmented tasks fold into one item with gaps (`id_key`), non-working spans render as background bands (`regions_key` + `region_*`), and a `[clock]` section (see below) drives a now-marker over it.
+
+## Datasets, metrics, and the clock
+
+Beyond `[[widgets]]`, a spec can declare three more top-level sections, all checked by `harumi dashboard validate` the same way a widget is — an invalid entry is reported and dropped, not silently rendered wrong:
+
+- **`[[datasets]]`** — names a dataset's shape once instead of restating it per widget. Needs `id`, `kind` (`intervals`\|`records`\|`timeline`\|`scalars`), `source_key` (a dot-path into `output.json`), and a `[datasets.roles]` sub-table naming which fields play which role: `intervals` needs `start` plus `end` or `duration`; `timeline` needs `at` or `start` plus `value`; `records`/`scalars` need no roles at all.
+- **`[[metrics]]`** — a KPI as a single read-only SQL query, run against the declared datasets and exposed to any widget under `metrics.<id>`. `sql` must be exactly one `SELECT`/`WITH`/`FROM`/`DESCRIBE`/`SUMMARIZE` statement — no writes, no `ATTACH`/`COPY`/`INSTALL`/`LOAD`/`PRAGMA`, and no table function that reads a path or URL (`read_csv`, `read_parquet`, `postgres_scan`, ...).
+- **`[clock]`** — turns one `intervals` dataset into a play/pause/scrub transport bar over the schedule chart. `dataset` must name a declared `intervals` dataset, or (with no `[[datasets]]` entry needed) a `gantt-chart`/`timeline` widget's own id, suffixed `__source` (e.g. `dataset = "schedule__source"` for `id = "schedule"`) — its rendered schedule counts as an implicit `intervals` dataset. `speed` is optional and, if set, must be a positive finite number.
+
+```toml
+[[datasets]]
+id = "schedule"
+kind = "intervals"
+source_key = "schedule"
+
+[datasets.roles]
+start = "start"
+end = "end"
+
+[[metrics]]
+id = "makespan"
+sql = "SELECT max(end) - min(start) AS value FROM schedule"
+
+[clock]
+dataset = "schedule"
+speed = 30
+```
+
 ## Layout
 
 Both keys below are per-dashboard, at the top level of each spec:
@@ -143,4 +265,4 @@ harumi dashboard validate --latest                 # + check dot-paths against t
 harumi dashboard validate --run <RUN_ID>           # + a specific run
 ```
 
-With no `PATH` it validates **every** spec it finds (locally, or in the repo with `--ref`), printing each filename as a heading, and exits non-zero if any spec would drop a widget, isn't valid TOML, or (when checking dot-paths) would render a widget empty.
+With no `PATH` it validates **every** spec it finds (locally, or in the repo with `--ref`), printing each filename as a heading, and exits non-zero if any spec would drop a widget, dataset, metric, or clock entry, isn't valid TOML, or (when checking dot-paths) would render a widget empty.

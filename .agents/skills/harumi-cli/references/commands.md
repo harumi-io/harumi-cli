@@ -243,6 +243,8 @@ harumi repo branches [--project ID]
 harumi repo branch-create NAME [--from BRANCH] [--project ID]
 harumi repo branch-rm NAME [--yes] [--project ID]
 harumi repo promote NAME [--title T] [--delete-after] [--project ID]
+harumi repo commits [PATH] [--ref REF] [--page N] [--per-page N] [--project ID]
+harumi repo readiness [--ref REF] [--project ID]
 ```
 
 Real endpoints on harumi-api's git router. All writes go through the batch `POST /projects/{id}/repo/changes` endpoint, so every `put`/`rm`/`mv` is exactly one commit.
@@ -258,6 +260,8 @@ Real endpoints on harumi-api's git router. All writes go through the batch `POST
 - **`branch-create`**: `POST /projects/{id}/repo/branches` with `{name, from_branch?}`.
 - **`branch-rm`**: `DELETE /projects/{id}/repo/branches/{name}`. Refuses (server-side) to delete the live branch.
 - **`promote`**: `POST /projects/{id}/repo/branches/{name}/promote` with `{title?, delete_after}`; merges the version into the live branch. On a merge conflict the response's `conflict=true` and the CLI surfaces `message` as an error instead of a fake success.
+- **`commits`**: `GET /projects/{id}/repo/commits?ref=&path=&page=&per_page=` → paginated commit history on `ref`; pass a file/folder `PATH` to see just its history instead of the whole branch.
+- **`readiness`**: `GET /projects/{id}/readiness?ref=` → everything blocking this project from running, answered up front instead of surfacing as a 4xx from `run`/`schedules add`.
 
 `--project` on every subcommand overrides the `.harumi` binding.
 
@@ -284,9 +288,9 @@ No backend endpoint — a dashboard spec is a plain file in the project's Gitea 
 ```
 harumi share list [--project ID]
 harumi share get LINK_ID [--project ID]
-harumi share add [--label TEXT] [--chat/--no-chat] [--run-history/--no-run-history]
+harumi share add [--label TEXT] [--app/--no-app] [--chat/--no-chat] [--run-history/--no-run-history]
                   [--run-control/--no-run-control] [--io-control/--no-io-control] [--project ID]
-harumi share update LINK_ID [--label TEXT] [--enable/--disable] [--chat/--no-chat]
+harumi share update LINK_ID [--label TEXT] [--enable/--disable] [--app/--no-app] [--chat/--no-chat]
                      [--run-history/--no-run-history] [--run-control/--no-run-control]
                      [--io-control/--no-io-control] [--project ID]
 harumi share remove LINK_ID [--yes] [--project ID]
@@ -299,7 +303,8 @@ Manages `/projects/{id}/share-links*` — a project's public, unauthenticated da
 
 - **`list`**: `GET /projects/{id}/share-links` → `ProjectShareLinkList {links: [ProjectShareLink]}`. Prints a table with each link's id, label, `enabled`, its enabled permissions, and whether it's password protected.
 - **`get`**: same list call, filtered to one link — prints its full viewer URL (built client-side as `{platform_url}/share/{token}`, since the API doesn't know its own public origin) and every permission flag.
-- **`add`**: `POST /projects/{id}/share-links` → `ProjectShareLink`. Every permission flag (`--chat`, `--run-history`, `--run-control`, `--io-control`) defaults to off, so creating a link never silently grants more than a bare read-only, latest-run-only dashboard view.
+- **`add`**: `POST /projects/{id}/share-links` → `ProjectShareLink`. Every permission flag (`--app`, `--chat`, `--run-history`, `--run-control`, `--io-control`) defaults to off, so creating a link never silently grants more than a bare read-only, latest-run-only dashboard view.
+  - `--app`: let visitors open the project's deployed Streamlit app.
   - `--chat`: read-only assistant for signed-in visitors.
   - `--run-history`: browse past runs instead of only ever the latest.
   - `--run-control`: signed-in visitors can run now, override the kernel, and manage schedules.

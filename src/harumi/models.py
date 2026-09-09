@@ -157,6 +157,48 @@ class RepoCommitInfo(BaseModel):
     committed_at: Optional[datetime] = None
 
 
+class RepoCommitList(BaseModel):
+    """Response from GET /projects/{id}/repo/commits — a page of commit
+    history on `ref`, the whole branch when `path` is omitted or one file/
+    folder's history when it isn't. `total` is None when Gitea doesn't report
+    a count, in which case a full page means "there may be more"."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ref: str
+    path: Optional[str] = None
+    page: int = 1
+    per_page: int = 30
+    total: Optional[int] = None
+    commits: list[RepoCommitInfo] = Field(default_factory=list)
+
+
+class ReadinessCheckResult(BaseModel):
+    """One row of the project readiness checklist (`id` is a stable key like
+    `repo`/`manifest`/`manifest_valid`/`kernel`; `fixable` is true when the CLI
+    itself can resolve it, e.g. a missing repo via `harumi init`)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    ok: bool
+    detail: Optional[str] = None
+    fixable: bool = False
+
+
+class ProjectReadiness(BaseModel):
+    """Response from GET /projects/{id}/readiness — everything blocking this
+    project from running, answered up front instead of surfacing as a 4xx
+    from `run`/`schedules add`."""
+
+    model_config = ConfigDict(extra="allow")
+
+    project_id: str
+    ref: str
+    ready: bool
+    checks: list[ReadinessCheckResult] = Field(default_factory=list)
+
+
 class RepoDirEntry(BaseModel):
     """One row from GET /projects/{id}/repo/dir: a file or folder, with its
     most recent commit."""
@@ -457,6 +499,7 @@ class ProjectShareLink(BaseModel):
     token: str
     label: Optional[str] = None
     enabled: bool = True
+    app_enabled: bool = False
     chat_enabled: bool = False
     run_history_enabled: bool = False
     run_control_enabled: bool = False

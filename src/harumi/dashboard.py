@@ -11,10 +11,22 @@ It's read on first use rather than at import, because ``cli.py`` imports this
 module at module level — an eager load would let a corrupt artifact break every
 command, including ones that never touch a dashboard.
 
-Refreshing it is a copy: ``cp <harumi-platform>/packages/ui/dashboard-schema.json
-src/harumi/dashboard-schema.json``. ``tests/test_dashboard.py`` pins the
-contract the CLI needs out of it, so a platform change that removes a field the
-CLI depends on fails here rather than silently degrading validation.
+Refreshing it is a copy from a harumi-platform checkout::
+
+    cp <harumi-platform>/packages/ui/dashboard-schema.json src/harumi/dashboard-schema.json
+
+or, without one, from a running deployment (harumi-api ≥ the release that added
+``GET /api/public/dashboard-schema``; older ones 404, in which case use the
+``cp`` above)::
+
+    curl -fsSL https://api.harumi.io/api/public/dashboard-schema \
+      -o src/harumi/dashboard-schema.json
+
+Either way the result is checked, not trusted: ``tests/test_dashboard.py`` pins
+the contract the CLI needs out of it — including the ``discovery`` block and the
+fields the validator reads — so a refresh that fetched something unusable, or a
+platform change that removed a field the CLI depends on, fails here rather than
+silently degrading validation.
 
 Only the machine-checkable contract is used here (toml key, required, enum
 values, and which fields are dot-paths into ``output.json``). The artifact also
@@ -27,11 +39,14 @@ validator.
 from __future__ import annotations
 
 import json
+import math
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from harumi.dashboard_sql_guard import SqlGuardError, ensure_read_only_select
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -46,7 +61,7 @@ SCHEMA_ARTIFACT_PATH = Path(__file__).with_name("dashboard-schema.json")
 class WidgetField:
     toml_key: str
     required: bool = False
-    kind: str = "string"  # "string" | "number" | "enum" | "columns" | "series"
+    kind: str = "string"  # "string" | "number" | "enum" | "columns" | "series" | "kpiItems"
     values: Optional[Tuple[str, ...]] = None
     # True for fields that are a dot-path into the run's output.json (as
     # opposed to a field name *within* an already-resolved array item, e.g.
@@ -69,7 +84,7 @@ class DashboardSchemaError(RuntimeError):
 # set would fall through to "no value is ever valid", quietly making a required
 # field impossible to satisfy and an optional one impossible to use — so a typo
 # in the artifact is rejected at load rather than silently weakening validation.
-_KNOWN_FIELD_KINDS = frozenset({"string", "number", "enum", "columns", "series"})
+_KNOWN_FIELD_KINDS = frozenset({"string", "number", "enum", "columns", "series", "kpiItems"})
 
 
 @lru_cache(maxsize=1)
@@ -178,6 +193,50 @@ def _coerce_series(value: Any) -> Optional[List[Dict[str, str]]]:
     return series or None
 
 
+_KPI_ITEM_FORMATS = ("number", "currency", "percent")
+_KPI_ITEM_TONES = ("good", "warn", "bad", "neutral")
+
+
+def _coerce_kpi_items(value: Any) -> Optional[List[Dict[str, Any]]]:
+    """Mirrors `coerceKpiItems` in schema.ts: each entry is a `metric`-shaped
+    dict (`label`, `value_key`, optional `delta_key`/`format`/`unit`), minus
+    `id`/`type`/`title` since a rail item isn't its own widget, plus the
+    optional `rows_key`/`progress_key`/`tone` that render a per-entity
+    `label / meter / value` list instead of one value. An item missing
+    `label`, or missing both `value_key` and `rows_key`, is dropped rather
+    than failing the whole rail — one bad item shouldn't blank the others.
+    """
+    if not isinstance(value, list):
+        return None
+    items = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            continue
+        label = raw.get("label")
+        value_key, rows_key = raw.get("value_key"), raw.get("rows_key")
+        if not isinstance(label, str):
+            continue
+        if not isinstance(value_key, str) and not isinstance(rows_key, str):
+            continue
+        item: Dict[str, Any] = {"label": label}
+        if isinstance(value_key, str):
+            item["value_key"] = value_key
+        if isinstance(raw.get("delta_key"), str):
+            item["delta_key"] = raw["delta_key"]
+        if raw.get("format") in _KPI_ITEM_FORMATS:
+            item["format"] = raw["format"]
+        if isinstance(raw.get("unit"), str):
+            item["unit"] = raw["unit"]
+        if isinstance(rows_key, str):
+            item["rows_key"] = rows_key
+        if isinstance(raw.get("progress_key"), str):
+            item["progress_key"] = raw["progress_key"]
+        if raw.get("tone") in _KPI_ITEM_TONES:
+            item["tone"] = raw["tone"]
+        items.append(item)
+    return items or None
+
+
 def _coerce_field(value: Any, field: WidgetField) -> Any:
     if value is None:
         return None
@@ -190,6 +249,8 @@ def _coerce_field(value: Any, field: WidgetField) -> Any:
         return value if isinstance(value, str) and field.values and value in field.values else None
     if field.kind == "columns":
         return _coerce_columns(value)
+    if field.kind == "kpiItems":
+        return _coerce_kpi_items(value)
     if field.kind == "series":
         return _coerce_series(value)
     return None
@@ -199,13 +260,19 @@ def _coerce_field(value: Any, field: WidgetField) -> Any:
 class WidgetIssue:
     """A problem found while validating `dashboard.toml`.
 
+    Shared by widgets, `[[datasets]]`, `[[metrics]]`, and `[clock]` — all four
+    follow the same "permissive parse, report why an entry didn't make it"
+    contract, so one issue shape covers all of them. `entity_id` is whichever
+    id the entry declared (a widget/dataset/metric id, or `None` for a
+    malformed `[clock]`, which has no id of its own).
+
     `dropped` mirrors `parseDashboardConfig`'s behavior: the platform never
-    fails the whole dashboard for a bad widget, it just silently omits it.
+    fails the whole dashboard for one bad entry, it just silently omits it.
     `dropped=False` issues (unresolved output paths) are CLI-only extras —
     the widget still renders, just empty.
     """
 
-    widget_id: Optional[str]
+    entity_id: Optional[str]
     message: str
     dropped: bool = True
 
@@ -270,12 +337,170 @@ class DashboardTomlError(ValueError):
     """Raised when a dashboard spec isn't valid TOML."""
 
 
+# Column roles each `[[datasets]]` kind needs before any view could draw it —
+# an inner tuple is an "either of these" group. Mirrors
+# `REQUIRED_DATASET_ROLES` in harumi-platform's `datasets.ts`. Checking this at
+# parse time is the point of declaring a kind at all: a dataset missing
+# `start` would otherwise produce a blank view with no explanation.
+_DATASET_KINDS: Tuple[str, ...] = ("intervals", "records", "timeline", "scalars")
+_REQUIRED_DATASET_ROLES: Dict[str, Tuple[Tuple[str, ...], ...]] = {
+    "intervals": (("start",), ("end", "duration")),
+    "timeline": (("at", "start"), ("value",)),
+    "records": (),
+    "scalars": (),
+}
+# Every `roles` key, spelled the way `dashboard.toml` writes it (already
+# snake_case — no TOML/JS casing gap here, unlike widget fields).
+_DATASET_ROLE_KEYS: Tuple[str, ...] = (
+    "resource", "start", "end", "duration", "label", "category", "value", "at",
+)
+
+
+def _describe_role_group(group: Tuple[str, ...]) -> str:
+    return f'"{group[0]}"' if len(group) == 1 else " or ".join(f'"{r}"' for r in group)
+
+
+def parse_dataset_entry(entry: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[WidgetIssue]]:
+    """Validate one raw `[[datasets]]` table entry. Mirrors `parseDatasetEntry`
+    in datasets.ts."""
+    id_ = entry.get("id")
+    kind = entry.get("kind")
+    source_key = entry.get("source_key")
+    dataset_id = id_ if isinstance(id_, str) and id_.strip() != "" else None
+
+    if dataset_id is None:
+        return None, WidgetIssue(None, 'dataset: missing or invalid "id"')
+    if not isinstance(kind, str) or kind not in _DATASET_KINDS:
+        described = "missing" if kind is None else f'unknown kind "{kind}"'
+        return None, WidgetIssue(
+            dataset_id,
+            f'dataset "{dataset_id}": {described} — must be one of: {", ".join(_DATASET_KINDS)}',
+        )
+    if not isinstance(source_key, str) or source_key.strip() == "":
+        return None, WidgetIssue(
+            dataset_id,
+            f'dataset "{dataset_id}": missing or invalid "source_key" (a dot-path into the run output)',
+        )
+
+    raw_roles = entry.get("roles") if isinstance(entry.get("roles"), dict) else {}
+    roles = {role: raw_roles[role] for role in _DATASET_ROLE_KEYS if isinstance(raw_roles.get(role), str) and raw_roles[role]}
+
+    for group in _REQUIRED_DATASET_ROLES[kind]:
+        if not any(role in roles for role in group):
+            return None, WidgetIssue(
+                dataset_id,
+                f'dataset "{dataset_id}" ({kind}): needs {_describe_role_group(group)} in [datasets.roles]',
+            )
+
+    dataset: Dict[str, Any] = {"id": dataset_id, "kind": kind, "source_key": source_key, "roles": roles}
+    time_unit = entry.get("time_unit")
+    if isinstance(time_unit, str):
+        dataset["time_unit"] = time_unit
+    return dataset, None
+
+
+def parse_metric_entry(entry: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[WidgetIssue]]:
+    """Validate one raw `[[metrics]]` table entry. Mirrors `parseMetricEntry`
+    in metrics.ts, including the read-only SQL guard.
+
+    `time_key`, when present, names a column in this metric's own result set
+    holding a numeric instant on the `[clock]` axis — marking the rows as a
+    time series rather than a single result (see `seriesAt` in
+    harumi-platform). Whether a `[clock]` actually exists is a fact about the
+    whole file, not this one entry, so that check lives in
+    `validate_dashboard_toml` alongside the other `[[metrics]]`/`[clock]`
+    cross-checks — not here.
+    """
+    id_ = entry.get("id")
+    sql = entry.get("sql")
+    title = entry.get("title")
+    time_key = entry.get("time_key")
+    metric_id = id_ if isinstance(id_, str) and id_.strip() != "" else None
+
+    if metric_id is None:
+        return None, WidgetIssue(None, 'metric: missing or invalid "id"')
+    if not isinstance(sql, str) or sql.strip() == "":
+        return None, WidgetIssue(metric_id, f'metric "{metric_id}": missing or invalid "sql"')
+
+    try:
+        ensure_read_only_select(sql)
+    except SqlGuardError as exc:
+        return None, WidgetIssue(metric_id, f'metric "{metric_id}": {exc}')
+
+    metric: Dict[str, Any] = {"id": metric_id, "sql": sql}
+    if isinstance(title, str):
+        metric["title"] = title
+    if isinstance(time_key, str) and time_key.strip() != "":
+        metric["time_key"] = time_key
+    return metric, None
+
+
+def parse_clock_entry(
+    entry: Dict[str, Any], dataset_kinds: Dict[str, str]
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Validate the optional `[clock]` table. Mirrors `parseClockEntry` in
+    clock.ts.
+
+    `dataset_kinds` maps dataset id -> kind. It's the caller's job to include
+    every dataset the clock could legally name — ponytail: `validate_dashboard_toml`
+    below only includes *declared* `[[datasets]]` plus a kind-only stand-in for
+    the `timeline`/`gantt-chart` widgets' synthesized dataset (the two widget
+    types that synthesize an `intervals` dataset — see `synthesizeDatasets` in
+    harumi-platform's `datasets.ts`), not the full synthesis every widget type
+    gets on the platform. A `[clock]` naming some other widget's synthesized id
+    validates here as "unknown dataset" but would actually resolve (to a
+    non-`intervals` dataset, so still rejected) on the platform — same verdict,
+    different reason. Upgrade path: port `synthesizeDatasets` in full if that
+    gap ever produces a false positive in practice.
+    """
+    dataset = entry.get("dataset")
+    speed = entry.get("speed")
+
+    if not isinstance(dataset, str) or dataset.strip() == "":
+        return None, 'clock: missing or invalid "dataset" (the id of an intervals dataset to take the horizon from)'
+
+    kind = dataset_kinds.get(dataset)
+    if kind is None:
+        known = sorted(dataset_kinds)
+        suffix = f" — declared: {', '.join(known)}" if known else ""
+        return None, f'clock: no dataset "{dataset}"{suffix}'
+    if kind != "intervals":
+        return None, f'clock: dataset "{dataset}" is {kind}, but a clock needs an intervals dataset'
+
+    if speed is not None:
+        # `tomllib` parses a TOML integer into an arbitrary-precision Python
+        # int with no 64-bit bound check, so `speed = 10**400` parses fine.
+        # `math.isfinite()` converts its argument to a C double and raises
+        # OverflowError for anything outside float range instead of
+        # returning False — catch it so a huge literal is reported as
+        # invalid input instead of crashing this validator.
+        try:
+            speed_is_finite = isinstance(speed, (int, float)) and not isinstance(speed, bool) and math.isfinite(speed)
+        except OverflowError:
+            speed_is_finite = False
+        if not speed_is_finite or speed <= 0:
+            return None, f'clock: "speed" must be a positive finite number, got {speed!r}'
+
+    clock: Dict[str, Any] = {"dataset": dataset}
+    if isinstance(speed, (int, float)) and not isinstance(speed, bool):
+        clock["speed"] = speed
+    return clock, None
+
+
 # The discovery rule (which files are dashboard specs, in what display order) is
 # structural rather than part of the widget contract, so it stays a plain
 # constant: `harumi dashboard list` keeps working even when the artifact is
 # unreadable, and this file's import can't fail. The artifact publishes the same
 # two values under `discovery` for consumers that have no copy of their own;
 # harumi-platform's packages/ui/src/dashboard/discovery.ts is the source.
+#
+# Deliberately not read from the artifact at runtime, even though it carries the
+# values: that would either move the read to import (breaking the guarantee
+# above) or add a lazy accessor whose fallback branch is the only one that ever
+# behaves differently. Instead `tests/test_dashboard.py` pins these two against
+# the vendored artifact's `discovery` block, so re-vendoring an artifact that
+# moved the rule fails there rather than leaving the CLI quietly enumerating the
+# old location. The copy is a fallback, not a second definition.
 DASHBOARD_DIR = "dashboard"
 ROOT_DASHBOARD_PATH = "dashboard.toml"
 
@@ -293,9 +518,15 @@ def is_dashboard_path(path: str) -> bool:
 
 def pick_dashboard_paths(paths: Iterable[str]) -> List[str]:
     """The dashboard specs in a flat repo listing, in the order the platform's
-    picker shows them: `dashboard/*.toml` (alphabetical) then the legacy root
-    `dashboard.toml`. Mirrors `pickDashboardPaths` in harumi-platform's
-    `apps/web/src/lib/dashboard-files.ts`."""
+    picker shows them: ``dashboard/*.toml`` (code-point sorted) then the legacy
+    root ``dashboard.toml``. Mirrors ``pickDashboardPaths`` in harumi-platform's
+    ``packages/ui/src/dashboard/discovery.ts``.
+
+    Plain ``sorted()`` is the shared order. The frontend used ``localeCompare``
+    until it was aligned to code point, which disagreed for names like
+    ``costs-v2.toml`` / ``costs_v2.toml``, so ``harumi dashboard list`` could
+    number specs differently from the browser's picker.
+    """
     all_paths = list(paths)
     in_dir = sorted(p for p in all_paths if p != ROOT_DASHBOARD_PATH and is_dashboard_path(p))
     if ROOT_DASHBOARD_PATH in all_paths:
@@ -318,10 +549,12 @@ def validate_dashboard_toml(
     raw: str, output: Optional[Dict[str, Any]] = None
 ) -> Tuple[List[Dict[str, Any]], List[WidgetIssue]]:
     """Parses and validates a dashboard spec, mirroring
-    `parseDashboardConfig` + `parseWidgetEntry`. Returns the widgets that
-    would actually render, plus every issue found (dropped widgets first,
-    then — only when `output` is given — output.json dot-paths that won't
-    resolve, which the platform itself can't check ahead of time).
+    `parseDashboardConfig` + `parseWidgetEntry` + `parseDatasetEntry` +
+    `parseMetricEntry` + `parseClockEntry`. Returns the widgets that would
+    actually render, plus every issue found across `[[widgets]]`,
+    `[[datasets]]`, `[[metrics]]`, and `[clock]` (dropped entries first, then
+    — only when `output` is given — output.json dot-paths that won't resolve,
+    which the platform itself can't check ahead of time).
 
     A top-level `title` (the picker label when a project has several
     dashboards) and a `[layout]` table are both accepted and ignored here —
@@ -349,10 +582,102 @@ def validate_dashboard_toml(
             assert issue is not None
             issues.append(issue)
 
+    raw_datasets = parsed.get("datasets")
+    declared_kinds: Dict[str, str] = {}
+    for entry in raw_datasets if isinstance(raw_datasets, list) else []:
+        if not isinstance(entry, dict):
+            issues.append(WidgetIssue(None, "dataset entry is not a table"))
+            continue
+        dataset, issue = parse_dataset_entry(entry)
+        if dataset is None:
+            assert issue is not None
+            issues.append(issue)
+            continue
+        if dataset["id"] in declared_kinds:
+            issues.append(WidgetIssue(dataset["id"], f'dataset "{dataset["id"]}": duplicate id — the later entry is ignored'))
+            continue
+        declared_kinds[dataset["id"]] = dataset["kind"]
+
+    raw_metrics = parsed.get("metrics")
+    metrics: List[Dict[str, Any]] = []
+    seen_metric_ids: set[str] = set()
+    for entry in raw_metrics if isinstance(raw_metrics, list) else []:
+        if not isinstance(entry, dict):
+            issues.append(WidgetIssue(None, "metric entry is not a table"))
+            continue
+        metric, issue = parse_metric_entry(entry)
+        if metric is None:
+            assert issue is not None
+            issues.append(issue)
+            continue
+        if metric["id"] in seen_metric_ids:
+            issues.append(WidgetIssue(metric["id"], f'metric "{metric["id"]}": duplicate id — the later entry is ignored'))
+            continue
+        seen_metric_ids.add(metric["id"])
+        metrics.append(metric)
+
+    raw_clock = parsed.get("clock")
+    has_clock = isinstance(raw_clock, dict)
+    if has_clock:
+        # See `parse_clock_entry`'s docstring for why this stand-in — a
+        # kind-only entry per timeline/gantt-chart widget — isn't full
+        # `synthesizeDatasets` parity.
+        dataset_kinds = dict(declared_kinds)
+        for widget in widgets:
+            if widget["type"] in ("timeline", "gantt-chart"):
+                dataset_kinds.setdefault(f'{widget["id"]}__source', "intervals")
+        _, clock_message = parse_clock_entry(raw_clock, dataset_kinds)
+        if clock_message is not None:
+            issues.append(WidgetIssue(None, clock_message))
+    elif raw_clock is not None:
+        issues.append(WidgetIssue(None, "clock entry is not a table"))
+
+    # Checked here rather than in `parse_metric_entry`, which only sees one
+    # `[[metrics]]` entry at a time: whether a `[clock]` exists at all is a
+    # fact about the whole file. `metrics.<id>` only ever resolves via the
+    # clock's current `t` for a time-keyed metric (see harumi-platform's
+    # `DashboardGrid`), so without a `[clock]` there's no time to evaluate it
+    # at. Mirrors the same check in `parseDashboardConfig`.
+    if not has_clock:
+        for metric in metrics:
+            if "time_key" not in metric:
+                continue
+            issues.append(
+                WidgetIssue(
+                    metric["id"],
+                    f'metric "{metric["id"]}": "time_key" requires a [clock] section — '
+                    "there is no time to evaluate it at otherwise",
+                )
+            )
+
     if output is not None:
         for widget in widgets:
             schema = widget_schemas()[widget["type"]]
             for field in schema:
+                if field.kind == "kpiItems":
+                    # `items` itself isn't a dot-path (it's a list), but each
+                    # item's `value_key`/`delta_key`/`rows_key` is — the doc's
+                    # own claim that a rail item has "the same value/delta/
+                    # format/unit contract as a metric widget" means it needs
+                    # the same check a standalone metric's `value_key` gets
+                    # below, and `rows_key` is a dot-path by the same logic.
+                    for index, item in enumerate(widget.get(field.toml_key) or [], start=1):
+                        for item_field in ("value_key", "delta_key", "rows_key"):
+                            path = item.get(item_field)
+                            if not isinstance(path, str):
+                                continue
+                            resolved = resolve_path(output, path)
+                            if resolved is None:
+                                issues.append(
+                                    WidgetIssue(
+                                        widget["id"],
+                                        f'widget "{widget["id"]}" ({widget["type"]}): '
+                                        f"{describe_missing_key(output, path)} "
+                                        f'(from "{field.toml_key}[{index}].{item_field}")',
+                                        dropped=False,
+                                    )
+                                )
+                    continue
                 if not field.is_output_path:
                     continue
                 path = widget.get(field.toml_key)
