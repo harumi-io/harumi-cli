@@ -42,6 +42,7 @@ Get the live, in-code reference with `harumi dashboard widgets` (add `--type met
 | `detail` | `items_key`, `id_key` | `fields` |
 | `filter` | `items_key`, `id_key` | `label_key` |
 | `treemap` | `items_key`, `value_key`, `name_key` | `color_key` |
+| `heatmap` | `items_key` | `resource_key`, `bucket_key`, `value_key`, `unit` |
 | `chart` | `variant` (`line`\|`bar`), `data_key`, `x_key`, `series` | — |
 | `line-chart` | `data_key`, `x_key`, `series` | — |
 | `bar-chart` | `data_key`, `x_key`, `series` | — |
@@ -136,6 +137,21 @@ name_key = "name"
 ```
 
 Matching `output.json`: `{"categories": [{"name": "Materials", "cost": 41200}]}`. Rectangle area is proportional to `value_key`; `color_key` optionally groups rectangles into a categorical color.
+
+### `heatmap` — entity x time-bucket grid
+
+```toml
+[[widgets]]
+type = "heatmap"
+id = "hourly-cycles"
+title = "Cycles per hour"
+items_key = "hourly_cycles"
+resource_key = "resource"
+bucket_key = "bucket"
+value_key = "value"
+```
+
+Matching `output.json`: `{"hourly_cycles": [{"resource": "M1", "bucket": 8, "value": 42}]}`. One row per `(resource, bucket)` pair, shaded by `value_key` intensity; `resource_key`/`bucket_key`/`value_key` default to `resource`/`bucket`/`value` and are fields within each row, not dot-paths. A `(resource, bucket)` pair with no matching row renders as a distinct unavailable cell, not a zero — so a machine with no cycles logged for an hour looks different from one that logged zero.
 
 ### `chart` — line or bar, by `variant`
 

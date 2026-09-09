@@ -248,6 +248,72 @@
       "tomlExample": "[[widgets]]\ntype = \"treemap\"\nid = \"cost-breakdown\"\ntitle = \"Cost by machine\"\nitems_key = \"breakdown\"\nvalue_key = \"cost\"\nname_key = \"machine\""
     },
     {
+      "type": "heatmap",
+      "description": "An entity x time-bucket grid, shaded by intensity — one row per resource, one column per bucket (e.g. hour of day). A `(resource, bucket)` pair with no matching row renders as a distinct unavailable cell rather than a zero.",
+      "fields": [
+        {
+          "tomlKey": "items_key",
+          "as": "itemsKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": true,
+          "doc": "Dot-path to the array of row objects to grid. One row per `(resource, bucket)` pair that has a value — a pair with no row renders as unavailable, not zero."
+        },
+        {
+          "tomlKey": "resource_key",
+          "as": "resourceKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Row field naming the resource/machine its row belongs to. Defaults to \"resource\"."
+        },
+        {
+          "tomlKey": "bucket_key",
+          "as": "bucketKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Row field naming the time bucket (e.g. an hour number) its row belongs to. Defaults to \"bucket\"."
+        },
+        {
+          "tomlKey": "value_key",
+          "as": "valueKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Row field shaded into cell intensity. Defaults to \"value\"."
+        },
+        {
+          "tomlKey": "unit",
+          "as": "unit",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Suffix appended to a cell's tooltip value, e.g. \"cycles\"."
+        }
+      ],
+      "dataExample": {
+        "hourly_cycles": [
+          {
+            "resource": "M1",
+            "bucket": 8,
+            "value": 42
+          },
+          {
+            "resource": "M1",
+            "bucket": 9,
+            "value": 38
+          },
+          {
+            "resource": "M2",
+            "bucket": 9,
+            "value": 12
+          }
+        ]
+      },
+      "tomlExample": "[[widgets]]\ntype = \"heatmap\"\nid = \"hourly-cycles\"\ntitle = \"Cycles per hour\"\nitems_key = \"hourly_cycles\"\nresource_key = \"resource\"\nbucket_key = \"bucket\"\nvalue_key = \"value\""
+    },
+    {
       "type": "line-chart",
       "description": "A line chart — good for a value trending over time. Deprecated: prefer `chart` with `variant = \"line\"`; this type is kept only so dashboards written before `chart` existed keep rendering.",
       "fields": [

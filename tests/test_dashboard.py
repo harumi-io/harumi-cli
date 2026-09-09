@@ -37,6 +37,13 @@ _EXPECTED_WIDGET_CONTRACT = {
     "detail": ["items_key!*", "id_key!", "fields"],
     "filter": ["items_key!*", "id_key!", "label_key"],
     "treemap": ["items_key!*", "value_key!", "name_key!", "color_key"],
+    "heatmap": [
+        "items_key!*",
+        "resource_key",
+        "bucket_key",
+        "value_key",
+        "unit",
+    ],
     "line-chart": ["data_key!*", "x_key!", "series!"],
     "bar-chart": ["data_key!*", "x_key!", "series!"],
     "chart": ["variant![line|bar]", "data_key!*", "x_key!", "series!"],
@@ -269,6 +276,12 @@ class TestParseWidgetEntry:
                 "items_key": "categories",
                 "value_key": "cost",
                 "name_key": "name",
+            },
+            "heatmap": {
+                "type": "heatmap",
+                "id": "hm",
+                "title": "HM",
+                "items_key": "hourly",
             },
             "line-chart": {
                 "type": "line-chart",
