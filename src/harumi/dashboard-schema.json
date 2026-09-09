@@ -227,6 +227,14 @@
           "required": false,
           "isOutputPath": false,
           "doc": "Row field grouped into a stable color per distinct value. Omit for one palette color per rectangle in source order."
+        },
+        {
+          "tomlKey": "capacity_key",
+          "as": "capacityKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": true,
+          "doc": "Dot-path to a total-capacity number (e.g. total yard positions). When the rows' summed value_key is less than this, a synthetic \"Free\" tile fills the remainder, so area doubles as a capacity gauge. Omitted, or at/below the summed value, adds no tile."
         }
       ],
       "dataExample": {

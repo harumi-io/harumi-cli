@@ -41,7 +41,7 @@ Get the live, in-code reference with `harumi dashboard widgets` (add `--type met
 | `table` | `rows_key`, `columns` | — |
 | `detail` | `items_key`, `id_key` | `fields` |
 | `filter` | `items_key`, `id_key` | `label_key` |
-| `treemap` | `items_key`, `value_key`, `name_key` | `color_key` |
+| `treemap` | `items_key`, `value_key`, `name_key` | `color_key`, `capacity_key` |
 | `heatmap` | `items_key` | `resource_key`, `bucket_key`, `value_key`, `unit` |
 | `chart` | `variant` (`line`\|`bar`), `data_key`, `x_key`, `series` | — |
 | `line-chart` | `data_key`, `x_key`, `series` | — |
@@ -144,7 +144,7 @@ value_key = "cost"
 name_key = "name"
 ```
 
-Matching `output.json`: `{"categories": [{"name": "Materials", "cost": 41200}]}`. Rectangle area is proportional to `value_key`; `color_key` optionally groups rectangles into a categorical color.
+Matching `output.json`: `{"categories": [{"name": "Materials", "cost": 41200}]}`. Rectangle area is proportional to `value_key`; `color_key` optionally groups rectangles into a categorical color. `capacity_key` is a dot-path to a total-capacity number — when the rows' summed `value_key` is less than this, a synthetic "Free" tile fills the remainder, so area doubles as a capacity gauge; omitted, or at/below the summed value, adds no tile.
 
 ### `heatmap` — entity x time-bucket grid
 
