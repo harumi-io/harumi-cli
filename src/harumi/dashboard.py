@@ -387,10 +387,20 @@ def parse_dataset_entry(entry: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]]
 
 def parse_metric_entry(entry: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[WidgetIssue]]:
     """Validate one raw `[[metrics]]` table entry. Mirrors `parseMetricEntry`
-    in metrics.ts, including the read-only SQL guard."""
+    in metrics.ts, including the read-only SQL guard.
+
+    `time_key`, when present, names a column in this metric's own result set
+    holding a numeric instant on the `[clock]` axis — marking the rows as a
+    time series rather than a single result (see `seriesAt` in
+    harumi-platform). Whether a `[clock]` actually exists is a fact about the
+    whole file, not this one entry, so that check lives in
+    `validate_dashboard_toml` alongside the other `[[metrics]]`/`[clock]`
+    cross-checks — not here.
+    """
     id_ = entry.get("id")
     sql = entry.get("sql")
     title = entry.get("title")
+    time_key = entry.get("time_key")
     metric_id = id_ if isinstance(id_, str) and id_.strip() != "" else None
 
     if metric_id is None:
@@ -406,6 +416,8 @@ def parse_metric_entry(entry: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]],
     metric: Dict[str, Any] = {"id": metric_id, "sql": sql}
     if isinstance(title, str):
         metric["title"] = title
+    if isinstance(time_key, str) and time_key.strip() != "":
+        metric["time_key"] = time_key
     return metric, None
 
 
@@ -573,6 +585,7 @@ def validate_dashboard_toml(
         declared_kinds[dataset["id"]] = dataset["kind"]
 
     raw_metrics = parsed.get("metrics")
+    metrics: List[Dict[str, Any]] = []
     seen_metric_ids: set[str] = set()
     for entry in raw_metrics if isinstance(raw_metrics, list) else []:
         if not isinstance(entry, dict):
@@ -587,9 +600,11 @@ def validate_dashboard_toml(
             issues.append(WidgetIssue(metric["id"], f'metric "{metric["id"]}": duplicate id — the later entry is ignored'))
             continue
         seen_metric_ids.add(metric["id"])
+        metrics.append(metric)
 
     raw_clock = parsed.get("clock")
-    if isinstance(raw_clock, dict):
+    has_clock = isinstance(raw_clock, dict)
+    if has_clock:
         # See `parse_clock_entry`'s docstring for why this stand-in — a
         # kind-only entry per timeline/gantt-chart widget — isn't full
         # `synthesizeDatasets` parity.
@@ -602,6 +617,24 @@ def validate_dashboard_toml(
             issues.append(WidgetIssue(None, clock_message))
     elif raw_clock is not None:
         issues.append(WidgetIssue(None, "clock entry is not a table"))
+
+    # Checked here rather than in `parse_metric_entry`, which only sees one
+    # `[[metrics]]` entry at a time: whether a `[clock]` exists at all is a
+    # fact about the whole file. `metrics.<id>` only ever resolves via the
+    # clock's current `t` for a time-keyed metric (see harumi-platform's
+    # `DashboardGrid`), so without a `[clock]` there's no time to evaluate it
+    # at. Mirrors the same check in `parseDashboardConfig`.
+    if not has_clock:
+        for metric in metrics:
+            if "time_key" not in metric:
+                continue
+            issues.append(
+                WidgetIssue(
+                    metric["id"],
+                    f'metric "{metric["id"]}": "time_key" requires a [clock] section — '
+                    "there is no time to evaluate it at otherwise",
+                )
+            )
 
     if output is not None:
         for widget in widgets:

@@ -466,6 +466,21 @@ class TestParseMetricEntry:
         assert issue is not None and issue.entity_id == "m"
         assert "read-only" in issue.message
 
+    def test_time_key_is_carried_when_present(self):
+        metric, issue = parse_metric_entry({"id": "occupancy", "sql": "SELECT 1", "time_key": "t"})
+        assert issue is None
+        assert metric is not None and metric["time_key"] == "t"
+
+    def test_time_key_is_absent_when_omitted(self):
+        metric, issue = parse_metric_entry({"id": "m", "sql": "SELECT 1"})
+        assert issue is None
+        assert metric is not None and "time_key" not in metric
+
+    def test_a_blank_time_key_is_dropped_not_carried(self):
+        metric, issue = parse_metric_entry({"id": "m", "sql": "SELECT 1", "time_key": "  "})
+        assert issue is None
+        assert metric is not None and "time_key" not in metric
+
 
 class TestParseClockEntry:
     def test_a_valid_clock_parses(self):
@@ -614,6 +629,65 @@ dataset = "nope"
 """
         _, issues = validate_dashboard_toml(raw)
         assert len(issues) == 1 and 'no dataset "nope"' in issues[0].message
+
+    def test_a_time_keyed_metric_with_a_clock_validates_clean(self):
+        raw = """
+[[datasets]]
+id = "schedule"
+kind = "intervals"
+source_key = "schedule"
+
+[datasets.roles]
+start = "start"
+end = "end"
+
+[[metrics]]
+id = "occupancy"
+time_key = "t"
+sql = "SELECT 1 AS t, 2 AS value"
+
+[clock]
+dataset = "schedule"
+"""
+        _, issues = validate_dashboard_toml(raw)
+        assert issues == []
+
+    def test_a_time_keyed_metric_without_a_clock_is_reported(self):
+        raw = """
+[[metrics]]
+id = "occupancy"
+time_key = "t"
+sql = "SELECT 1 AS t, 2 AS value"
+"""
+        _, issues = validate_dashboard_toml(raw)
+        assert len(issues) == 1
+        assert issues[0].entity_id == "occupancy"
+        assert '"time_key" requires a [clock] section' in issues[0].message
+
+    def test_multiple_time_keyed_metrics_without_a_clock_are_each_reported(self):
+        raw = """
+[[metrics]]
+id = "a"
+time_key = "t"
+sql = "SELECT 1 AS t"
+
+[[metrics]]
+id = "b"
+time_key = "t"
+sql = "SELECT 1 AS t"
+"""
+        _, issues = validate_dashboard_toml(raw)
+        assert len(issues) == 2
+        assert {issue.entity_id for issue in issues} == {"a", "b"}
+
+    def test_a_non_time_keyed_metric_does_not_require_a_clock(self):
+        raw = """
+[[metrics]]
+id = "makespan"
+sql = "SELECT max(end) FROM schedule"
+"""
+        _, issues = validate_dashboard_toml(raw)
+        assert issues == []
 
     def test_a_clock_can_name_a_timeline_widgets_synthesized_dataset(self):
         """No `[[datasets]]` entry at all — the clock names the dataset a bare
