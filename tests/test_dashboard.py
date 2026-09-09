@@ -36,7 +36,7 @@ _EXPECTED_WIDGET_CONTRACT = {
     "table": ["rows_key!*", "columns!"],
     "detail": ["items_key!*", "id_key!", "fields"],
     "filter": ["items_key!*", "id_key!", "label_key"],
-    "treemap": ["items_key!*", "value_key!", "name_key!", "color_key"],
+    "treemap": ["items_key!*", "value_key!", "name_key!", "color_key", "capacity_key*"],
     "line-chart": ["data_key!*", "x_key!", "series!"],
     "bar-chart": ["data_key!*", "x_key!", "series!"],
     "chart": ["variant![line|bar]", "data_key!*", "x_key!", "series!"],
