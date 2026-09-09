@@ -168,15 +168,16 @@ app = typer.Typer(
 console = Console()
 err_console = Console(stderr=True)
 
-# figlet "ansi_shadow", generated once and pasted in rather than taking a
-# pyfiglet runtime dependency for six letters that never change.
+# figlet "ansi_shadow" with a 2-column gap inserted between each letter for
+# readability, generated once and pasted in rather than taking a pyfiglet
+# runtime dependency for six letters that never change.
 _BANNER = r"""
-██╗  ██╗ █████╗ ██████╗ ██╗   ██╗███╗   ███╗██╗
-██║  ██║██╔══██╗██╔══██╗██║   ██║████╗ ████║██║
-███████║███████║██████╔╝██║   ██║██╔████╔██║██║
-██╔══██║██╔══██║██╔══██╗██║   ██║██║╚██╔╝██║██║
-██║  ██║██║  ██║██║  ██║╚██████╔╝██║ ╚═╝ ██║██║
-╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝╚═╝
+██╗  ██╗   █████╗   ██████╗   ██╗   ██╗  ███╗   ███╗  ██╗
+██║  ██║  ██╔══██╗  ██╔══██╗  ██║   ██║  ████╗ ████║  ██║
+███████║  ███████║  ██████╔╝  ██║   ██║  ██╔████╔██║  ██║
+██╔══██║  ██╔══██║  ██╔══██╗  ██║   ██║  ██║╚██╔╝██║  ██║
+██║  ██║  ██║  ██║  ██║  ██║  ╚██████╔╝  ██║ ╚═╝ ██║  ██║
+╚═╝  ╚═╝  ╚═╝  ╚═╝  ╚═╝  ╚═╝   ╚═════╝   ╚═╝     ╚═╝  ╚═╝
 """.strip("\n")
 
 
