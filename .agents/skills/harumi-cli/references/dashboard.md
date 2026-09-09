@@ -189,9 +189,32 @@ Semantics worth knowing:
 
 `timeline` is the same shape plus more: fragmented tasks fold into one item with gaps (`id_key`), non-working spans render as background bands (`regions_key` + `region_*`), and a `[clock]` section (see below) drives a now-marker over it.
 
-## Datasets, metrics, and the clock — not yet checked by this CLI
+## Datasets, metrics, and the clock
 
-Beyond `[[widgets]]`, a spec can declare `[[datasets]]` (name a dataset's shape once instead of restating it per widget), `[[metrics]]` (a KPI as a read-only SQL query over the datasets, exposed to any widget under `metrics.<id>`), and `[clock]` (turns one `intervals` dataset into a play/pause/scrub transport bar). **`validate_dashboard_toml`/`harumi dashboard validate` do not parse or check any of these three sections yet** — a problem there isn't caught here, only when the dashboard is opened in the browser, where the platform's own parser reports it. Don't tell a user this CLI validated a spec's datasets, metrics, or clock section; it didn't.
+Beyond `[[widgets]]`, a spec can declare three more top-level sections, all checked by `harumi dashboard validate` the same way a widget is — an invalid entry is reported and dropped, not silently rendered wrong:
+
+- **`[[datasets]]`** — names a dataset's shape once instead of restating it per widget. Needs `id`, `kind` (`intervals`\|`records`\|`timeline`\|`scalars`), `source_key` (a dot-path into `output.json`), and a `[datasets.roles]` sub-table naming which fields play which role: `intervals` needs `start` plus `end` or `duration`; `timeline` needs `at` or `start` plus `value`; `records`/`scalars` need no roles at all.
+- **`[[metrics]]`** — a KPI as a single read-only SQL query, run against the declared datasets and exposed to any widget under `metrics.<id>`. `sql` must be exactly one `SELECT`/`WITH`/`FROM`/`DESCRIBE`/`SUMMARIZE` statement — no writes, no `ATTACH`/`COPY`/`INSTALL`/`LOAD`/`PRAGMA`, and no table function that reads a path or URL (`read_csv`, `read_parquet`, `postgres_scan`, ...).
+- **`[clock]`** — turns one `intervals` dataset into a play/pause/scrub transport bar over the schedule chart. `dataset` must name a declared `intervals` dataset, or (with no `[[datasets]]` entry needed) a `gantt-chart`/`timeline` widget's own id, suffixed `__source` (e.g. `dataset = "schedule__source"` for `id = "schedule"`) — its rendered schedule counts as an implicit `intervals` dataset. `speed` is optional and, if set, must be a positive finite number.
+
+```toml
+[[datasets]]
+id = "schedule"
+kind = "intervals"
+source_key = "schedule"
+
+[datasets.roles]
+start = "start"
+end = "end"
+
+[[metrics]]
+id = "makespan"
+sql = "SELECT max(end) - min(start) AS value FROM schedule"
+
+[clock]
+dataset = "schedule"
+speed = 30
+```
 
 ## Layout
 
@@ -218,4 +241,4 @@ harumi dashboard validate --latest                 # + check dot-paths against t
 harumi dashboard validate --run <RUN_ID>           # + a specific run
 ```
 
-With no `PATH` it validates **every** spec it finds (locally, or in the repo with `--ref`), printing each filename as a heading, and exits non-zero if any spec would drop a widget, isn't valid TOML, or (when checking dot-paths) would render a widget empty.
+With no `PATH` it validates **every** spec it finds (locally, or in the repo with `--ref`), printing each filename as a heading, and exits non-zero if any spec would drop a widget, dataset, metric, or clock entry, isn't valid TOML, or (when checking dot-paths) would render a widget empty.
