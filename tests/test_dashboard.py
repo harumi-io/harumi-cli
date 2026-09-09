@@ -370,6 +370,35 @@ class TestParseWidgetEntry:
         assert widget is None
         assert issue is not None and issue.dropped is True
 
+    def test_kpi_rail_item_accepts_rows_key_in_place_of_value_key(self):
+        entry = {
+            "type": "kpi-rail",
+            "id": "k",
+            "title": "K",
+            "items": [
+                {"label": "Utilization", "rows_key": "machines", "progress_key": "utilization_pct", "tone": "warn"},
+                {"label": "Bad"},  # neither value_key nor rows_key
+            ],
+        }
+        widget, issue = parse_widget_entry(entry)
+        assert issue is None
+        assert widget is not None
+        assert widget["items"] == [
+            {"label": "Utilization", "rows_key": "machines", "progress_key": "utilization_pct", "tone": "warn"}
+        ]
+
+    def test_kpi_rail_item_rejects_unknown_tone(self):
+        entry = {
+            "type": "kpi-rail",
+            "id": "k",
+            "title": "K",
+            "items": [{"label": "Utilization", "rows_key": "machines", "tone": "sparkly"}],
+        }
+        widget, issue = parse_widget_entry(entry)
+        assert issue is None
+        assert widget is not None
+        assert "tone" not in widget["items"][0]
+
     def test_kpi_rail_item_ignores_unknown_format_but_keeps_item(self):
         entry = {
             "type": "kpi-rail",
@@ -734,6 +763,19 @@ items = [{ label = "Cost", value_key = "totals.cost" }]
         widgets, issues = validate_dashboard_toml(raw, output={"totals": {"cost": 1}})
         assert len(widgets) == 1
         assert issues == []
+
+    def test_kpi_rail_item_with_unresolved_rows_key_is_reported_but_not_dropped(self):
+        raw = """
+[[widgets]]
+type = "kpi-rail"
+id = "summary"
+title = "Summary"
+items = [{ label = "Utilization", rows_key = "machiens", progress_key = "utilization_pct" }]
+"""
+        widgets, issues = validate_dashboard_toml(raw, output={"machines": [{"label": "m1", "value": "1"}]})
+        assert len(widgets) == 1
+        assert len(issues) == 1 and issues[0].dropped is False
+        assert "machiens" in issues[0].message and "items[1].rows_key" in issues[0].message
 
     def test_resolved_dot_path_has_no_issues(self):
         raw = """
