@@ -2,8 +2,6 @@ name: Auto-add to Project
 on:
   issues:
     types: [opened, labeled]
-  pull_request:
-    types: [opened, labeled]
 
 jobs:
   add-to-project:

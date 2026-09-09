@@ -79,6 +79,33 @@ def test_every_command_builds():
     )
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [[], ["--help"]],
+)
+def test_banner_shown_for_bare_and_help(argv, monkeypatch, capsys):
+    """The banner is an entry-point decoration (see `main()`), not a Click
+    callback, so it's checked against raw argv rather than through
+    `CliRunner` — this pins that argv match directly."""
+    monkeypatch.setattr("sys.argv", ["harumi"] + argv)
+    cli._print_banner_if_bare_entrypoint()
+    assert capsys.readouterr().out.strip() != ""
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["--version"], ["login"], ["login", "--help"], ["whoami"], ["--env", "staging"]],
+)
+def test_banner_not_shown_for_version_and_real_commands(argv, monkeypatch, capsys):
+    """`--version` is deliberately excluded: harumi-cli-setup/SKILL.md
+    documents its output as an exact-match `harumi <x.y.z>` contract used to
+    verify installs and disambiguate a shadowing same-named binary — banner
+    art would break that machine-parsed shape."""
+    monkeypatch.setattr("sys.argv", ["harumi"] + argv)
+    cli._print_banner_if_bare_entrypoint()
+    assert capsys.readouterr().out == ""
+
+
 def test_cli_surface_normalizes_click_builtin_type_names():
     """Typer >=0.27's vendored click names STRING/INT 'str'/'int'; every real
     click release (8.1-8.4, which is what Python 3.9's typer 0.23.x uses) names
