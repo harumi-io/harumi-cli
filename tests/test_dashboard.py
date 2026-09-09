@@ -32,9 +32,14 @@ from harumi.dashboard import (
 # validating less than it used to.
 _EXPECTED_WIDGET_CONTRACT = {
     "metric": ["value_key!*", "delta_key*", "format[number|currency|percent]", "unit"],
+    "kpi-rail": ["items!"],
     "table": ["rows_key!*", "columns!"],
+    "detail": ["items_key!*", "id_key!", "fields"],
+    "filter": ["items_key!*", "id_key!", "label_key"],
+    "treemap": ["items_key!*", "value_key!", "name_key!", "color_key"],
     "line-chart": ["data_key!*", "x_key!", "series!"],
     "bar-chart": ["data_key!*", "x_key!", "series!"],
+    "chart": ["variant![line|bar]", "data_key!*", "x_key!", "series!"],
     "gantt-chart": [
         "tasks_key!*",
         "resource_key",
@@ -242,12 +247,28 @@ class TestParseWidgetEntry:
     def test_parses_a_minimal_valid_entry_for_every_type(self):
         entries = {
             "metric": {"type": "metric", "id": "m", "title": "M", "value_key": "totals.x"},
+            "kpi-rail": {
+                "type": "kpi-rail",
+                "id": "k",
+                "title": "K",
+                "items": [{"label": "Cost", "value_key": "totals.cost"}],
+            },
             "table": {
                 "type": "table",
                 "id": "t",
                 "title": "T",
                 "rows_key": "rows",
                 "columns": [{"key": "name", "label": "Name"}],
+            },
+            "detail": {"type": "detail", "id": "d", "title": "D", "items_key": "jobs", "id_key": "id"},
+            "filter": {"type": "filter", "id": "f", "title": "F", "items_key": "jobs", "id_key": "id"},
+            "treemap": {
+                "type": "treemap",
+                "id": "tm",
+                "title": "TM",
+                "items_key": "categories",
+                "value_key": "cost",
+                "name_key": "name",
             },
             "line-chart": {
                 "type": "line-chart",
@@ -265,12 +286,27 @@ class TestParseWidgetEntry:
                 "x_key": "label",
                 "series": [{"key": "value"}],
             },
+            "chart": {
+                "type": "chart",
+                "id": "c",
+                "title": "C",
+                "variant": "line",
+                "data_key": "series",
+                "x_key": "label",
+                "series": [{"key": "value"}],
+            },
             "gantt-chart": {"type": "gantt-chart", "id": "g", "title": "G", "tasks_key": "schedule"},
+            "timeline": {"type": "timeline", "id": "tl", "title": "TL", "items_key": "schedule"},
         }
         for type_, entry in entries.items():
             widget, issue = parse_widget_entry(entry)
             assert issue is None, f"{type_} should parse cleanly"
             assert widget is not None and widget["type"] == type_
+        # Every type the artifact declares must have a minimal entry above —
+        # missing one here would mean this "every type" test silently stopped
+        # covering a type without anyone noticing, the same drift the
+        # re-vendor step above exists to catch.
+        assert set(entries) == set(widget_schemas())
 
     def test_rejects_unknown_widget_type(self):
         widget, issue = parse_widget_entry({"type": "pie-chart", "id": "p", "title": "P"})
@@ -310,6 +346,41 @@ class TestParseWidgetEntry:
         assert issue is None
         assert widget is not None
         assert widget["columns"] == [{"key": "name", "label": "name"}]
+
+    def test_kpi_rail_drops_invalid_items_but_keeps_valid_ones(self):
+        entry = {
+            "type": "kpi-rail",
+            "id": "k",
+            "title": "K",
+            "items": [
+                {"label": "Cost", "value_key": "totals.cost", "format": "currency"},
+                {"label": "Bad"},  # missing value_key
+                {"value_key": "totals.x"},  # missing label
+                {"label": "Not a dict"},  # placeholder to keep list realistic
+            ],
+        }
+        widget, issue = parse_widget_entry(entry)
+        assert issue is None
+        assert widget is not None
+        assert widget["items"] == [{"label": "Cost", "value_key": "totals.cost", "format": "currency"}]
+
+    def test_kpi_rail_with_only_invalid_items_is_dropped(self):
+        entry = {"type": "kpi-rail", "id": "k", "title": "K", "items": [{"label": "Bad"}]}
+        widget, issue = parse_widget_entry(entry)
+        assert widget is None
+        assert issue is not None and issue.dropped is True
+
+    def test_kpi_rail_item_ignores_unknown_format_but_keeps_item(self):
+        entry = {
+            "type": "kpi-rail",
+            "id": "k",
+            "title": "K",
+            "items": [{"label": "Cost", "value_key": "totals.cost", "format": "scientific-notation"}],
+        }
+        widget, issue = parse_widget_entry(entry)
+        assert issue is None
+        assert widget is not None
+        assert widget["items"] == [{"label": "Cost", "value_key": "totals.cost"}]
 
 
 class TestParseDatasetEntry:
@@ -575,7 +646,7 @@ dataset = "schedule"
         assert len(issues) == 1 and "clock entry is not a table" in issues[0].message
 
 
-
+class TestResolvePath:
     def test_resolves_nested_dot_path(self):
         assert resolve_path({"totals": {"revenue": 100}}, "totals.revenue") == 100
 
@@ -629,6 +700,40 @@ value_key = "totals.objective"
         assert len(widgets) == 1
         assert len(issues) == 1 and issues[0].dropped is False
         assert "totals.objective" in issues[0].message
+
+    def test_kpi_rail_item_with_unresolved_value_key_is_reported_but_not_dropped(self):
+        # kpi-rail items get the same value_key/delta_key contract as a
+        # standalone metric — a typo here used to pass validate cleanly and
+        # only show up as a blank tile in the browser.
+        raw = """
+[[widgets]]
+type = "kpi-rail"
+id = "summary"
+title = "Summary"
+items = [
+  { label = "Cost", value_key = "totals.cost" },
+  { label = "Makespan", value_key = "totals.makespan", delta_key = "deltas.makespan" },
+]
+"""
+        widgets, issues = validate_dashboard_toml(raw, output={"totals": {"cost": 1}})
+        assert len(widgets) == 1
+        messages = [issue.message for issue in issues]
+        assert len(issues) == 2
+        assert all(issue.dropped is False for issue in issues)
+        assert any("totals.makespan" in m and "items[2].value_key" in m for m in messages)
+        assert any("deltas.makespan" in m and "items[2].delta_key" in m for m in messages)
+
+    def test_kpi_rail_item_with_resolved_value_key_has_no_issues(self):
+        raw = """
+[[widgets]]
+type = "kpi-rail"
+id = "summary"
+title = "Summary"
+items = [{ label = "Cost", value_key = "totals.cost" }]
+"""
+        widgets, issues = validate_dashboard_toml(raw, output={"totals": {"cost": 1}})
+        assert len(widgets) == 1
+        assert issues == []
 
     def test_resolved_dot_path_has_no_issues(self):
         raw = """

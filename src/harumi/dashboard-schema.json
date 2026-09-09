@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 7,
   "discovery": {
     "dashboardDir": "dashboard",
     "rootPath": "dashboard.toml"
@@ -55,6 +55,28 @@
       "tomlExample": "[[widgets]]\ntype = \"metric\"\nid = \"revenue\"\ntitle = \"Total revenue\"\nvalue_key = \"totals.revenue\"\nformat = \"currency\""
     },
     {
+      "type": "kpi-rail",
+      "description": "Several KPI tiles in one horizontal row — for a handful of related numbers that read better side by side than as separate `metric` widgets competing for grid columns.",
+      "fields": [
+        {
+          "tomlKey": "items",
+          "as": "items",
+          "type": "kpiItems",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "One or more `{ label, value_key, delta_key?, format?, unit? }` entries — each is the same value/delta/format/unit contract as a `metric` widget, rendered as one tile in the row."
+        }
+      ],
+      "dataExample": {
+        "totals": {
+          "cost": 128400,
+          "makespan": 640,
+          "utilization": 0.82
+        }
+      },
+      "tomlExample": "[[widgets]]\ntype = \"kpi-rail\"\nid = \"summary\"\ntitle = \"Run summary\"\nitems = [\n  { label = \"Total cost\", value_key = \"totals.cost\", format = \"currency\" },\n  { label = \"Makespan\", value_key = \"totals.makespan\", unit = \"min\" },\n  { label = \"Utilization\", value_key = \"totals.utilization\", format = \"percent\" },\n]"
+    },
+    {
       "type": "table",
       "description": "A sortable data grid bound to an array of row objects.",
       "fields": [
@@ -86,8 +108,148 @@
       "tomlExample": "[[widgets]]\ntype = \"table\"\nid = \"breakdown\"\ntitle = \"Breakdown\"\nrows_key = \"breakdown\"\ncolumns = [\n  { key = \"name\", label = \"Name\" },\n  { key = \"value\", label = \"Value\" },\n]"
     },
     {
+      "type": "detail",
+      "description": "Shows the fields of whichever row is currently selected (via a `timeline` click, or any other selecting view) — looked up by matching `id_key` against the selection id.",
+      "fields": [
+        {
+          "tomlKey": "items_key",
+          "as": "itemsKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": true,
+          "doc": "Dot-path to the array of row objects a selection is looked up in."
+        },
+        {
+          "tomlKey": "id_key",
+          "as": "idKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "Row field compared against the current selection id — the same field the selecting view (e.g. `timeline`'s `id_key`) used to identify that row."
+        },
+        {
+          "tomlKey": "fields",
+          "as": "fields",
+          "type": "columns",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Which row fields to show, and in what order/label. Omit to show every field on the matched row."
+        }
+      ],
+      "dataExample": {
+        "schedule": [
+          {
+            "op": "A1",
+            "task": "Job A op1",
+            "resource": "Machine 1",
+            "start": 0,
+            "end": 45
+          }
+        ]
+      },
+      "tomlExample": "[[widgets]]\ntype = \"detail\"\nid = \"task-detail\"\ntitle = \"Task details\"\nitems_key = \"schedule\"\nid_key = \"op\"\nfields = [\n  { key = \"task\", label = \"Task\" },\n  { key = \"resource\", label = \"Machine\" },\n]"
+    },
+    {
+      "type": "filter",
+      "description": "A picker that sets the dashboard's selection — one option per distinct `id_key` value in `items_key`. An alternative to clicking a `timeline` bar, for choosing an item by name.",
+      "fields": [
+        {
+          "tomlKey": "items_key",
+          "as": "itemsKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": true,
+          "doc": "Dot-path to the array of row objects to pick options from."
+        },
+        {
+          "tomlKey": "id_key",
+          "as": "idKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "Row field set as the selection id when an option is picked."
+        },
+        {
+          "tomlKey": "label_key",
+          "as": "labelKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Row field shown as each option's label. Defaults to the id itself."
+        }
+      ],
+      "dataExample": {
+        "schedule": [
+          {
+            "op": "A1",
+            "task": "Job A op1"
+          },
+          {
+            "op": "B1",
+            "task": "Job B op1"
+          }
+        ]
+      },
+      "tomlExample": "[[widgets]]\ntype = \"filter\"\nid = \"task-filter\"\ntitle = \"Choose a task\"\nitems_key = \"schedule\"\nid_key = \"op\"\nlabel_key = \"task\""
+    },
+    {
+      "type": "treemap",
+      "description": "A flat treemap — one rectangle per row, area proportional to `value_key`, labeled from `name_key`. Good for a breakdown where relative size matters more than exact values (e.g. cost by machine).",
+      "fields": [
+        {
+          "tomlKey": "items_key",
+          "as": "itemsKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": true,
+          "doc": "Dot-path to the array of row objects to size rectangles from."
+        },
+        {
+          "tomlKey": "value_key",
+          "as": "valueKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "Row field sized into each rectangle's area. Rows with a missing or non-positive value are dropped."
+        },
+        {
+          "tomlKey": "name_key",
+          "as": "nameKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "Row field shown as each rectangle's label."
+        },
+        {
+          "tomlKey": "color_key",
+          "as": "colorKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Row field grouped into a stable color per distinct value. Omit for one palette color per rectangle in source order."
+        }
+      ],
+      "dataExample": {
+        "breakdown": [
+          {
+            "machine": "Machine 1",
+            "cost": 420
+          },
+          {
+            "machine": "Machine 2",
+            "cost": 180
+          },
+          {
+            "machine": "Machine 3",
+            "cost": 260
+          }
+        ]
+      },
+      "tomlExample": "[[widgets]]\ntype = \"treemap\"\nid = \"cost-breakdown\"\ntitle = \"Cost by machine\"\nitems_key = \"breakdown\"\nvalue_key = \"cost\"\nname_key = \"machine\""
+    },
+    {
       "type": "line-chart",
-      "description": "A line chart — good for a value trending over time.",
+      "description": "A line chart — good for a value trending over time. Deprecated: prefer `chart` with `variant = \"line\"`; this type is kept only so dashboards written before `chart` existed keep rendering.",
       "fields": [
         {
           "tomlKey": "data_key",
@@ -130,7 +292,7 @@
     },
     {
       "type": "bar-chart",
-      "description": "A bar chart — good for comparing values across categories.",
+      "description": "A bar chart — good for comparing values across categories. Deprecated: prefer `chart` with `variant = \"bar\"`; this type is kept only so dashboards written before `chart` existed keep rendering.",
       "fields": [
         {
           "tomlKey": "data_key",
@@ -170,6 +332,61 @@
         ]
       },
       "tomlExample": "[[widgets]]\ntype = \"bar-chart\"\nid = \"breakdown-chart\"\ntitle = \"Cost by warehouse\"\ndata_key = \"breakdown\"\nx_key = \"name\"\nseries = [{ key = \"value\", label = \"Cost\" }]"
+    },
+    {
+      "type": "chart",
+      "description": "A line or bar chart, picked by `variant` — folds `line-chart` and `bar-chart` into one type since they only ever differed in that. Use `variant = \"line\"` for a value trending over time, `\"bar\"` for comparing values across categories.",
+      "fields": [
+        {
+          "tomlKey": "variant",
+          "as": "variant",
+          "type": "enum",
+          "required": true,
+          "values": [
+            "line",
+            "bar"
+          ],
+          "isOutputPath": false,
+          "doc": "Which chart to draw: \"line\" for a trend, \"bar\" for comparing categories."
+        },
+        {
+          "tomlKey": "data_key",
+          "as": "dataKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": true,
+          "doc": "Dot-path to an array of data points in the run output payload."
+        },
+        {
+          "tomlKey": "x_key",
+          "as": "xKey",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "The data point field to use as the category/x-axis value."
+        },
+        {
+          "tomlKey": "series",
+          "as": "series",
+          "type": "series",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "One or more `{ key, label?, color? }` entries — each renders as its own line/bar."
+        }
+      ],
+      "dataExample": {
+        "timeseries": [
+          {
+            "label": "Mon",
+            "value": 412
+          },
+          {
+            "label": "Tue",
+            "value": 398
+          }
+        ]
+      },
+      "tomlExample": "[[widgets]]\ntype = \"chart\"\nid = \"trend\"\ntitle = \"Objective value over time\"\nvariant = \"line\"\ndata_key = \"timeseries\"\nx_key = \"label\"\nseries = [{ key = \"value\", label = \"Objective value\" }]"
     },
     {
       "type": "gantt-chart",
