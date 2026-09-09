@@ -646,7 +646,7 @@ dataset = "schedule"
         assert len(issues) == 1 and "clock entry is not a table" in issues[0].message
 
 
-
+class TestResolvePath:
     def test_resolves_nested_dot_path(self):
         assert resolve_path({"totals": {"revenue": 100}}, "totals.revenue") == 100
 
