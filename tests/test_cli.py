@@ -79,6 +79,29 @@ def test_every_command_builds():
     )
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [[], ["--help"], ["--version"]],
+)
+def test_banner_shown_for_bare_help_and_version(argv, monkeypatch, capsys):
+    """The banner is an entry-point decoration (see `main()`), not a Click
+    callback, so it's checked against raw argv rather than through
+    `CliRunner` — this pins that argv match directly."""
+    monkeypatch.setattr("sys.argv", ["harumi"] + argv)
+    cli._print_banner_if_bare_entrypoint()
+    assert capsys.readouterr().out.strip() != ""
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["login"], ["login", "--help"], ["whoami"], ["--env", "staging"]],
+)
+def test_banner_not_shown_for_real_commands(argv, monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["harumi"] + argv)
+    cli._print_banner_if_bare_entrypoint()
+    assert capsys.readouterr().out == ""
+
+
 def test_cli_surface_normalizes_click_builtin_type_names():
     """Typer >=0.27's vendored click names STRING/INT 'str'/'int'; every real
     click release (8.1-8.4, which is what Python 3.9's typer 0.23.x uses) names

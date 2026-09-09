@@ -51,7 +51,7 @@ Repository = "https://github.com/harumi-io/harumi-cli"
 Issues = "https://github.com/harumi-io/harumi-cli/issues"
 
 [project.scripts]
-harumi = "harumi.cli:app"
+harumi = "harumi.cli:main"
 
 [project.optional-dependencies]
 dev = [

@@ -113,6 +113,7 @@ import functools
 import json
 import mimetypes
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -166,6 +167,33 @@ app = typer.Typer(
 )
 console = Console()
 err_console = Console(stderr=True)
+
+# figlet "ansi_shadow", generated once and pasted in rather than taking a
+# pyfiglet runtime dependency for six letters that never change.
+_BANNER = r"""
+██╗  ██╗ █████╗ ██████╗ ██╗   ██╗███╗   ███╗██╗
+██║  ██║██╔══██╗██╔══██╗██║   ██║████╗ ████║██║
+███████║███████║██████╔╝██║   ██║██╔████╔██║██║
+██╔══██║██╔══██║██╔══██╗██║   ██║██║╚██╔╝██║██║
+██║  ██║██║  ██║██║  ██║╚██████╔╝██║ ╚═╝ ██║██║
+╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝╚═╝
+""".strip("\n")
+
+
+def _print_banner_if_bare_entrypoint() -> None:
+    """Show the banner only for the three read-only, no-side-effect
+    invocations: bare `harumi`, `harumi --help`, `harumi --version`.
+
+    Deliberately narrow: `harumi <command> --help` (e.g. `harumi login
+    --help`) does NOT match, so the banner decorates the entry point once
+    rather than prepending itself to every command's help text. Checked
+    against raw argv in `main()` (the actual process entry point) rather than
+    as a Typer/Click callback, so it can't interfere with Click's own eager
+    `--help`/`--version` handling — and `tests/test_cli.py` invokes `app()`
+    directly via `CliRunner`, never `main()`, so this never touches test output.
+    """
+    if sys.argv[1:] in ([], ["--help"], ["--version"]):
+        console.print(f"[bold magenta]{_BANNER}[/bold magenta]")
 
 
 def _version_callback(value: bool) -> None:
@@ -2877,6 +2905,7 @@ def org_remove(
 
 
 def main() -> None:
+    _print_banner_if_bare_entrypoint()
     app()
 
 
