@@ -194,14 +194,17 @@ def _coerce_series(value: Any) -> Optional[List[Dict[str, str]]]:
 
 
 _KPI_ITEM_FORMATS = ("number", "currency", "percent")
+_KPI_ITEM_TONES = ("good", "warn", "bad", "neutral")
 
 
-def _coerce_kpi_items(value: Any) -> Optional[List[Dict[str, str]]]:
+def _coerce_kpi_items(value: Any) -> Optional[List[Dict[str, Any]]]:
     """Mirrors `coerceKpiItems` in schema.ts: each entry is a `metric`-shaped
     dict (`label`, `value_key`, optional `delta_key`/`format`/`unit`), minus
-    `id`/`type`/`title` since a rail item isn't its own widget. An item
-    missing `label` or `value_key` is dropped rather than failing the whole
-    rail — one bad item shouldn't blank the others.
+    `id`/`type`/`title` since a rail item isn't its own widget, plus the
+    optional `rows_key`/`progress_key`/`tone` that render a per-entity
+    `label / meter / value` list instead of one value. An item missing
+    `label`, or missing both `value_key` and `rows_key`, is dropped rather
+    than failing the whole rail — one bad item shouldn't blank the others.
     """
     if not isinstance(value, list):
         return None
@@ -209,16 +212,27 @@ def _coerce_kpi_items(value: Any) -> Optional[List[Dict[str, str]]]:
     for raw in value:
         if not isinstance(raw, dict):
             continue
-        label, value_key = raw.get("label"), raw.get("value_key")
-        if not isinstance(label, str) or not isinstance(value_key, str):
+        label = raw.get("label")
+        value_key, rows_key = raw.get("value_key"), raw.get("rows_key")
+        if not isinstance(label, str):
             continue
-        item = {"label": label, "value_key": value_key}
+        if not isinstance(value_key, str) and not isinstance(rows_key, str):
+            continue
+        item: Dict[str, Any] = {"label": label}
+        if isinstance(value_key, str):
+            item["value_key"] = value_key
         if isinstance(raw.get("delta_key"), str):
             item["delta_key"] = raw["delta_key"]
         if raw.get("format") in _KPI_ITEM_FORMATS:
             item["format"] = raw["format"]
         if isinstance(raw.get("unit"), str):
             item["unit"] = raw["unit"]
+        if isinstance(rows_key, str):
+            item["rows_key"] = rows_key
+        if isinstance(raw.get("progress_key"), str):
+            item["progress_key"] = raw["progress_key"]
+        if raw.get("tone") in _KPI_ITEM_TONES:
+            item["tone"] = raw["tone"]
         items.append(item)
     return items or None
 
@@ -642,12 +656,13 @@ def validate_dashboard_toml(
             for field in schema:
                 if field.kind == "kpiItems":
                     # `items` itself isn't a dot-path (it's a list), but each
-                    # item's `value_key`/`delta_key` is — the doc's own claim
-                    # that a rail item has "the same value/delta/format/unit
-                    # contract as a metric widget" means it needs the same
-                    # check a standalone metric's `value_key` gets below.
+                    # item's `value_key`/`delta_key`/`rows_key` is — the doc's
+                    # own claim that a rail item has "the same value/delta/
+                    # format/unit contract as a metric widget" means it needs
+                    # the same check a standalone metric's `value_key` gets
+                    # below, and `rows_key` is a dot-path by the same logic.
                     for index, item in enumerate(widget.get(field.toml_key) or [], start=1):
-                        for item_field in ("value_key", "delta_key"):
+                        for item_field in ("value_key", "delta_key", "rows_key"):
                             path = item.get(item_field)
                             if not isinstance(path, str):
                                 continue

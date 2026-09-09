@@ -37,7 +37,7 @@ Get the live, in-code reference with `harumi dashboard widgets` (add `--type met
 | type | required keys | optional keys |
 |---|---|---|
 | `metric` | `value_key` | `delta_key`, `format` (`number`\|`currency`\|`percent`), `unit` |
-| `kpi-rail` | `items` | — |
+| `kpi-rail` | `items` | — (each item optionally: `rows_key`, `progress_key`, `tone`) |
 | `table` | `rows_key`, `columns` | — |
 | `detail` | `items_key`, `id_key` | `fields` |
 | `filter` | `items_key`, `id_key` | `label_key` |
@@ -80,6 +80,14 @@ items = [
 ```
 
 Each item has its own `value_key`/`format`/`unit`, same as a standalone `metric`. Always renders in a pinned strip above every other widget, regardless of where it's declared in `[[widgets]]`.
+
+An item can instead use `rows_key` in place of `value_key` — a dot-path to an array of rows, rendered as a per-entity `label / meter / value` list within that one tile instead of a single number:
+
+```toml
+{ label = "Utilization", rows_key = "machines", progress_key = "utilization_pct", tone = "warn" }
+```
+
+`rows_key` and `value_key` are mutually exclusive on one item — set one or the other, not both. `progress_key` names a field within each resolved row holding a 0–100 progress value (not validated as a dot-path the way `rows_key` itself is), drawn as a meter under the row's label/value; a row missing it renders with no meter. `tone` is one of `good`\|`warn`\|`bad`\|`neutral` and colors the meter/value — set on the item as a fallback, or on a row itself (a `tone` field within the row) to vary per entity.
 
 ### `table` — a sortable grid
 
