@@ -295,6 +295,105 @@ def test_api_error_exits_nonzero_with_a_message(api):
     assert "Error" in result.output
 
 
+def test_a_402_from_a_run_points_at_usage_and_the_billing_settings_page(api, bound_dir):
+    # A billing denial ("harumi-api returned HTTP 402: ...") is technically
+    # correct but doesn't tell the user what to do about it — this pins the
+    # friendlier message _format_api_error swaps in for exactly this status.
+    api.route(
+        "POST",
+        "/api/projects/proj-bound/execute",
+        {"detail": "Included credits exhausted for this period."},
+        status=402,
+    )
+
+    result = runner.invoke(cli.app, ["run", "--branch", "main"])
+
+    assert result.exit_code == 1
+    assert "Included credits exhausted for this period." in result.output
+    assert "harumi usage" in result.output
+    assert "settings?tab=billing" in result.output
+
+
+def test_usage_shows_the_balance_and_plan(api):
+    api.route(
+        "GET",
+        "/api/billing/usage",
+        {
+            "billing_account_id": "acct-1",
+            "plan_code": "free",
+            "balance_credits": 1500,
+            "included_credits": 2000,
+            "period_start": "2026-09-01T00:00:00Z",
+            "period_end": "2026-10-01T00:00:00Z",
+            "overage_enabled": False,
+            "overage_cap_credits": 0,
+            "entries": [],
+        },
+    )
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "free" in result.output
+    assert "1,500" in result.output
+    assert "2,000" in result.output
+    assert "2026-10-01" in result.output
+    assert "disabled" in result.output
+
+
+def test_usage_flags_an_exhausted_balance_with_no_overage(api):
+    api.route(
+        "GET",
+        "/api/billing/usage",
+        {
+            "billing_account_id": "acct-1",
+            "plan_code": "free",
+            "balance_credits": 0,
+            "included_credits": 2000,
+            "period_start": "2026-09-01T00:00:00Z",
+            "period_end": "2026-10-01T00:00:00Z",
+            "overage_enabled": False,
+            "overage_cap_credits": 0,
+            "entries": [],
+        },
+    )
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "exhausted" in result.output
+    assert "settings?tab=billing" in result.output
+
+
+def test_usage_reports_the_overage_cap_when_enabled(api):
+    api.route(
+        "GET",
+        "/api/billing/usage",
+        {
+            "billing_account_id": "acct-1",
+            "plan_code": "individual",
+            "balance_credits": -50,
+            "included_credits": 2000,
+            "period_start": "2026-09-01T00:00:00Z",
+            "period_end": "2026-10-01T00:00:00Z",
+            "overage_enabled": True,
+            "overage_cap_credits": 500,
+            "entries": [],
+        },
+    )
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "enabled" in result.output
+    assert "500" in result.output
+    # A negative balance renders as 0, not a confusing negative count.
+    assert "0 / 2,000" in result.output
+    # Overage is on, so the exhausted-allowance warning must not fire even
+    # though the balance itself is negative.
+    assert "exhausted" not in result.output
+
+
 def test_secrets_list_prints_names_but_never_values(api):
     api.route("GET", "/api/projects/proj-1/secrets", [{"name": "API_KEY", "value": "super-secret"}])
 

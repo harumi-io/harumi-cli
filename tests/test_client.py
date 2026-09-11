@@ -412,6 +412,72 @@ def test_client_get_project_returns_project():
     assert project.name == "Routing"
 
 
+def test_client_get_credit_usage_parses_the_allowance():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/billing/usage"
+        return httpx.Response(
+            200,
+            json={
+                "billing_account_id": "acct-1",
+                "plan_code": "free",
+                "balance_credits": 1500,
+                "included_credits": 2000,
+                "period_start": "2026-09-01T00:00:00Z",
+                "period_end": "2026-10-01T00:00:00Z",
+                "overage_enabled": False,
+                "overage_cap_credits": 0,
+                "entries": [
+                    {
+                        "id": "led-1",
+                        "kind": "debit",
+                        "delta_credits": -500,
+                        "source_kind": "chat_turn",
+                        "source_id": "msg-1",
+                        "created_at": "2026-09-05T00:00:00Z",
+                    }
+                ],
+            },
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    usage = client.get_credit_usage()
+
+    assert usage.plan_code == "free"
+    assert usage.balance_credits == 1500
+    assert usage.included_credits == 2000
+    assert usage.entries[0].delta_credits == -500
+
+
+def test_client_get_credit_usage_sends_the_configured_org_header():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["X-Organization"] == "org-1"
+        return httpx.Response(
+            200,
+            json={
+                "billing_account_id": "acct-org-1",
+                "plan_code": "enterprise",
+                "balance_credits": 100,
+                "included_credits": 100,
+                "period_start": "2026-09-01T00:00:00Z",
+                "period_end": "2026-10-01T00:00:00Z",
+                "overage_enabled": False,
+                "overage_cap_credits": 0,
+                "entries": [],
+            },
+        )
+
+    client = Client(
+        api_url="https://harumi-api.test/api", org_id="org-1", transport=httpx.MockTransport(handler)
+    )
+    usage = client.get_credit_usage()
+
+    assert usage.plan_code == "enterprise"
+
+
 def test_client_update_project_sends_patch_body():
     _write_credentials()
 
