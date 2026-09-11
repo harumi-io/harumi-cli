@@ -4885,6 +4885,36 @@
       ]
     },
     {
+      "path": "usage",
+      "help": "Show your (or --org's) current credit allowance.",
+      "params": [
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Show an organization's pooled allowance instead of your personal one."
+        }
+      ]
+    },
+    {
       "path": "whoami",
       "help": "Show the currently logged-in user.",
       "params": [

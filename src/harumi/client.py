@@ -21,6 +21,7 @@ from harumi.errors import ApiError, NotAuthenticatedError
 from harumi.models import (
     BranchInfo,
     ConnectionTestResponse,
+    CreditUsage,
     Datasource,
     DatasourceList,
     DeleteFilesResult,
@@ -203,6 +204,16 @@ class Client:
     def update_profile(self, body: dict[str, Any]) -> UserProfile:
         response = self.api.request("POST", "/users/profile", json=body)
         return UserProfile.model_validate(response.json())
+
+    # -- Billing --------------------------------------------------------
+    # /billing/usage — the caller's personal credit allowance, or (with the
+    # client's configured org — see `--org`/`X-Organization`) that org's
+    # pooled one, same scoping every other org-aware method here already gets
+    # for free via `ApiClient._headers()`.
+
+    def get_credit_usage(self) -> CreditUsage:
+        response = self.api.request("GET", "/billing/usage")
+        return CreditUsage.model_validate(response.json())
 
     # -- Git credentials ------------------------------------------------
     # POST /git/credentials — provisions (idempotently) the current user's

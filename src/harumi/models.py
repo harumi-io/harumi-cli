@@ -562,3 +562,35 @@ class DeleteFilesResult(BaseModel):
     deleted: int = 0
 
 
+class CreditLedgerEntry(BaseModel):
+    """One row from `GET /billing/usage`'s `entries` list — a grant, debit, or
+    adjustment. Mirrors harumi-api's `LedgerEntryOut` (`src/api/billing/models.py`)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    kind: str
+    delta_credits: int
+    source_kind: str
+    source_id: Optional[str] = None
+    created_at: str
+
+
+class CreditUsage(BaseModel):
+    """Response from `GET /billing/usage` — the caller's (or, with
+    `--org`/`X-Organization`, an org's) current credit allowance. Mirrors
+    harumi-api's `UsageSummary` (`src/api/billing/models.py`); `balance_credits`
+    is what's left of `included_credits` for the current period."""
+
+    model_config = ConfigDict(extra="allow")
+
+    billing_account_id: str
+    plan_code: str
+    balance_credits: int
+    included_credits: int
+    period_start: str
+    period_end: str
+    overage_enabled: bool
+    overage_cap_credits: int
+    entries: list[CreditLedgerEntry] = Field(default_factory=list)
+
