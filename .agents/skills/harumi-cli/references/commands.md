@@ -9,7 +9,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [profile](#profile)
 - [config set-org](#config-set-org)
 - [specs](#specs)
-- [templates](#templates)
+- [blueprints](#blueprints)
 - [projects](#projects)
 - [init](#init)
 - [import](#import)
@@ -106,18 +106,18 @@ harumi specs [--api-url URL] [--org ORG]
 
 Lists kernel specs (`name`, `display_name`, `cpu`, `memory`, `subscription_required`) from `GET /sandbox/specs`. `name` is what you pass to `run --kernel`.
 
-## `templates`
+## `blueprints`
 
 ```
-harumi templates [--api-url URL] [--org ORG]
+harumi blueprints [--api-url URL] [--org ORG]
 ```
 
-Lists project templates (`id`, `slug`, `name`, `description`) from `GET /templates`. Pass a template's `id` as `projects create --template-id`.
+Lists project blueprints (`slug`, `name`, `description`) from `GET /blueprints`. Pass a blueprint's `slug` as `projects create --blueprint`.
 
 ## `projects`
 
 ```
-harumi projects create NAME [--customer-id ID] [--personal] [--template-id ID] [--bind/--no-bind]
+harumi projects create NAME [--customer-id ID] [--personal] [--blueprint SLUG] [--bind/--no-bind]
                        [--api-url URL] [--git-url URL] [--org ORG]
 harumi projects list [--api-url URL] [--org ORG]
 harumi projects get PROJECT_ID [--api-url URL] [--org ORG]
@@ -523,8 +523,8 @@ client.create_secret(binding.project_id, "API_KEY", "s3cr3t")
 # Organizations
 orgs = client.list_organizations()
 
-# Templates
-templates = client.list_templates()
+# Blueprints
+blueprints = client.list_blueprints()
 
 # Dashboard spec discovery, widget contract + validation
 from harumi.dashboard import (
