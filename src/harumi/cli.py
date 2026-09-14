@@ -294,6 +294,25 @@ def _resolve_project(project: Optional[str]) -> str:
     raise AssertionError("unreachable")  # _fail always raises
 
 
+def _format_api_error(exc: ApiError) -> str:
+    """`str(exc)` for every `ApiError` except a 402, which gets a message that
+    actually tells the user what to do — "harumi-api returned HTTP 402: ..."
+    is accurate but doesn't point anywhere. 402 here always means one thing:
+    the credit-billing entitlement check in harumi-api's `billing/admission.py`
+    denied the run/chat turn that was about to start (see the credit-billing
+    plan's "hard block (402) enforcement" decision) — never an HTTP-layer
+    payment problem, so there's exactly one message to show regardless of
+    which command triggered it.
+    """
+    if exc.status_code != 402:
+        return str(exc)
+    return (
+        f"{exc.detail}\nRun [bold]harumi usage[/bold] to see your current allowance, "
+        f"or visit {active_platform_url()}/settings?tab=billing to upgrade, enable "
+        "overage, or buy a top-up."
+    )
+
+
 def _handle_errors(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
@@ -306,7 +325,7 @@ def _handle_errors(fn):
         except NotAuthenticatedError as exc:
             _fail(str(exc))
         except ApiError as exc:
-            _fail(str(exc))
+            _fail(_format_api_error(exc))
         except HarumiError as exc:
             _fail(str(exc))
         except DashboardSchemaError as exc:
@@ -465,6 +484,44 @@ def whoami(
         f"[bold]{profile.email or '?'}[/bold]  (id: {profile.id or '?'})  "
         f"[dim]env: {client.config.environment}[/dim]"
     )
+
+
+@app.command()
+@_handle_errors
+def usage(
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(
+        None, "--org", help="Show an organization's pooled allowance instead of your personal one."
+    ),
+) -> None:
+    """Show your (or --org's) current credit allowance.
+
+    Credits are the abstract unit AI chat tokens and compute run-seconds are
+    metered in — see `harumi run`'s 402 errors, which are this same
+    allowance running out.
+    """
+    client = _get_client(api_url=api_url, org=org)
+    usage_data = client.get_credit_usage()
+
+    period_end = usage_data.period_end.split("T", 1)[0]
+    remaining = max(0, usage_data.balance_credits)
+    console.print(
+        f"Plan: [bold]{usage_data.plan_code}[/bold]  "
+        f"Balance: [bold]{remaining:,}[/bold] / {usage_data.included_credits:,} credits  "
+        f"(resets {period_end})"
+    )
+    if usage_data.overage_enabled:
+        console.print(
+            f"Overage: [bold green]enabled[/bold green], capped at {usage_data.overage_cap_credits:,} credits."
+        )
+    else:
+        console.print("Overage: [dim]disabled[/dim] — hits a hard stop (402) once the balance runs out.")
+
+    if usage_data.balance_credits <= 0 and not usage_data.overage_enabled:
+        console.print(
+            "[yellow]Your allowance is exhausted. Enable overage or buy a top-up "
+            f"at {active_platform_url()}/settings?tab=billing.[/yellow]"
+        )
 
 
 # ---------------------------------------------------------------------------
