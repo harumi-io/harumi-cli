@@ -1,0 +1,20 @@
+---
+description: Automates opening a pull request and iterating on automated code-review bot comments (e.g. the "code-review" GitHub Action / Bugbot-style check) until no valid findings remain. Use when pushing your own branch and opening a PR, or when checking on a PR you already opened for outstanding bot review comments.
+alwaysApply: false
+---
+
+# PR open → review → fix loop
+
+This is for pull requests **you** open with your own committed work — not for reviewing someone else's PR.
+
+1. **Open the PR.** Push the branch, then ask the user for confirmation before running `gh pr create` — skip the ask if they already told you to open PRs for this task. Write a real title/body (What / Why / How / Testing), not a placeholder.
+2. **Wait for CI + the review bot in one long block**, not tight polling: `gh pr checks <n> --watch --interval 20` (or one long `AwaitShell` wait). Waiting itself costs nothing; every extra poll is a tool round-trip, so batch the wait instead of checking every few seconds.
+3. **Read the new comments**: `gh pr view <n> --json comments -q '.comments[...]'`. The bot posts one comment per finding plus a review summary — read both.
+4. **Triage each finding on its merits** — re-read the referenced code before deciding, don't take the bot's claim at face value:
+   - **Valid** → fix it, re-run the touched files' tests/lint/typecheck, commit with a message naming which finding it addresses, push.
+   - **Not valid, out of scope, or a deliberate tradeoff** → don't silently ignore it. Post a reply comment on the PR explaining why, citing the specific code/behavior that makes it inapplicable:
+     ```bash
+     gh pr comment <n> --body "Looked at this — <finding> doesn't apply here because <reasoning citing the actual code path>."
+     ```
+5. **Repeat from step 2 after every push.** The bot re-reviews the incremental diff and may flag a new issue introduced by your own fix (this happens often — budget for 2-3 rounds). Keep looping until a round produces zero valid findings, or the bot's own summary says nothing new was found.
+6. **Never merge.** This loop only gets the PR green and its findings addressed or explained — a human still merges.
