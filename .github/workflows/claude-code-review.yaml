@@ -186,7 +186,9 @@ jobs:
           # itself fail to start with "Argument list too long" — not just this action's Claude
           # invocation but the run's post-job cleanup steps too, since they inherit the same
           # oversized env block. 150000 sat above the ceiling with no headroom for the prompt
-          # text wrapped around the diff; 100000 leaves enough margin for that text.
+          # text wrapped around the diff; 100000 leaves enough margin for that text plus the
+          # `git diff --stat` file list (capped separately at 20000 bytes, hardcoded next to
+          # where it's built below — it isn't something this repo's callers need to tune).
           MAX_DIFF_BYTES: 100000
         run: |
           set -euo pipefail
@@ -228,6 +230,18 @@ jobs:
           # truncated diff still leaves it able to fetch the rest.
           STAT=$(git diff --stat "$DIFF_RANGE" || echo "(diff --stat failed for $DIFF_RANGE)")
           DIFF=$(git diff "$DIFF_RANGE" || echo "(diff failed for $DIFF_RANGE)")
+
+          # `git diff --stat` is one line per changed file with no cap of its own. A PR that touches
+          # many files — e.g. vendoring a generated asset set — can make this alone blow the
+          # MAX_ARG_STRLEN budget documented on MAX_DIFF_BYTES above before $DIFF's own truncation
+          # even matters (seen on harumi-platform's Iconsax migration PR: ~7000 vendored icon files
+          # made `--stat` alone 419KB). Cap it the same way, well under the headroom MAX_DIFF_BYTES'
+          # value leaves for everything that isn't $DIFF.
+          MAX_STAT_BYTES=20000
+          if [ "${#STAT}" -gt "$MAX_STAT_BYTES" ]; then
+            STAT="${STAT:0:$MAX_STAT_BYTES}
+          (stat output truncated at ${MAX_STAT_BYTES} bytes — run \`git diff --stat $DIFF_RANGE\` for the full file list)"
+          fi
 
           TRUNCATION_NOTE=""
           if [ "${#DIFF}" -gt "$MAX_DIFF_BYTES" ]; then

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from harumi.client import Client
 from harumi.models import (
+    BlueprintSummary,
     BranchInfo,
     GitCredentials,
     KernelSpec,
@@ -25,13 +26,13 @@ from harumi.models import (
     RepoInfo,
     Schedule,
     Secret,
-    TemplateSummary,
 )
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 __all__ = [
     "Client",
+    "BlueprintSummary",
     "BranchInfo",
     "GitCredentials",
     "KernelSpec",
@@ -45,6 +46,5 @@ __all__ = [
     "RepoInfo",
     "Schedule",
     "Secret",
-    "TemplateSummary",
     "__version__",
 ]
