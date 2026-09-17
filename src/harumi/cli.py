@@ -218,10 +218,20 @@ def _print_skill_install_hint() -> None:
     installed the CLI without an agent driving `harumi-cli-setup` for them.
     Only ever prints a recommendation — never writes skill files unprompted,
     matching `harumi skill install`'s existing consent-based behavior.
+
+    ponytail: catches bare `Exception`, not a specific type. This probes
+    `~/.cursor`, `~/.claude`, `~/.codex` (via `agents_missing_skill()`) on
+    every bare invocation now, instead of only inside the opt-in `skill
+    install` command — a purely decorative nudge must never turn a
+    filesystem hiccup (odd container, permission error, symlink loop) into a
+    crash of the CLI's most common entry point. Ceiling: a real bug in the
+    probing logic would be silently swallowed here too. Upgrade path: narrow
+    to `OSError` once `agents_missing_skill()` is proven to raise nothing
+    else in practice.
     """
     try:
         missing = skills_mod.agents_missing_skill()
-    except FileNotFoundError:
+    except Exception:
         return
     if not missing:
         return

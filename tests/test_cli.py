@@ -87,6 +87,9 @@ def test_banner_shown_for_bare_and_help(argv, monkeypatch, capsys):
     """The banner is an entry-point decoration (see `main()`), not a Click
     callback, so it's checked against raw argv rather than through
     `CliRunner` — this pins that argv match directly."""
+    import harumi.skills as skills_mod
+
+    monkeypatch.setattr(skills_mod, "agents_missing_skill", lambda: [])
     monkeypatch.setattr("sys.argv", ["harumi"] + argv)
     cli._print_banner_if_bare_entrypoint()
     assert capsys.readouterr().out.strip() != ""
@@ -101,6 +104,9 @@ def test_banner_not_shown_for_version_and_real_commands(argv, monkeypatch, capsy
     documents its output as an exact-match `harumi <x.y.z>` contract used to
     verify installs and disambiguate a shadowing same-named binary — banner
     art would break that machine-parsed shape."""
+    import harumi.skills as skills_mod
+
+    monkeypatch.setattr(skills_mod, "agents_missing_skill", lambda: [])
     monkeypatch.setattr("sys.argv", ["harumi"] + argv)
     cli._print_banner_if_bare_entrypoint()
     assert capsys.readouterr().out == ""
@@ -128,6 +134,23 @@ def test_skill_install_hint_hidden_when_nothing_missing(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["harumi"])
     cli._print_banner_if_bare_entrypoint()
     assert "harumi skill install" not in capsys.readouterr().out
+
+
+def test_skill_install_hint_swallows_filesystem_errors(monkeypatch, capsys):
+    """A decorative nudge must never crash the CLI's most common invocation
+    over a filesystem hiccup (odd container, permission error, symlink loop)
+    while probing ~/.cursor, ~/.claude, ~/.codex."""
+    import harumi.skills as skills_mod
+
+    def _boom():
+        raise PermissionError("nope")
+
+    monkeypatch.setattr(skills_mod, "agents_missing_skill", _boom)
+    monkeypatch.setattr("sys.argv", ["harumi"])
+    cli._print_banner_if_bare_entrypoint()  # must not raise
+    out = capsys.readouterr().out
+    assert "harumi skill install" not in out
+    assert out.strip() != ""  # banner itself still printed
 
 
 def test_cli_surface_normalizes_click_builtin_type_names():
