@@ -205,6 +205,31 @@ def _print_banner_if_bare_entrypoint() -> None:
     """
     if sys.argv[1:] in ([], ["--help"]):
         console.print(f"[bold magenta]{_BANNER}[/bold magenta]")
+        _print_skill_install_hint()
+
+
+def _print_skill_install_hint() -> None:
+    """Nudge toward `harumi skill install` when a coding agent detected on
+    this machine (Cursor/Claude Code/Codex) doesn't have the skill yet.
+
+    `pip`/`pipx`/`uv` have no post-install hook to seed the skill
+    automatically as part of the install itself, so the next bare `harumi`
+    invocation is the closest automatic moment to catch a human who
+    installed the CLI without an agent driving `harumi-cli-setup` for them.
+    Only ever prints a recommendation — never writes skill files unprompted,
+    matching `harumi skill install`'s existing consent-based behavior.
+    """
+    try:
+        missing = skills_mod.agents_missing_skill()
+    except FileNotFoundError:
+        return
+    if not missing:
+        return
+    names = ", ".join(a.label for a in missing)
+    console.print(
+        f"\n[dim]Using {names}? Run [/dim][bold]harumi skill install[/bold]"
+        "[dim] to teach it this CLI.[/dim]"
+    )
 
 
 def _version_callback(value: bool) -> None:

@@ -71,6 +71,18 @@ def test_dry_run_writes_nothing(tmp_path, monkeypatch):
     assert not fake_home_dir.exists()
 
 
+def test_agents_missing_skill_reports_detected_agent_without_it(tmp_path, monkeypatch):
+    fake_home_dir = tmp_path / "cursor-home"
+    fake_home_dir.mkdir()
+    agent = skills.Agent("cursor", "Cursor", fake_home_dir / "skills")
+    monkeypatch.setattr(skills, "AGENTS", [agent])
+
+    assert skills.agents_missing_skill() == [agent]
+
+    skills.install(agent_keys=["cursor"])
+    assert skills.agents_missing_skill() == []
+
+
 def test_project_scope_writes_agents_skills_dir(tmp_path):
     skills.install(project=True, cwd=tmp_path)
     project_dir = tmp_path / skills.PROJECT_SKILLS_DIR

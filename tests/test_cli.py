@@ -106,6 +106,30 @@ def test_banner_not_shown_for_version_and_real_commands(argv, monkeypatch, capsy
     assert capsys.readouterr().out == ""
 
 
+def test_skill_install_hint_shown_when_agent_missing_skill(monkeypatch, capsys):
+    import harumi.skills as skills_mod
+
+    monkeypatch.setattr(
+        skills_mod,
+        "agents_missing_skill",
+        lambda: [skills_mod.Agent("cursor", "Cursor", Path("/tmp/does-not-matter"))],
+    )
+    monkeypatch.setattr("sys.argv", ["harumi"])
+    cli._print_banner_if_bare_entrypoint()
+    out = capsys.readouterr().out
+    assert "harumi skill install" in out
+    assert "Cursor" in out
+
+
+def test_skill_install_hint_hidden_when_nothing_missing(monkeypatch, capsys):
+    import harumi.skills as skills_mod
+
+    monkeypatch.setattr(skills_mod, "agents_missing_skill", lambda: [])
+    monkeypatch.setattr("sys.argv", ["harumi"])
+    cli._print_banner_if_bare_entrypoint()
+    assert "harumi skill install" not in capsys.readouterr().out
+
+
 def test_cli_surface_normalizes_click_builtin_type_names():
     """Typer >=0.27's vendored click names STRING/INT 'str'/'int'; every real
     click release (8.1-8.4, which is what Python 3.9's typer 0.23.x uses) names
