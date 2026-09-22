@@ -176,7 +176,7 @@ class RepoCommitList(BaseModel):
 class ReadinessCheckResult(BaseModel):
     """One row of the project readiness checklist (`id` is a stable key like
     `repo`/`manifest`/`manifest_valid`/`kernel`; `fixable` is true when the CLI
-    itself can resolve it, e.g. a missing repo via `harumi init`)."""
+    itself can resolve it, e.g. a missing repo via `harumi link`)."""
 
     model_config = ConfigDict(extra="allow")
 

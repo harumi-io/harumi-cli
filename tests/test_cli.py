@@ -1651,13 +1651,16 @@ def git(monkeypatch):
     return state
 
 
-def test_run_without_a_binding_points_at_init(api, git, tmp_path, monkeypatch):
+def test_run_without_a_binding_points_at_onboarding_verbs(api, git, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(cli.app, ["run"])
 
     assert result.exit_code == 1
-    assert "harumi init" in result.output
+    output = " ".join(result.output.split())
+    assert "harumi new" in output
+    assert "harumi clone" in output
+    assert "harumi link" in output
     assert api.requests == []
 
 
