@@ -73,7 +73,11 @@ def _run(
     `redact`, when given, is scrubbed from the command/stderr embedded in a
     raised `GitError` — a token-bearing authenticated URL in `args` must
     never end up verbatim in a message that gets printed to the terminal or
-    logged.
+    logged. Callers pass the raw token, but `args` may actually embed its
+    percent-encoded form (see `_authenticated_url`), so both forms are
+    scrubbed — otherwise a token with URL-reserved characters (`+`, `/`,
+    `=`, ...) would survive redaction in its (trivially reversible)
+    encoded form.
     """
     full_args = ["git"] + args
     merged_env = {**os.environ, **(env or {})}
@@ -90,8 +94,9 @@ def _run(
         command = " ".join(args)
         stderr = exc.stderr
         if redact:
-            command = command.replace(redact, "***")
-            stderr = stderr.replace(redact, "***")
+            for needle in {redact, quote(redact, safe="")}:
+                command = command.replace(needle, "***")
+                stderr = stderr.replace(needle, "***")
         raise GitError(command, stderr) from exc
     except FileNotFoundError:
         raise HarumiError(

@@ -9,7 +9,12 @@ git/curl as host=`harumi.io`, port=`token@host` (not numeric), failing with
 
 from __future__ import annotations
 
-from harumi.git import _authenticated_url
+import subprocess
+
+import pytest
+
+from harumi.git import GitError, _authenticated_url, _run
+from urllib.parse import quote
 
 
 def test_percent_encodes_email_like_username():
@@ -51,3 +56,32 @@ def test_strips_existing_credentials_before_re_embedding():
         token="new-tok",
     )
     assert url == "https://u-abc123:new-tok@git.dev.harumi.io/o/repo.git"
+
+
+def test_run_redacts_a_token_containing_url_reserved_chars(monkeypatch, tmp_path):
+    """A failing git command must never leak a token in `GitError`, whether
+    it appears in its raw form or (as `_authenticated_url` embeds it) its
+    percent-encoded form — see the redaction bug this guards against: a
+    token like `ab+cd/ef=12` never matches its own literal text once quoted
+    to `ab%2Bcd%2Fef%3D12`, so a naive `str.replace(raw_token, "***")` is a
+    silent no-op and the (trivially reversible) encoded token leaks.
+    """
+    token = "ab+cd/ef=12"
+    authed_url = _authenticated_url(
+        "https://git.dev.harumi.io/o/repo.git", username="u-abc123", token=token
+    )
+
+    def fake_run(full_args, **_kwargs):
+        raise subprocess.CalledProcessError(
+            128, full_args, output="", stderr=f"fatal: could not clone {authed_url}"
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(GitError) as exc_info:
+        _run(["clone", authed_url, str(tmp_path / "dest")], redact=token)
+
+    message = str(exc_info.value)
+    assert token not in message
+    assert quote(token, safe="") not in message
+    assert "***" in message
