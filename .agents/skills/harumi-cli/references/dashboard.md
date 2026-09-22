@@ -20,7 +20,7 @@ title = "Machine schedule"
 # ...
 ```
 
-A project with **no** spec at all still renders — the platform falls back to a generic default dashboard. `harumi projects create` gets a starter root `dashboard.toml` seeded server-side; `harumi import` does **not** (it overwrites the scaffold), so an imported project has no dashboard until one is committed.
+A project with **no** spec at all still renders — the platform falls back to a generic default dashboard. `harumi new`/`harumi projects create` get a starter root `dashboard.toml` seeded server-side; `harumi push` does **not** (it overwrites the scaffold), so a pushed project has no dashboard until one is committed.
 
 To add a second dashboard to a project that has the root file, leave it alone and commit `dashboard/<name>.toml` — or move it (`harumi repo mv dashboard.toml dashboard/<name>.toml`) if you'd rather have every dashboard in one folder.
 

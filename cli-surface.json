@@ -32,6 +32,72 @@
       ]
     },
     {
+      "path": "clone",
+      "help": "Fetch an existing Harumi project's code onto your machine.",
+      "params": [
+        {
+          "opts": [
+            "project"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Harumi project id to clone (see `harumi projects list`)."
+        },
+        {
+          "opts": [
+            "--dir"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "path",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Local directory to clone into. Defaults to ./<slugified-project-name>."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--git-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the Harumi Git base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
       "path": "config set-org",
       "help": "Persist the organization id sent as X-Organization on every request.",
       "params": [
@@ -1314,112 +1380,8 @@
       ]
     },
     {
-      "path": "import",
-      "help": "Turn a downloaded project folder into a new git-based Harumi project.",
-      "params": [
-        {
-          "opts": [
-            "path"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "path",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Folder to import (an unzipped project export). Defaults to the current directory."
-        },
-        {
-          "opts": [
-            "--project-name"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Name for the new project (defaults to the folder name)."
-        },
-        {
-          "opts": [
-            "--from-git"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Also clone this git URL (the project's old GitHub repo) flat into the folder before importing."
-        },
-        {
-          "opts": [
-            "--bind"
-          ],
-          "secondary_opts": [
-            "--no-bind"
-          ],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": true,
-          "help": "Bind the folder to the new project (like `harumi init`)."
-        },
-        {
-          "opts": [
-            "--personal"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": false,
-          "help": "Create in your personal workspace, ignoring the configured org."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--git-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the Harumi Git base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "init",
-      "help": "Bind the current directory to a Harumi project and configure the git remote.",
+      "path": "link",
+      "help": "Bind the current directory to an existing Harumi project and configure the git remote.",
       "params": [
         {
           "opts": [
@@ -1429,10 +1391,10 @@
           "secondary_opts": [],
           "kind": "option",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Harumi project id to bind this directory to."
+          "help": "Harumi project id to bind this directory to. Prompted if omitted."
         },
         {
           "opts": [
@@ -1530,6 +1492,108 @@
       "path": "logout",
       "help": "Clear the stored local session for the active environment.",
       "params": []
+    },
+    {
+      "path": "new",
+      "help": "Create a brand-new Harumi project and clone its scaffold locally.",
+      "params": [
+        {
+          "opts": [
+            "name"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Project name."
+        },
+        {
+          "opts": [
+            "--dir"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "path",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Local directory to clone the new project into. Defaults to ./<slugified-name>."
+        },
+        {
+          "opts": [
+            "--customer-id"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Organization id to create the project under. Defaults to the configured org."
+        },
+        {
+          "opts": [
+            "--personal"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Create in your personal workspace, ignoring the configured org."
+        },
+        {
+          "opts": [
+            "--blueprint"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Blueprint slug to seed the project from (see `harumi blueprints`, optional)."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--git-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the Harumi Git base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
     },
     {
       "path": "org create",
@@ -2035,7 +2099,7 @@
     },
     {
       "path": "projects create",
-      "help": "Create a new Harumi project and its Gitea repo, then bind this directory to it.",
+      "help": "Create a new Harumi project.",
       "params": [
         {
           "opts": [
@@ -2084,20 +2148,6 @@
           "multiple": false,
           "default": null,
           "help": "Blueprint slug to seed the project from (see `harumi blueprints`, optional)."
-        },
-        {
-          "opts": [
-            "--bind"
-          ],
-          "secondary_opts": [
-            "--no-bind"
-          ],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": true,
-          "help": "Bind the current directory to the new project (like `harumi init`)."
         },
         {
           "opts": [
@@ -2303,6 +2353,110 @@
           "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "push",
+      "help": "Turn an existing local folder of code into a new Harumi project.",
+      "params": [
+        {
+          "opts": [
+            "path"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "path",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Folder of existing code to turn into a new project. Defaults to the current directory."
+        },
+        {
+          "opts": [
+            "--project-name"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Name for the new project (defaults to the folder name)."
+        },
+        {
+          "opts": [
+            "--from-git"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Also clone this git URL (e.g. an old GitHub repo) flat into the folder before pushing."
+        },
+        {
+          "opts": [
+            "--bind"
+          ],
+          "secondary_opts": [
+            "--no-bind"
+          ],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": true,
+          "help": "Bind the folder to the new project afterward (default: yes)."
+        },
+        {
+          "opts": [
+            "--personal"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Create in your personal workspace, ignoring the configured org."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--git-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the Harumi Git base URL."
         },
         {
           "opts": [
@@ -4883,6 +5037,11 @@
           "help": "Override the organization sent as X-Organization."
         }
       ]
+    },
+    {
+      "path": "start",
+      "help": "Interactively figure out which of the three onboarding journeys you want, and run it.",
+      "params": []
     },
     {
       "path": "usage",

@@ -1,6 +1,6 @@
 ---
 name: harumi-cli
-description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to select the backend environment (production vs internal staging), create/manage projects, import a downloaded project export as a new project, browse and edit the project's git repo, inspect and cancel runs, manage the project's dashboard widgets and public share link, manage datasources, schedules, secrets, organizations, and your profile. Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi init`, `harumi import`, `harumi run`, `harumi runs`, `harumi repo`, `harumi dashboard`, `harumi share`, `harumi blueprints`, `harumi env`, `harumi projects`, `harumi datasources`, `harumi schedules`, `harumi secrets`, `harumi org`, `harumi profile`, asks about switching between production and staging, creating a new Harumi project, importing/uploading a downloaded project zip to the CLI, Harumi kernel specs, project blueprints, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, managing environment variables/secrets, organization members, dashboard widgets (metric/table/line-chart/bar-chart/gantt-chart), `dashboard.toml`, `dashboard/*.toml`, multiple dashboards per project, the dashboard picker, `output.json`, what components/widgets the platform dashboard can render, sharing/publishing a project's dashboard publicly, or needs to fetch/download results or files from a Harumi run/repo.
+description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to select the backend environment (production vs internal staging), start a new project, push an existing folder of code as a new project, clone an existing project locally, bind a directory to a project, browse and edit the project's git repo, inspect and cancel runs, manage the project's dashboard widgets and public share link, manage datasources, schedules, secrets, organizations, and your profile. Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi start`, `harumi new`, `harumi push`, `harumi clone`, `harumi link`, `harumi run`, `harumi runs`, `harumi repo`, `harumi dashboard`, `harumi share`, `harumi blueprints`, `harumi env`, `harumi projects`, `harumi datasources`, `harumi schedules`, `harumi secrets`, `harumi org`, `harumi profile`, asks about switching between production and staging, creating a new Harumi project, turning an existing local folder/repo into a Harumi project, getting an existing Harumi project's code onto their machine, Harumi kernel specs, project blueprints, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, managing environment variables/secrets, organization members, dashboard widgets (metric/table/line-chart/bar-chart/gantt-chart), `dashboard.toml`, `dashboard/*.toml`, multiple dashboards per project, the dashboard picker, `output.json`, what components/widgets the platform dashboard can render, sharing/publishing a project's dashboard publicly, or needs to fetch/download results or files from a Harumi run/repo.
 ---
 
 # Harumi CLI
@@ -13,7 +13,7 @@ For the full flag-by-flag reference and troubleshooting table, see [references/c
 
 ## VPN requirement
 
-The staging endpoints (`api.dev.harumi.io`, `git.dev.harumi.io`) are internal ALBs — anything on the `staging` environment (login, `harumi init`, git push, runs) only works over VPN. Surface a clear network error if the user isn't on VPN.
+The staging endpoints (`api.dev.harumi.io`, `git.dev.harumi.io`) are internal ALBs — anything on the `staging` environment (login, `harumi new`/`push`/`clone`/`link`, git push, runs) only works over VPN. Surface a clear network error if the user isn't on VPN.
 
 ## Preflight
 
@@ -22,39 +22,40 @@ The staging endpoints (`api.dev.harumi.io`, `git.dev.harumi.io`) are internal AL
 
 ## The always-bound-repo invariant
 
-Every `harumi run` (and every command that accepts `--project`) requires either an explicit `--project <ID>`, or the working directory (or a parent) to be bound to a Harumi project via `harumi init`. Without either, the command exits with a clear "provide --project or run `harumi init`" error.
+Every `harumi run` (and every command that accepts `--project`) requires either an explicit `--project <ID>`, or the working directory (or a parent) to be bound to a Harumi project — which `harumi new`/`harumi push`/`harumi clone`/`harumi link` all do. Without either, the command exits with a clear error pointing at those verbs.
 
-## Workflow
+## Onboarding — three journeys, three commands
 
-### 1. Bind a directory to a project
+Every project starts one of three ways. Pick the command that matches what the user has, or run `harumi start` to ask them interactively and dispatch to it.
 
-Run once per project directory:
-
-```bash
-harumi init --project <PROJECT_ID>
-```
-
-This fetches the Gitea repo metadata (`GET /projects/{id}/repo`), writes `.harumi/config.json`, and configures the `harumi` git remote for authenticated HTTPS pushes.
-
-Find project IDs with: `harumi projects list`.
-
-**Creating a brand-new project instead of binding to an existing one:**
+| User has | Command | What it does |
+|---|---|---|
+| Nothing yet | `harumi new <NAME>` | Creates the project, then clones its seeded scaffold repo locally and binds it. |
+| A local folder of existing code | `harumi push [PATH]` | Creates a project, then force-pushes the folder as its first commit and binds it. |
+| A project that already exists in Harumi (web app, teammate) | `harumi clone <PROJECT_ID>` | Fetches its repo into a local directory and binds it. |
 
 ```bash
-harumi projects create "My Project" [--customer-id ID] [--blueprint SLUG]
+harumi start                       # interactive: asks which of the three, then dispatches
+harumi new "My Project" [--dir PATH] [--blueprint SLUG] [--customer-id ID]
+harumi push [PATH] [--project-name NAME] [--from-git URL]
+harumi clone <PROJECT_ID> [--dir PATH]
 ```
 
-Calls `POST /projects`, then fetches its repo and binds the current directory the same way `harumi init` does (pass `--no-bind` to skip that). If the backend hasn't provisioned a Gitea repo for the project, the CLI still creates the bare project and prints a warning instead of failing. Run `harumi blueprints` to list available `--blueprint` values.
+All three leave the working directory `cd`-able and immediately `harumi run`-able — no separate bind step. `harumi push` overwrites whatever scaffold the backend seeded, so if the folder has no `harumi.toml` the CLI writes a minimal one before pushing.
 
-**Importing a downloaded project export (e.g. from the web app's "Download project" button) as a new project:**
+**`harumi link`** is the narrower primitive underneath `clone`: it binds the *current* directory to a project (writes `.harumi/config.json`, configures the `harumi` git remote) without cloning anything. Use it only for the rare case where the project's code is already checked out by hand.
 
 ```bash
-harumi import [PATH] [--project-name NAME] [--from-git URL]
+harumi link --project <PROJECT_ID>
 ```
 
-`PATH` must be an **unzipped folder** (default: current directory) — unzip the export first. Creates a project, then pushes the whole folder as the repo's initial commit and binds the directory, same as `projects create` above. `--from-git URL` additionally clones an old GitHub repo flat into the folder before pushing (exported files win on any filename collision). See [references/commands.md#import](references/commands.md#import) for the full flag/behavior breakdown.
+**`harumi projects create <NAME>`** is a lower-level primitive that creates a project via the API but does *not* touch the local directory or git — it's for scripting/automation. For a normal interactive flow, use `harumi new` instead (it does the same creation step, then clones the result).
 
-### 2. Run code
+Find project IDs with `harumi projects list`. Run `harumi blueprints` to list available `--blueprint` values for `harumi new`.
+
+## Run and inspect code
+
+### 1. Run code
 
 **Default — scratch branch (for uncommitted/unpushed work):**
 
@@ -85,7 +86,7 @@ harumi run --command "python solver.py" --kernel gurobi_python_medium
 harumi run --watch --output-dir ./out
 ```
 
-### 3. Inspect and manage runs
+### 2. Inspect and manage runs
 
 ```bash
 harumi runs list                          # table of runs for the bound project, newest first
@@ -129,7 +130,7 @@ harumi dashboard validate [PATH] [--ref BRANCH]        # validate every dashboar
 
 **Critical:** the platform's parser never errors on a bad widget — an unknown `type`, a missing required key, or a renamed key (e.g. `valueKey` instead of `value_key`) makes it **silently drop that widget** from the dashboard, and a widget whose dot-path doesn't resolve just renders empty. Always run `harumi dashboard validate` (with `--latest` if a run already exists) before `harumi repo put`, and after any edit made on the user's behalf — it's the only point in the toolchain that fails loudly instead of shipping a dashboard that's quietly missing a widget. With no `PATH` it checks every spec at once, so adding a second dashboard doesn't mean remembering to validate it separately.
 
-A project with no spec at all still renders a generic default dashboard rather than erroring. `harumi projects create` seeds a starter root `dashboard.toml` server-side; `harumi import` does not (it overwrites the scaffold), so an imported project has none until one is committed. To add a second dashboard, commit `dashboard/<name>.toml` — the existing root file keeps working alongside it.
+A project with no spec at all still renders a generic default dashboard rather than erroring. `harumi new`/`harumi projects create` seed a starter root `dashboard.toml` server-side; `harumi push` does not (it overwrites the scaffold, and only writes a minimal `harumi.toml` — not a dashboard spec), so a pushed project has none until one is committed. To add a second dashboard, commit `dashboard/<name>.toml` — the existing root file keeps working alongside it.
 
 ## Share the dashboard publicly
 
@@ -234,5 +235,5 @@ Staging is **internal-only**: it's hidden from `env list`/help for regular users
 Environment selection precedence: `--env` > `HARUMI_ENV` > `harumi env use` (saved default) > `production`.
 
 - Per-command URL overrides: `--api-url` / `HARUMI_API_URL`, `--git-url` / `HARUMI_GIT_URL` (e.g. for a local harumi-api). These override the active environment's endpoints without changing which env you're on.
-- Org: `harumi config set-org <ORG_ID>` / `--org` / `HARUMI_ORG` (scoped per environment). Sent as `X-Organization` to scope reads, and used as the owning workspace when creating a project — `projects create --personal` / `import --personal` opts out.
+- Org: `harumi config set-org <ORG_ID>` / `--org` / `HARUMI_ORG` (scoped per environment). Sent as `X-Organization` to scope reads, and used as the owning workspace when creating a project — `--personal` on `new`/`push`/`projects create` opts out.
 - Stored under `~/.harumi/`: global `config.json` (just the selected environment) + per-env `environments/<env>/{credentials,config}.json`. Override the home dir with `HARUMI_HOME`.

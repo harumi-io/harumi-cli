@@ -81,12 +81,13 @@ class TestPlanIsValid:
             assert delete.teardown, "delete must be a teardown step or a mid-plan failure leaks the project"
 
     def test_project_deletion_only_ever_targets_a_captured_id(self):
-        """A hardcoded id here would delete someone's real project. `import`
-        creates an independent second project, so it gets its own delete
-        targeting its own captured id rather than reusing {project}."""
+        """A hardcoded id here would delete someone's real project. `push`
+        and `new` each create an independent project, so they get their own
+        deletes targeting their own captured ids rather than reusing
+        {project}."""
         deletes = [step for step in PLAN if step.path == "projects delete"]
         targets = {delete.args[0] for delete in deletes}
-        assert targets == {"{project}", "{import_project}"}
+        assert targets == {"{project}", "{push_project}", "{new_project}"}
 
     def test_compute_costing_steps_are_gated(self):
         for step in PLAN:
@@ -189,13 +190,16 @@ class TestRunnerSubstitution:
         runner = self._runner(tmp_path)
         assert runner.execute(Step("run", gated=True)).status == "skip"
 
-    def test_the_project_id_is_read_from_the_binding_not_scraped_from_output(self, tmp_path):
-        """The .harumi binding is a contract; the printed line is cosmetic."""
-        (tmp_path / ".harumi").mkdir()
-        (tmp_path / ".harumi" / "config.json").write_text(json.dumps({"project_id": "bound-id-123"}))
+    def test_projects_create_id_is_recovered_from_printed_output(self, tmp_path):
+        """`projects create` no longer binds the directory (that moved to
+        `link`/`new`/`push`/`clone`), so its id comes from the same UUID
+        fallback as everything else — not a `.harumi` binding."""
         runner = self._runner(tmp_path)
-        captured = runner._capture(Step("projects create", capture="project"), "Created project (id=printed-id)")
-        assert captured == "bound-id-123"
+        captured = runner._capture(
+            Step("projects create", capture="project"),
+            "Created project demo (id=3f8b1c2d-4e5a-6b7c-8d9e-0f1a2b3c4d5e).",
+        )
+        assert captured == "3f8b1c2d-4e5a-6b7c-8d9e-0f1a2b3c4d5e"
 
     def test_a_uuid_is_recovered_from_output_when_there_is_no_binding(self, tmp_path):
         runner = self._runner(tmp_path)
@@ -276,7 +280,7 @@ class TestRunnerSubstitution:
         assert "logout" in executed
 
     def test_seed_git_repo_leaves_a_committed_head_the_cli_can_push_from(self, tmp_path):
-        """Regression: `init` silently skips remote setup, and `run`'s dirty/
+        """Regression: `link` silently skips remote setup, and `run`'s dirty/
         unpushed check errors outright, when the bound directory isn't a real
         git repo — which an empty tempdir never is. `_seed_git_repo` must
         leave a workdir indistinguishable (for git's purposes) from a real
@@ -298,12 +302,12 @@ class TestRunnerSubstitution:
         )
         assert status.stdout.strip() == ""
 
-    def test_seed_import_folder_has_no_project_dependency(self, tmp_path):
-        """`import` never takes --project — it always creates a new project —
+    def test_seed_push_folder_has_no_project_dependency(self, tmp_path):
+        """`push` never takes --project — it always creates a new project —
         so its input folder must be independently buildable with no {project}
         substitution, unlike every other CANARY step."""
         runner = self._runner(tmp_path)
-        folder = runner._seed_import_folder()
+        folder = runner._seed_push_folder()
         assert folder.is_dir()
         assert (folder / "main.py").exists()
 
@@ -374,7 +378,7 @@ class TestTierSanity:
     def test_canary_steps_all_scope_themselves_to_a_project(self):
         """A canary-tier command with no project scope would act on the account
         at large."""
-        exempt = {"projects create", "import", "init", "config set-org", "env use", "run", "outputs"}
+        exempt = {"projects create", "push", "new", "clone", "config set-org", "env use", "run", "outputs"}
         for step in PLAN:
             if TIERS[step.path][0] != CANARY or step.path in exempt:
                 continue
@@ -382,7 +386,8 @@ class TestTierSanity:
                 "{project}" in step.args
                 or "{share}" in step.args
                 or "{schedule}" in step.args
-                or "{import_project}" in step.args
+                or "{push_project}" in step.args
+                or "{new_project}" in step.args
             ), f"{step.path} mutates without scoping to the canary"
 
 

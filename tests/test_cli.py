@@ -272,7 +272,7 @@ def api(monkeypatch) -> FakeApi:
 
 @pytest.fixture
 def bound_dir(tmp_path, monkeypatch):
-    """A cwd containing a .harumi/config.json binding, as `harumi init` writes."""
+    """A cwd containing a .harumi/config.json binding, as `harumi link` writes."""
     import json
 
     harumi_dir = tmp_path / "work" / ".harumi"
