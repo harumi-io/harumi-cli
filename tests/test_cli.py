@@ -637,6 +637,24 @@ def test_link_binds_an_already_checked_out_directory(api, git_ops, tmp_path, mon
     assert result.exit_code == 0, result.output
     assert (tmp_path / ".harumi" / "config.json").exists()
     assert git_ops["ensure_remote"][0]["cwd"] == tmp_path
+
+
+def test_new_without_a_gitea_token_warns_but_does_not_fail(api, git_ops, tmp_path, monkeypatch):
+    """A missing Gitea token is a soft warning, not a hard failure — the
+    project was already created server-side by the time this check runs
+    (mirrors `push`'s convention for the same precondition, see
+    `_clone_and_bind`)."""
+    monkeypatch.chdir(tmp_path)
+    api.route("POST", "/api/projects", {"id": "proj-new", "name": "Widget", "notebook_ids": []})
+    _route_project_repo(api, "proj-new", "widget")
+
+    result = runner.invoke(cli.app, ["new", "Widget"])
+
+    assert result.exit_code == 0, result.output
+    assert "Created" in result.output
+    assert "can't clone" in result.output
+    assert git_ops["clone"] == []
+    assert not (tmp_path / "widget").exists()
     # `link` never fetches code — only `new`/`push`/`clone` do.
     assert git_ops["clone"] == []
 

@@ -124,9 +124,9 @@ endpoint — `secrets set` on an existing name overwrites it.
 Creating projects
 -----------------
 `harumi projects create` calls `POST /projects`, which provisions the
-project's Gitea repo server-side, and (unless `--no-bind`, the default is
-NOT to bind — see `harumi new` for the binding+cloning verb) is a bare,
-scriptable primitive with no local filesystem side effects.
+project's Gitea repo server-side. It's a bare, scriptable primitive with no
+local filesystem side effects — it does not bind or clone anything. See
+`harumi new` for the create-then-clone-and-bind verb.
 """
 
 from __future__ import annotations
@@ -1246,18 +1246,29 @@ def _clone_and_bind(project_id: str, repo, dest: Path) -> None:
 
     Shared by `new` (a repo it just created) and `clone` (a repo that
     already existed). Requires a Gitea token/username on file — `harumi
-    login` provisions both.
+    login` provisions both. A missing credential is a warning, not a
+    failure: the project itself was already created/exists server-side by
+    the time this runs, so this mirrors `_push_impl`'s convention for the
+    same precondition rather than reporting what looks like a failed
+    project creation.
     """
     git_token = load_git_token()
     if not git_token:
-        _fail("No Gitea token found. Run [bold]harumi login[/bold] to provision one, then retry.")
+        console.print(
+            "[yellow]No Gitea token found — can't clone.[/yellow] "
+            "Run [bold]harumi login[/bold], then [bold]harumi clone "
+            f"{project_id}[/bold] to try again."
+        )
+        return
 
     username = load_git_username()
     if not username:
-        _fail(
-            "No Gitea username on file. Run [bold]harumi login[/bold] again to "
-            "re-provision your Gitea credentials, then retry."
+        console.print(
+            "[yellow]No Gitea username on file — can't clone.[/yellow] "
+            "Run [bold]harumi login[/bold] again to re-provision your Gitea "
+            f"credentials, then [bold]harumi clone {project_id}[/bold] to try again."
         )
+        return
 
     console.print(f"Cloning into [bold]{dest}[/bold]...")
     clone_repo(
