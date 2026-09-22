@@ -210,6 +210,7 @@ Semantics worth knowing:
 - `resource_key`/`label_key`/`start_key`/`end_key` default to `resource`/`task`/`start`/`end` and are fields within each task object, not dot-paths.
 - Set either `end_key` or `duration_key` (added to the start). If both are set, `end_key` wins. A task resolving neither is dropped from the chart.
 - `color_key` names a field grouping tasks into a categorical color (e.g. tasks belonging to the same job).
+- `time_unit` is either a plain display suffix (e.g. `"min"`, the default reading — start/end/duration are bare numbers with that unit) or a wall-clock sentinel: `"epoch"` (seconds since epoch), `"epoch_ms"` (milliseconds), or `"iso"` (an ISO 8601 string) — any of the three render as a real date/time instead of a bare number, and scale a `[clock]` transport bar's playback speed accordingly.
 
 `timeline` is the same shape plus more: fragmented tasks fold into one item with gaps (`id_key`), non-working spans render as background bands (`regions_key` + `region_*`), and a `[clock]` section (see below) drives a now-marker over it.
 

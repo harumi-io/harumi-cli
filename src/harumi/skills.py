@@ -78,6 +78,21 @@ def detect_agents() -> list[Agent]:
     return [a for a in AGENTS if a.key != "universal" and a.global_dir.parent.is_dir()]
 
 
+def agents_missing_skill() -> list[Agent]:
+    """Detected agents (see `detect_agents`) that don't have the `harumi-cli`
+    skill in their global skills directory yet.
+
+    Powers a first-run nudge toward `harumi skill install` (see
+    `cli._print_skill_install_hint`). `pip`/`pipx`/`uv` have no post-install
+    hook to seed the skill automatically during the install itself, so the
+    CLI's own next bare invocation is the closest automatic moment — and it
+    only *recommends* running the command rather than writing files
+    unprompted, since `install()` already treats seeding an agent's config
+    directory as something the user should ask for.
+    """
+    return [a for a in detect_agents() if not (a.global_dir / "harumi-cli" / "SKILL.md").exists()]
+
+
 def install(
     *,
     agent_keys: Optional[list[str]] = None,

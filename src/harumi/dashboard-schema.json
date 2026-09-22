@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 9,
   "discovery": {
     "dashboardDir": "dashboard",
     "rootPath": "dashboard.toml"
@@ -64,7 +64,7 @@
           "type": "kpiItems",
           "required": true,
           "isOutputPath": false,
-          "doc": "One or more `{ label, value_key, delta_key?, format?, unit? }` entries — each is the same value/delta/format/unit contract as a `metric` widget, rendered as one tile in the row."
+          "doc": "One or more `{ label, value_key, delta_key?, format?, unit? }` entries — each is the same value/delta/format/unit contract as a `metric` widget, rendered as one tile in the row. Instead of `value_key`, an entry can set `rows_key` (a dot-path to an array of `{ label, value, tone?, progress? }` rows) to render a per-entity `label / meter / value` list in that tile, with `progress_key` naming the 0-100 field that fills the meter and `tone` (`good`/`warn`/`bad`/`neutral`) coloring it."
         }
       ],
       "dataExample": {
@@ -72,9 +72,23 @@
           "cost": 128400,
           "makespan": 640,
           "utilization": 0.82
-        }
+        },
+        "machines": [
+          {
+            "label": "M1",
+            "value": "42 min",
+            "progress": 70,
+            "tone": "good"
+          },
+          {
+            "label": "M2",
+            "value": "18 min",
+            "progress": 30,
+            "tone": "warn"
+          }
+        ]
       },
-      "tomlExample": "[[widgets]]\ntype = \"kpi-rail\"\nid = \"summary\"\ntitle = \"Run summary\"\nitems = [\n  { label = \"Total cost\", value_key = \"totals.cost\", format = \"currency\" },\n  { label = \"Makespan\", value_key = \"totals.makespan\", unit = \"min\" },\n  { label = \"Utilization\", value_key = \"totals.utilization\", format = \"percent\" },\n]"
+      "tomlExample": "[[widgets]]\ntype = \"kpi-rail\"\nid = \"summary\"\ntitle = \"Run summary\"\nitems = [\n  { label = \"Total cost\", value_key = \"totals.cost\", format = \"currency\" },\n  { label = \"Makespan\", value_key = \"totals.makespan\", unit = \"min\" },\n  { label = \"Utilization\", value_key = \"totals.utilization\", format = \"percent\" },\n  { label = \"Setup time\", rows_key = \"machines\", progress_key = \"progress\" },\n]"
     },
     {
       "type": "table",
@@ -528,7 +542,7 @@
           "type": "string",
           "required": false,
           "isOutputPath": false,
-          "doc": "Suffix appended to axis tick labels and tooltip times, e.g. \"min\"."
+          "doc": "How start/end/duration values are read: a plain display suffix (e.g. \"min\"), or a wall-clock sentinel — \"epoch\" (seconds since epoch), \"epoch_ms\" (milliseconds), or \"iso\" (an ISO 8601 string) — rendered as a real time instead of a bare number."
         }
       ],
       "dataExample": {
@@ -670,7 +684,7 @@
           "type": "string",
           "required": false,
           "isOutputPath": false,
-          "doc": "Suffix appended to axis tick labels and tooltip times, e.g. \"min\"."
+          "doc": "How start/end/duration (and region) values are read: a plain display suffix (e.g. \"min\"), or a wall-clock sentinel — \"epoch\" (seconds since epoch), \"epoch_ms\" (milliseconds), or \"iso\" (an ISO 8601 string) — rendered as a real time instead of a bare number."
         }
       ],
       "dataExample": {

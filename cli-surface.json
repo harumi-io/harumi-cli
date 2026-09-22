@@ -1,6 +1,36 @@
 {
-  "cli_version": "0.6.0",
+  "cli_version": "0.7.0",
   "commands": [
+    {
+      "path": "blueprints",
+      "help": "List project blueprints.",
+      "params": [
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
     {
       "path": "config set-org",
       "help": "Persist the organization id sent as X-Organization on every request.",
@@ -2045,7 +2075,7 @@
         },
         {
           "opts": [
-            "--template-id"
+            "--blueprint"
           ],
           "secondary_opts": [],
           "kind": "option",
@@ -2053,7 +2083,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Template id to pre-configure the project (optional)."
+          "help": "Blueprint slug to seed the project from (see `harumi blueprints`, optional)."
         },
         {
           "opts": [
@@ -4827,36 +4857,6 @@
     {
       "path": "specs",
       "help": "List available kernel specs (sizes/images) for running code.",
-      "params": [
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "templates",
-      "help": "List project templates.",
       "params": [
         {
           "opts": [

@@ -88,7 +88,7 @@ TIERS: dict[str, tuple[str, str]] = {
     "config set-org": (LOCAL, "writes only the throwaway HARUMI_HOME config"),
     # -- discovery ------------------------------------------------------------
     "specs": (READ, "proves real API reachability"),
-    "templates": (READ, ""),
+    "blueprints": (READ, ""),
     "outputs": (READ, ""),
     # -- organizations --------------------------------------------------------
     "org list": (READ, ""),
@@ -208,7 +208,7 @@ PLAN: tuple[Step, ...] = (
     Step("whoami"),
     Step("usage"),
     Step("specs"),
-    Step("templates"),
+    Step("blueprints"),
     Step("profile show"),
     Step("org list"),
     # Skipped automatically for a personal-workspace session, where {org} is empty.

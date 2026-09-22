@@ -5,7 +5,7 @@
     harumi whoami
     harumi profile show|set
     harumi specs
-    harumi templates
+    harumi blueprints
     harumi init --project <id> [--api-url <url>] [--git-url <url>]
     harumi import [path] [--from-git <url>] [--project-name <name>]
     harumi run [--branch <b>] [--commit <sha>] [--command <c>] [--kernel <k>]
@@ -205,6 +205,41 @@ def _print_banner_if_bare_entrypoint() -> None:
     """
     if sys.argv[1:] in ([], ["--help"]):
         console.print(f"[bold magenta]{_BANNER}[/bold magenta]")
+        _print_skill_install_hint()
+
+
+def _print_skill_install_hint() -> None:
+    """Nudge toward `harumi skill install` when a coding agent detected on
+    this machine (Cursor/Claude Code/Codex) doesn't have the skill yet.
+
+    `pip`/`pipx`/`uv` have no post-install hook to seed the skill
+    automatically as part of the install itself, so the next bare `harumi`
+    invocation is the closest automatic moment to catch a human who
+    installed the CLI without an agent driving `harumi-cli-setup` for them.
+    Only ever prints a recommendation — never writes skill files unprompted,
+    matching `harumi skill install`'s existing consent-based behavior.
+
+    ponytail: catches bare `Exception`, not a specific type. This probes
+    `~/.cursor`, `~/.claude`, `~/.codex` (via `agents_missing_skill()`) on
+    every bare invocation now, instead of only inside the opt-in `skill
+    install` command — a purely decorative nudge must never turn a
+    filesystem hiccup (odd container, permission error, symlink loop) into a
+    crash of the CLI's most common entry point. Ceiling: a real bug in the
+    probing logic would be silently swallowed here too. Upgrade path: narrow
+    to `OSError` once `agents_missing_skill()` is proven to raise nothing
+    else in practice.
+    """
+    try:
+        missing = skills_mod.agents_missing_skill()
+    except Exception:
+        return
+    if not missing:
+        return
+    names = ", ".join(a.label for a in missing)
+    console.print(
+        f"\n[dim]Using {names}? Run [/dim][bold]harumi skill install[/bold]"
+        "[dim] to teach it this CLI.[/dim]"
+    )
 
 
 def _version_callback(value: bool) -> None:
@@ -739,20 +774,20 @@ def specs(
 
 @app.command()
 @_handle_errors
-def templates(
+def blueprints(
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """List project templates. Pass a template's id as `projects create --template-id`."""
+    """List project blueprints. Pass a blueprint's slug as `projects create --blueprint`."""
     client = _get_client(api_url=api_url, org=org)
-    items = client.list_templates()
+    items = client.list_blueprints()
     if not items:
-        console.print("No templates found.")
+        console.print("No blueprints found.")
         return
 
-    table = Table("id", "slug", "name", "description")
-    for t in items:
-        table.add_row(t.id, t.slug, t.name, t.description)
+    table = Table("slug", "name", "description")
+    for b in items:
+        table.add_row(b.slug, b.name, b.description)
     console.print(table)
 
 
@@ -1012,7 +1047,9 @@ def projects_create(
         "--personal",
         help="Create in your personal workspace, ignoring the configured org.",
     ),
-    template_id: Optional[str] = typer.Option(None, "--template-id", help="Template id to pre-configure the project (optional)."),
+    blueprint: Optional[str] = typer.Option(
+        None, "--blueprint", help="Blueprint slug to seed the project from (see `harumi blueprints`, optional)."
+    ),
     bind: bool = typer.Option(
         True, "--bind/--no-bind", help="Bind the current directory to the new project (like `harumi init`)."
     ),
@@ -1028,7 +1065,7 @@ def projects_create(
 
     console.print(f"Creating project [bold]{name}[/bold]...")
     project = client.create_project(
-        name, customer_id=customer_id, template_id=template_id, personal=personal
+        name, customer_id=customer_id, blueprint=blueprint, personal=personal
     )
     console.print(f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id}).")
     _print_project_workspace(project.customer_id)

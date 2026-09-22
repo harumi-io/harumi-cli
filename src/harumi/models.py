@@ -68,7 +68,7 @@ class Project(BaseModel):
     customer_id: Optional[str] = None
     kernel_spec: Optional[str] = None
     notebook_ids: list[str] = Field(default_factory=list)
-    template_id: Optional[str] = None
+    blueprint_slug: Optional[str] = None
     role_name: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -455,28 +455,28 @@ class OrganizationMember(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Templates <-> harumi-api/src/api/templates/schemas.py — live, read-only.
+# Blueprints <-> harumi-api/src/api/blueprints/schemas.py — live, read-only.
+# Replaces the old, now-deleted Templates (GET /templates + templates table).
 # ---------------------------------------------------------------------------
 
-class TemplateSummary(BaseModel):
-    """One entry from GET /templates. Pass its `id` as `--template-id` to
-    `harumi projects create`."""
+class BlueprintSummary(BaseModel):
+    """One entry from GET /blueprints. Pass its `slug` as `--blueprint` to
+    `harumi projects create`. No `id` — a blueprint is a manifest directory in
+    harumi-api's repo, not a database row."""
 
     model_config = ConfigDict(extra="allow")
 
-    id: str
     slug: str
     name: str
     description: str
-    is_public: bool = True
 
 
-class TemplateList(BaseModel):
-    """Response from GET /templates."""
+class BlueprintList(BaseModel):
+    """Response from GET /blueprints."""
 
     model_config = ConfigDict(extra="allow")
 
-    templates: list[TemplateSummary] = Field(default_factory=list)
+    blueprints: list[BlueprintSummary] = Field(default_factory=list)
     total_count: int = 0
 
 

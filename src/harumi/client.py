@@ -20,6 +20,7 @@ from harumi.config import Config
 from harumi.errors import ApiError, NotAuthenticatedError
 from harumi.models import (
     BranchInfo,
+    BlueprintSummary,
     ConnectionTestResponse,
     CreditUsage,
     Datasource,
@@ -48,7 +49,6 @@ from harumi.models import (
     RepoInfo,
     Schedule,
     Secret,
-    TemplateSummary,
     UserProfile,
 )
 
@@ -248,10 +248,10 @@ class Client:
         response = self.api.request("GET", "/sandbox/specs")
         return [KernelSpec.model_validate(s) for s in response.json()]
 
-    def list_templates(self) -> list[TemplateSummary]:
-        """List project templates (pass a `.id` as `--template-id` to `create_project`)."""
-        response = self.api.request("GET", "/templates")
-        return [TemplateSummary.model_validate(t) for t in response.json().get("templates", [])]
+    def list_blueprints(self) -> list[BlueprintSummary]:
+        """List project blueprints (pass a `.slug` as `--blueprint` to `create_project`)."""
+        response = self.api.request("GET", "/blueprints")
+        return [BlueprintSummary.model_validate(b) for b in response.json().get("blueprints", [])]
 
     # -- Project creation -------------------------------------------------
     # POST /projects creates the project row AND (best-effort, synchronously)
@@ -262,7 +262,7 @@ class Client:
         self,
         name: str,
         customer_id: Optional[str] = None,
-        template_id: Optional[str] = None,
+        blueprint: Optional[str] = None,
         personal: bool = False,
     ) -> ProjectWithRepo:
         """Create a new Harumi project and fetch its (auto-provisioned) repo.
@@ -292,8 +292,8 @@ class Client:
         body: dict[str, Any] = {"name": name}
         if owner:
             body["customer_id"] = owner
-        if template_id:
-            body["template_id"] = template_id
+        if blueprint:
+            body["blueprint"] = blueprint
 
         response = self.api.request("POST", "/projects", json=body)
         project = ProjectWithRepo.model_validate(response.json())
