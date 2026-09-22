@@ -637,6 +637,8 @@ def test_link_binds_an_already_checked_out_directory(api, git_ops, tmp_path, mon
     assert result.exit_code == 0, result.output
     assert (tmp_path / ".harumi" / "config.json").exists()
     assert git_ops["ensure_remote"][0]["cwd"] == tmp_path
+    # `link` never fetches code — only `new`/`push`/`clone` do.
+    assert git_ops["clone"] == []
 
 
 def test_new_without_a_gitea_token_warns_but_does_not_fail(api, git_ops, tmp_path, monkeypatch):
@@ -655,8 +657,6 @@ def test_new_without_a_gitea_token_warns_but_does_not_fail(api, git_ops, tmp_pat
     assert "can't clone" in result.output
     assert git_ops["clone"] == []
     assert not (tmp_path / "widget").exists()
-    # `link` never fetches code — only `new`/`push`/`clone` do.
-    assert git_ops["clone"] == []
 
 
 def test_start_dispatches_to_new_when_the_user_has_nothing_yet(api, git_ops, tmp_path, monkeypatch):
