@@ -24,33 +24,34 @@ pip install -e .
 # 1. Log in (Supabase OTP — check your email for the code)
 harumi login
 
-# 2. Create a new project, or find an existing one
-harumi projects create "My Project"
-harumi projects list
+# 2. Pick your onboarding journey — nothing yet, an existing folder, or an
+#    existing Harumi project — and run its command (or let `harumi start`
+#    ask and dispatch for you)
+harumi new "My Project"          # nothing yet: creates + clones a fresh project
+# harumi push                    # or: turn the current folder into a new project
+# harumi clone <PROJECT_ID>      # or: fetch a project that already exists
 
-# 3. Bind the current directory to a project (skip if `projects create` already bound it)
-harumi init --project <PROJECT_ID>
-
-# 4. See available kernel sizes (CPU/RAM, Gurobi vs plain Python)
+# 3. See available kernel sizes (CPU/RAM, Gurobi vs plain Python)
 harumi specs
 
-# 5. Run the bound directory's code on the infra
+# 4. Run the bound directory's code on the infra
 harumi run --watch --output-dir ./out
 
-# 6. Inspect runs later
+# 5. Inspect runs later
 harumi runs list
 harumi runs get <RUN_ID>
 
-# 7. Check the project's dashboard.toml renders the widgets you expect
+# 6. Check the project's dashboard.toml renders the widgets you expect
 harumi dashboard validate --latest
 ```
 
 ## Everything else the CLI can do
 
+- `harumi new` / `harumi push` / `harumi clone` / `harumi link` / `harumi start` — the onboarding verbs; see Quick start above.
 - `harumi repo` — browse, read, write, delete, move, and download files in the project's Gitea repo; create/delete/promote branches (versions); `repo dir` for a GitHub-style folder-at-a-time browse.
 - `harumi dashboard` — look up the `dashboard.toml` widget reference (`widgets`) and validate a project's dashboard, including its `output.json` dot-paths, before pushing (`validate`).
 - `harumi share` — turn the project's public, unauthenticated dashboard link on/off, rotate it, and password-protect it.
-- `harumi blueprints` — list project blueprints to pass as `projects create --blueprint`.
+- `harumi blueprints` — list project blueprints to pass as `harumi new --blueprint`.
 - `harumi datasources` — CRUD project database connections, test them, and run read-only SQL queries against them.
 - `harumi schedules` — CRUD cron schedules that trigger git-ref runs.
 - `harumi secrets` — CRUD project-scoped environment variables.
@@ -84,7 +85,7 @@ Selection precedence: `--env` > `HARUMI_ENV` > `harumi env use` (saved default) 
 |---|---|
 | `HARUMI_API_URL` | Override `harumi-api` base URL (e.g. `http://localhost:8000/api`) |
 | `HARUMI_GIT_URL` | Override the Harumi Git (Gitea) base URL |
-| `HARUMI_ORG` | Organization ID sent as `X-Organization`, and the workspace new projects are created in (`projects create --personal` opts out) |
+| `HARUMI_ORG` | Organization ID sent as `X-Organization`, and the workspace new projects are created in (`--personal` on `new`/`push`/`projects create` opts out) |
 | `HARUMI_INTERNAL` | Set to `1` to reveal internal environments in `harumi env list` |
 
 Credentials (JWT + refresh token + Gitea token) are stored per-environment under `~/.harumi/environments/<env>/credentials.json` (mode `0600`) after `harumi login`. An older flat `~/.harumi/credentials.json` is migrated into `production` automatically on first run.

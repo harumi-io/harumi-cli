@@ -17,7 +17,7 @@ description: >-
 
 Gets the `harumi` CLI installed, authenticated, and pointed at the right backend environment. For using the CLI once it works, switch to the `harumi-cli` skill.
 
-The CLI is the `harumi` package on PyPI (`pip install harumi`). It installs one console script, `harumi`, plus the importable `harumi` Python package. Requires **Python ≥ 3.9** and **git** on PATH (git is used for `harumi run`'s scratch-branch push and `harumi import`).
+The CLI is the `harumi` package on PyPI (`pip install harumi`). It installs one console script, `harumi`, plus the importable `harumi` Python package. Requires **Python ≥ 3.9** and **git** on PATH (git is used for `harumi run`'s scratch-branch push and `harumi push`/`new`/`clone`).
 
 ## Order of operations
 
@@ -133,7 +133,7 @@ Use `--signup` the **first** time a given email logs in. Plain `harumi login` on
 
 Logging in also, best-effort:
 
-- provisions a per-user **Gitea token** (`POST /git/credentials`) needed by `harumi run` and `harumi init` for git-over-HTTPS, and
+- provisions a per-user **Gitea token** (`POST /git/credentials`) needed by `harumi run` and `harumi new`/`push`/`clone`/`link` for git-over-HTTPS, and
 - resolves the organization (see step 4), and
 - configures the `harumi` git remote if the cwd is already a bound project directory.
 
@@ -169,7 +169,7 @@ harumi projects list
 
 `harumi whoami` failing with `Not logged in. Run harumi login first.` means step 3 didn't complete (or the session expired). `harumi specs` failing with a network/timeout error on a `*.dev.harumi.io` host means the VPN isn't connected.
 
-Setup is done once `whoami` and `specs` both succeed. Hand off to the `harumi-cli` skill for the actual work — the next step there is usually binding a directory to a project with `harumi init --project <PROJECT_ID>`.
+Setup is done once `whoami` and `specs` both succeed. Hand off to the `harumi-cli` skill for the actual work — the next step there is usually one of the three onboarding verbs (`harumi new`, `harumi push`, or `harumi clone <PROJECT_ID>`), or `harumi start` if it's unclear which applies.
 
 ## Where things are stored
 
@@ -178,7 +178,7 @@ Setup is done once `whoami` and `specs` both succeed. Hand off to the `harumi-cl
 | `~/.harumi/config.json` | Global; stores only the selected `environment`. |
 | `~/.harumi/environments/<env>/credentials.json` | Per-env `access_token`, `refresh_token`, `git_token`, `git_url`, `git_username`, `user_id`, `email`. Written mode `0600`. |
 | `~/.harumi/environments/<env>/config.json` | Per-env `org_id`, plus any local `api_url` / `git_url` overrides. |
-| `.harumi/config.json` (in the project dir) | `project_id` + repo metadata. Written by `harumi init` / `harumi projects create`; searched **upward** from cwd. |
+| `.harumi/config.json` (in the project dir) | `project_id` + repo metadata. Written by `harumi new` / `push` / `clone` / `link`; searched **upward** from cwd. |
 
 Override the home directory with `HARUMI_HOME`. Upgrading from a pre-environments install migrates the old flat `~/.harumi/credentials.json` into `production` automatically on first run.
 
@@ -230,7 +230,7 @@ Tell the user which of these you're doing rather than silently working around it
 | Permission denied writing to site-packages | Installing into system Python | Use pipx/uv or a venv — do **not** `sudo pip install` |
 | Installed fine, but `import harumi` fails in the user's script | Installed with pipx/uv, which isolate the CLI from other interpreters | That's expected. For library use, `pip install harumi` into the venv running the code — the two installs can coexist |
 | `pipx: command not found` | pipx not installed | `brew install pipx` (macOS), `python3 -m pip install --user pipx`, or choose another method from step 1 |
-| `git not found` on `harumi run` / `harumi import` | git missing from PATH | Install git |
+| `git not found` on `harumi run` / `harumi push`/`new`/`clone` | git missing from PATH | Install git |
 | `Not logged in. Run harumi login first.` | No session, or it expired, for the **active** environment | `harumi login` (check `harumi env current` — you may be logged in on the other env) |
 | `harumi-api returned HTTP 422: ... Signups not allowed for otp` | First login for this email | `harumi login --signup` |
 | `Could not provision a Gitea token: ...` (yellow, non-fatal) | Harumi Git unreachable or not configured on that backend | Non-git commands still work; re-run `harumi login` once reachable |

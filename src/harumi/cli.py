@@ -6,8 +6,11 @@
     harumi profile show|set
     harumi specs
     harumi blueprints
-    harumi init --project <id> [--api-url <url>] [--git-url <url>]
-    harumi import [path] [--from-git <url>] [--project-name <name>]
+    harumi start
+    harumi new <NAME> [--blueprint <slug>] [--personal] [--customer-id <id>] [--dir <path>]
+    harumi push [path] [--from-git <url>] [--project-name <name>]
+    harumi clone <PROJECT_ID> [--dir <path>]
+    harumi link --project <id> [--api-url <url>] [--git-url <url>]
     harumi run [--branch <b>] [--commit <sha>] [--command <c>] [--kernel <k>]
                [--watch] [--output-dir <dir>]
     harumi runs list|get|cancel [--project <id>]
@@ -24,6 +27,24 @@
     harumi secrets list|set|rm [--project <id>]
     harumi org list|create|rename|delete|members|invite|role|remove
 
+Onboarding — three journeys, three commands
+---------------------------------------------
+Every project starts one of three ways, and each has its own verb:
+
+* Nothing yet: `harumi new <NAME>` creates the project, then clones its
+  freshly-provisioned (and scaffold-seeded) repo into a local directory.
+* An existing local folder of code: `harumi push [PATH]` creates a project
+  and force-pushes the folder's contents as its first commit.
+* A project that already exists in Harumi (created via the web app, or by a
+  teammate): `harumi clone <PROJECT_ID>` fetches its repo into a local
+  directory.
+
+`harumi start` asks which of the three applies and dispatches to it — the
+one entry point to point a confused user at. `harumi link` is the narrower
+primitive underneath `clone`: it binds the *current* directory to a project
+without cloning, for the rare case where the code is already checked out
+by hand.
+
 Git-ref execution model
 -----------------------
 Every run goes through the project's Harumi Git (Gitea) repo.  If the
@@ -31,7 +52,8 @@ working tree is dirty or has unpushed commits, the CLI auto-pushes a
 throwaway scratch branch so the run still executes without forcing the
 user to commit manually.
 
-Requires `harumi init` to have been run in (or above) the current directory.
+Requires a working directory produced by `harumi new`/`harumi push`/
+`harumi clone` (or `harumi link`, if the checkout already exists).
 
 Repo files
 ----------
@@ -102,8 +124,9 @@ endpoint — `secrets set` on an existing name overwrites it.
 Creating projects
 -----------------
 `harumi projects create` calls `POST /projects`, which provisions the
-project's Gitea repo server-side, then binds the current directory the
-same way `harumi init` does (skip with `--no-bind`).
+project's Gitea repo server-side. It's a bare, scriptable primitive with no
+local filesystem side effects — it does not bind or clone anything. See
+`harumi new` for the create-then-clone-and-bind verb.
 """
 
 from __future__ import annotations
@@ -149,6 +172,7 @@ from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
 from harumi.git import (
     GitError,
     NotAHarumiRepoError,
+    clone_repo,
     current_branch,
     delete_remote_scratch,
     ensure_remote,
@@ -306,6 +330,19 @@ def _format_bytes(num_bytes: int) -> str:
     return f"{num_bytes / (1024 * 1024):.1f} MB"
 
 
+def _slugify(name: str) -> str:
+    """Turn a project name into a filesystem-safe directory name.
+
+    Lowercases, replaces every run of non-alphanumeric characters with a
+    single `-`, and strips leading/trailing `-`. Falls back to "project" if
+    that leaves nothing (e.g. a name that's all punctuation/emoji).
+    """
+    import re
+
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return slug or "project"
+
+
 def _print_project_workspace(customer_id: Optional[str]) -> None:
     """Report which workspace a freshly-created project landed in.
 
@@ -325,7 +362,10 @@ def _resolve_project(project: Optional[str]) -> str:
     binding = ProjectBinding.load()
     if binding:
         return binding.project_id
-    _fail("Provide --project or run from a directory with a .harumi binding (see `harumi init`).")
+    _fail(
+        "Provide --project or run from a directory bound to a project "
+        "(see `harumi start`, `harumi new`, `harumi push`, `harumi clone`, or `harumi link`)."
+    )
     raise AssertionError("unreachable")  # _fail always raises
 
 
@@ -792,16 +832,19 @@ def blueprints(
 
 
 # ---------------------------------------------------------------------------
-# harumi init
+# Shared binding/remote helper
 # ---------------------------------------------------------------------------
 
-def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None) -> None:
+def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None) -> bool:
     """Write .harumi/config.json for `project_id`/`repo` and configure the
     `harumi` git remote in the target directory (defaults to cwd), if possible.
 
-    Shared by `init` (binding an existing project), `projects create`
-    (binding a just-created project), and `import` (binding an imported folder).
-    `repo` is a `RepoInfo`-shaped object (owner/name/clone_url/default_branch).
+    Shared by `link` (binding an existing checkout) and `new`/`push` (binding
+    a just-created project after cloning/pushing its repo). `repo` is a
+    `RepoInfo`-shaped object (owner/name/clone_url/default_branch).
+
+    Returns whether the remote was actually configured — callers use this to
+    decide whether it's safe to print a "you're ready to go" message.
     """
     from harumi.config import ProjectBinding, RepoBinding
 
@@ -826,9 +869,10 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
     if repo_root(cwd=target) is None:
         console.print(
             "[yellow]Not inside a git repo — skipping remote setup.[/yellow]\n"
-            "Run [bold]git init[/bold] then [bold]harumi init --project ...[/bold] again."
+            f"Run [bold]git init[/bold] in {target}, then "
+            f"[bold]harumi link --project {project_id}[/bold] again."
         )
-        return
+        return False
 
     git_token = load_git_token()
     if not git_token:
@@ -836,7 +880,7 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
             "[yellow]No Gitea token found — skipping remote setup.[/yellow]\n"
             "Run [bold]harumi login[/bold] to provision one."
         )
-        return
+        return False
 
     username = load_git_username()
     if not username:
@@ -844,7 +888,7 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
             "[yellow]No Gitea username on file — skipping remote setup.[/yellow]\n"
             "Run [bold]harumi login[/bold] again to re-provision your Gitea credentials."
         )
-        return
+        return False
 
     ensure_remote(
         clone_url=repo.clone_url,
@@ -852,28 +896,48 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
         token=git_token,
         cwd=target,
     )
-    console.print(
-        "[bold green]Remote `harumi` configured.[/bold green]\n"
-        f"Push your code:  git push harumi {repo.default_branch}"
-    )
+    console.print("[bold green]Remote `harumi` configured.[/bold green]")
+    return True
 
+
+# ---------------------------------------------------------------------------
+# harumi link — bind an already-checked-out directory to a project
+# ---------------------------------------------------------------------------
 
 @app.command()
 @_handle_errors
-def init(
-    project: str = typer.Option(..., "--project", "-p", help="Harumi project id to bind this directory to."),
+def link(
+    project: Optional[str] = typer.Option(
+        None, "--project", "-p", help="Harumi project id to bind this directory to. Prompted if omitted."
+    ),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Bind the current directory to a Harumi project and configure the git remote.
+    """Bind the current directory to an existing Harumi project and configure the git remote.
 
-    Fetches the project's Gitea repo from harumi-api, writes .harumi/config.json,
-    and configures the `harumi` git remote for HTTPS+token pushes.
+    For the rare case where a project's code is already checked out by hand
+    (or you're re-binding after moving the folder). Fetches the project's
+    Gitea repo from harumi-api, writes .harumi/config.json, and configures
+    the `harumi` git remote for HTTPS+token pushes — it does NOT fetch or
+    clone the code itself.
 
-    Run this once per project directory before using `harumi run`.
+    Starting fresh? Use `harumi new`, `harumi push`, or `harumi clone`
+    instead — each of those binds automatically as part of getting you a
+    working local checkout.
     """
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
+
+    if project is None:
+        projects = client.list_projects()
+        if not projects:
+            _fail("You have no projects to link. Run [bold]harumi new <NAME>[/bold] to create one.")
+        console.print("Your projects:")
+        table = Table("id", "name")
+        for p in projects:
+            table.add_row(p.id, p.name)
+        console.print(table)
+        project = typer.prompt("Project id to bind this directory to")
 
     console.print(f"Fetching repo for project [bold]{project}[/bold]...")
     repo = client.get_project_repo(project)
@@ -882,8 +946,38 @@ def init(
 
 
 # ---------------------------------------------------------------------------
-# harumi import
+# harumi push — turn an existing local folder into a new Harumi project
 # ---------------------------------------------------------------------------
+
+_DEFAULT_HARUMI_TOML = """\
+# harumi.toml — how Harumi runs this project.
+# Committed alongside your code: a run is whatever this file says, on the live branch.
+[run]
+command = "python main.py"
+kernel = "or_python_small"
+"""
+
+
+def _ensure_scaffold(folder: Path) -> None:
+    """Write a minimal `harumi.toml` into `folder` if one isn't already there.
+
+    `harumi push` force-pushes the folder as-is, overwriting whatever
+    scaffold `POST /projects` seeded server-side — so, unlike `harumi new`,
+    a pushed project has no run manifest unless the folder already had one.
+    Without this, the very first `harumi run` afterward fails with a missing
+    harumi.toml, which looks like a bug rather than a documented tradeoff of
+    pushing your own files over the seed.
+    """
+    manifest = folder / "harumi.toml"
+    if manifest.exists():
+        return
+    manifest.write_text(_DEFAULT_HARUMI_TOML)
+    console.print(
+        f"[dim]No harumi.toml in {folder} — wrote a minimal one "
+        "(command: python main.py, kernel: or_python_small). Edit it if your "
+        "entry point is different.[/dim]"
+    )
+
 
 def _merge_git_repo_flat(from_git: str, dest: Path) -> None:
     """Clone `from_git` and copy its tree (minus .git) FLAT into `dest`.
@@ -919,18 +1013,18 @@ def _merge_git_repo_flat(from_git: str, dest: Path) -> None:
 
     if collisions:
         console.print(
-            "[yellow]Kept the exported version of "
+            "[yellow]Kept the existing version of "
             f"{len(collisions)} file(s) that also exist in the repo "
             f"(e.g. {', '.join(collisions[:3])}); merge manually if needed.[/yellow]"
         )
 
 
-@app.command(name="import")
+@app.command()
 @_handle_errors
-def import_project(
+def push(
     path: Path = typer.Argument(
         Path("."),
-        help="Folder to import (an unzipped project export). Defaults to the current directory.",
+        help="Folder of existing code to turn into a new project. Defaults to the current directory.",
     ),
     project_name: Optional[str] = typer.Option(
         None, "--project-name", help="Name for the new project (defaults to the folder name)."
@@ -938,10 +1032,10 @@ def import_project(
     from_git: Optional[str] = typer.Option(
         None,
         "--from-git",
-        help="Also clone this git URL (the project's old GitHub repo) flat into the folder before importing.",
+        help="Also clone this git URL (e.g. an old GitHub repo) flat into the folder before pushing.",
     ),
     bind: bool = typer.Option(
-        True, "--bind/--no-bind", help="Bind the folder to the new project (like `harumi init`)."
+        True, "--bind/--no-bind", help="Bind the folder to the new project afterward (default: yes)."
     ),
     personal: bool = typer.Option(
         False,
@@ -952,12 +1046,45 @@ def import_project(
     git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Turn a downloaded project folder into a new git-based Harumi project.
+    """Turn an existing local folder of code into a new Harumi project.
 
-    Creates a project (which provisions a Harumi Git repo), optionally clones the
-    project's old GitHub repo flat into the folder, then commits and pushes the
-    whole folder as the repo's initial content. Read `HARUMI_IMPORT.md` in the
-    export for follow-ups (datasource credentials, the GitHub repo URL).
+    Use this when you already have code on your machine (from anywhere —
+    an old GitHub repo, a colleague's zip, a script you've been iterating
+    on locally) and want to move it into Harumi. Creates a project, then
+    force-pushes the folder's contents as the repo's first commit — this
+    intentionally overwrites the server-seeded scaffold, so if the folder
+    has no `harumi.toml` one is written for you before pushing.
+
+    Starting with nothing at all? Use `harumi new <NAME>` instead — it
+    clones the seeded scaffold rather than overwriting it.
+    """
+    _push_impl(
+        path=path,
+        project_name=project_name,
+        from_git=from_git,
+        bind=bind,
+        personal=personal,
+        api_url=api_url,
+        git_url=git_url,
+        org=org,
+    )
+
+
+def _push_impl(
+    *,
+    path: Path,
+    project_name: Optional[str],
+    from_git: Optional[str],
+    bind: bool,
+    personal: bool,
+    api_url: Optional[str],
+    git_url: Optional[str],
+    org: Optional[str],
+) -> None:
+    """Body of `harumi push`, factored out so `harumi start` can call it
+    directly without going through Typer's CLI-parsing machinery (whose
+    `Option`/`Argument` defaults are sentinel objects, not the real
+    defaults, when a decorated command function is called as plain Python).
     """
     folder = path.resolve()
     if not folder.is_dir():
@@ -967,6 +1094,8 @@ def import_project(
 
     if from_git:
         _merge_git_repo_flat(from_git, folder)
+
+    _ensure_scaffold(folder)
 
     name = project_name or folder.name
     console.print(f"Creating project [bold]{name}[/bold]...")
@@ -999,30 +1128,251 @@ def import_project(
             "re-provision your Gitea credentials, then retry."
         )
 
-    console.print("Pushing project files...")
+    console.print("Pushing your code...")
     push_folder(
         folder,
         clone_url=repo.clone_url,
         username=username,
         token=git_token,
         branch=repo.default_branch,
-        message="Import project",
+        message="Push local project",
     )
-    console.print(
-        f"[bold green]Pushed[/bold green] to Harumi ({repo.default_branch})."
-    )
+    console.print(f"[bold green]Pushed[/bold green] to Harumi ({repo.default_branch}).")
+
     if not bind:
         console.print(f"View project: {active_platform_url()}/projects/{project.id}")
+        return
 
-    notes = folder / "HARUMI_IMPORT.md"
-    if notes.exists():
+    if _bind_and_configure_remote(project.id, repo, cwd=folder):
+        console.print(f"\nRun [bold]cd {folder}[/bold] then [bold]harumi run[/bold] to try it.")
+
+
+# ---------------------------------------------------------------------------
+# harumi new — create a project from nothing and clone its scaffold locally
+# ---------------------------------------------------------------------------
+
+@app.command()
+@_handle_errors
+def new(
+    name: str = typer.Argument(..., help="Project name."),
+    dir: Optional[Path] = typer.Option(
+        None, "--dir", help="Local directory to clone the new project into. Defaults to ./<slugified-name>."
+    ),
+    customer_id: Optional[str] = typer.Option(
+        None,
+        "--customer-id",
+        help="Organization id to create the project under. Defaults to the configured org.",
+    ),
+    personal: bool = typer.Option(
+        False,
+        "--personal",
+        help="Create in your personal workspace, ignoring the configured org.",
+    ),
+    blueprint: Optional[str] = typer.Option(
+        None, "--blueprint", help="Blueprint slug to seed the project from (see `harumi blueprints`, optional)."
+    ),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Create a brand-new Harumi project and clone its scaffold locally.
+
+    Use this when you have nothing yet. Creates the project (which
+    provisions a Harumi Git repo pre-seeded with a runnable `harumi.toml` +
+    `main.py` + `dashboard.toml`, or a blueprint's files if `--blueprint` is
+    given), then clones that repo into a local directory and binds it — so
+    `harumi run` works immediately, no manual push required.
+
+    Already have code you want to bring in instead? Use `harumi push`.
+    Project already exists in Harumi (web app or a teammate made it)? Use
+    `harumi clone <PROJECT_ID>`.
+    """
+    _new_impl(
+        name=name,
+        dir=dir,
+        customer_id=customer_id,
+        personal=personal,
+        blueprint=blueprint,
+        api_url=api_url,
+        git_url=git_url,
+        org=org,
+    )
+
+
+def _new_impl(
+    *,
+    name: str,
+    dir: Optional[Path],
+    customer_id: Optional[str],
+    personal: bool,
+    blueprint: Optional[str],
+    api_url: Optional[str],
+    git_url: Optional[str],
+    org: Optional[str],
+) -> None:
+    """Body of `harumi new` — see `_push_impl` for why this is factored out."""
+    if personal and customer_id:
+        _fail("--personal and --customer-id are mutually exclusive. Pass only one.")
+
+    client = _get_client(api_url=api_url, git_url=git_url, org=org)
+
+    console.print(f"Creating project [bold]{name}[/bold]...")
+    project = client.create_project(
+        name, customer_id=customer_id, blueprint=blueprint, personal=personal
+    )
+    console.print(f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id}).")
+    _print_project_workspace(project.customer_id)
+
+    if project.repo is None:
         console.print(
-            "[yellow]•[/yellow] See [bold]HARUMI_IMPORT.md[/bold] for follow-ups "
-            "(datasource credentials, GitHub repo)."
+            "[yellow]No Gitea repo was provisioned for this project "
+            "(Harumi Git may not be configured on this backend).[/yellow]"
         )
+        return
 
-    if bind:
-        _bind_and_configure_remote(project.id, repo, cwd=folder)
+    dest = (dir or Path.cwd() / _slugify(project.name)).resolve()
+    if dest.exists() and any(dest.iterdir()):
+        _fail(f"{dest} already exists and isn't empty. Pass --dir to clone somewhere else.")
+
+    _clone_and_bind(project.id, project.repo, dest)
+
+
+# ---------------------------------------------------------------------------
+# harumi clone — fetch an existing Harumi project's code locally
+# ---------------------------------------------------------------------------
+
+def _clone_and_bind(project_id: str, repo, dest: Path) -> None:
+    """Clone `repo` into `dest`, then bind `dest` to `project_id`.
+
+    Shared by `new` (a repo it just created) and `clone` (a repo that
+    already existed). Requires a Gitea token/username on file — `harumi
+    login` provisions both. A missing credential is a warning, not a
+    failure: the project itself was already created/exists server-side by
+    the time this runs, so this mirrors `_push_impl`'s convention for the
+    same precondition rather than reporting what looks like a failed
+    project creation.
+    """
+    git_token = load_git_token()
+    if not git_token:
+        console.print(
+            "[yellow]No Gitea token found — can't clone.[/yellow] "
+            "Run [bold]harumi login[/bold], then [bold]harumi clone "
+            f"{project_id}[/bold] to try again."
+        )
+        return
+
+    username = load_git_username()
+    if not username:
+        console.print(
+            "[yellow]No Gitea username on file — can't clone.[/yellow] "
+            "Run [bold]harumi login[/bold] again to re-provision your Gitea "
+            f"credentials, then [bold]harumi clone {project_id}[/bold] to try again."
+        )
+        return
+
+    console.print(f"Cloning into [bold]{dest}[/bold]...")
+    clone_repo(
+        clone_url=repo.clone_url,
+        username=username,
+        token=git_token,
+        dest=dest,
+    )
+
+    if _bind_and_configure_remote(project_id, repo, cwd=dest):
+        console.print(f"\nRun [bold]cd {dest}[/bold] then [bold]harumi run[/bold] to try it.")
+
+
+@app.command()
+@_handle_errors
+def clone(
+    project: str = typer.Argument(..., help="Harumi project id to clone (see `harumi projects list`)."),
+    dir: Optional[Path] = typer.Option(
+        None, "--dir", help="Local directory to clone into. Defaults to ./<slugified-project-name>."
+    ),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Fetch an existing Harumi project's code onto your machine.
+
+    Use this for a project that already exists in Harumi — created via the
+    web app, by a teammate, or in an earlier session — and binds the clone
+    so `harumi run` works right away. Find a project id with
+    [bold]harumi projects list[/bold].
+    """
+    _clone_impl(project=project, dir=dir, api_url=api_url, git_url=git_url, org=org)
+
+
+def _clone_impl(
+    *,
+    project: str,
+    dir: Optional[Path],
+    api_url: Optional[str],
+    git_url: Optional[str],
+    org: Optional[str],
+) -> None:
+    """Body of `harumi clone` — see `_push_impl` for why this is factored out."""
+    client = _get_client(api_url=api_url, git_url=git_url, org=org)
+
+    console.print(f"Fetching repo for project [bold]{project}[/bold]...")
+    repo = client.get_project_repo(project)
+
+    proj = client.get_project(project)
+    dest = (dir or Path.cwd() / _slugify(proj.name)).resolve()
+    if dest.exists() and any(dest.iterdir()):
+        _fail(f"{dest} already exists and isn't empty. Pass --dir to clone somewhere else.")
+
+    _clone_and_bind(project, repo, dest)
+
+
+# ---------------------------------------------------------------------------
+# harumi start — the one entry point for "how do I begin"
+# ---------------------------------------------------------------------------
+
+@app.command()
+@_handle_errors
+def start() -> None:
+    """Interactively figure out which of the three onboarding journeys you
+    want, and run it.
+
+    Equivalent to picking one of `harumi new`, `harumi push`, or
+    `harumi clone` yourself — this just asks the question first.
+    """
+    console.print("[bold]What do you have?[/bold]\n")
+    console.print("  1. Nothing yet — start a brand-new project")
+    console.print("  2. A folder of code on this machine — bring it into Harumi")
+    console.print("  3. A project that already exists in Harumi — get its code here")
+    choice = ""
+    while choice not in {"1", "2", "3"}:
+        choice = typer.prompt("Choice (1/2/3)")
+
+    if choice == "1":
+        name = typer.prompt("Project name")
+        _new_impl(
+            name=name,
+            dir=None,
+            customer_id=None,
+            personal=False,
+            blueprint=None,
+            api_url=None,
+            git_url=None,
+            org=None,
+        )
+    elif choice == "2":
+        path_str = typer.prompt("Path to the folder", default=".")
+        _push_impl(
+            path=Path(path_str),
+            project_name=None,
+            from_git=None,
+            bind=True,
+            personal=False,
+            api_url=None,
+            git_url=None,
+            org=None,
+        )
+    else:
+        project = typer.prompt("Project id (see `harumi projects list`)")
+        _clone_impl(project=project, dir=None, api_url=None, git_url=None, org=None)
 
 
 # ---------------------------------------------------------------------------
@@ -1050,14 +1400,16 @@ def projects_create(
     blueprint: Optional[str] = typer.Option(
         None, "--blueprint", help="Blueprint slug to seed the project from (see `harumi blueprints`, optional)."
     ),
-    bind: bool = typer.Option(
-        True, "--bind/--no-bind", help="Bind the current directory to the new project (like `harumi init`)."
-    ),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Create a new Harumi project and its Gitea repo, then bind this directory to it."""
+    """Create a new Harumi project. Doesn't touch the local directory or git.
+
+    A scriptable primitive for automation — it doesn't clone or bind
+    anything locally. To get a working local checkout, use `harumi new`
+    instead (it does this same creation step, then clones the result).
+    """
     if personal and customer_id:
         _fail("--personal and --customer-id are mutually exclusive. Pass only one.")
 
@@ -1069,18 +1421,9 @@ def projects_create(
     )
     console.print(f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id}).")
     _print_project_workspace(project.customer_id)
-
-    if project.repo is None:
-        console.print(
-            "[yellow]No Gitea repo was provisioned for this project "
-            "(Harumi Git may not be configured on this backend).[/yellow]"
-        )
-        return
-
-    if not bind:
-        return
-
-    _bind_and_configure_remote(project.id, project.repo)
+    console.print(
+        f"Clone it locally: [bold]harumi clone {project.id}[/bold]"
+    )
 
 
 @projects_app.command("list")
@@ -1181,12 +1524,16 @@ def run(
     you can iterate without committing manually.  Pass --branch or --commit
     to run a specific ref instead.
 
-    Requires `harumi init` to have been run in this directory (or a parent).
+    Requires a working directory produced by `harumi new`/`harumi push`/
+    `harumi clone` (or `harumi link`, if the checkout already exists).
     """
     binding = ProjectBinding.load()
     if binding is None:
         _fail(
-            "No Harumi project found. Run [bold]harumi init --project <PROJECT_ID>[/bold] first."
+            "No Harumi project found in this directory (or any parent). "
+            "Run `harumi new` to start one, `harumi clone <PROJECT_ID>` to fetch "
+            "an existing one, or `harumi link --project <PROJECT_ID>` if this "
+            "directory already has the project's code."
         )
 
     client = _get_client(api_url=api_url, git_url=git_url, org=org)

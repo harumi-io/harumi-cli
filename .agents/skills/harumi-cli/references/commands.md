@@ -11,8 +11,11 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [specs](#specs)
 - [blueprints](#blueprints)
 - [projects](#projects)
-- [init](#init)
-- [import](#import)
+- [new](#new)
+- [push](#push)
+- [clone](#clone)
+- [link](#link)
+- [start](#start)
 - [run](#run)
 - [runs](#runs)
 - [outputs](#outputs)
@@ -39,7 +42,7 @@ Logs into the **active environment** (see [env](#env)) — pass `harumi --env st
 
 - Prompts for email if `--email` omitted, then prompts for the OTP code emailed by Supabase.
 - `--signup`: creates the Supabase account first. Required the *first* time a new email logs in.
-- On success, stores `access_token`/`refresh_token` at `~/.harumi/credentials.json` (mode `0600`), then calls `POST /git/credentials` to provision a per-user Gitea personal access token (`git_token` + `git_url`), used by `harumi init` and `harumi run` for git-over-HTTPS.
+- On success, stores `access_token`/`refresh_token` at `~/.harumi/credentials.json` (mode `0600`), then calls `POST /git/credentials` to provision a per-user Gitea personal access token (`git_token` + `git_url`), used by `harumi new`/`push`/`clone`/`link` and `harumi run` for git-over-HTTPS.
 - Best-effort org resolution: if exactly one org, stored automatically; if multiple, prints a table and instructs `harumi config set-org`.
 
 ### `harumi logout`
@@ -96,7 +99,7 @@ harumi config set-org <ORG_ID>
 
 Persists `org_id` in `~/.harumi/config.json`; every subsequent request sends it as `X-Organization`.
 
-The header scopes the *read* endpoints (`projects list`, `projects trash`). Creation reads the workspace from the request body instead, so `projects create` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway.
+The header scopes the *read* endpoints (`projects list`, `projects trash`). Creation reads the workspace from the request body instead, so `projects create`, `new`, and `push` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway.
 
 ## `specs`
 
@@ -117,7 +120,7 @@ Lists project blueprints (`slug`, `name`, `description`) from `GET /blueprints`.
 ## `projects`
 
 ```
-harumi projects create NAME [--customer-id ID] [--personal] [--blueprint SLUG] [--bind/--no-bind]
+harumi projects create NAME [--customer-id ID] [--personal] [--blueprint SLUG]
                        [--api-url URL] [--git-url URL] [--org ORG]
 harumi projects list [--api-url URL] [--org ORG]
 harumi projects get PROJECT_ID [--api-url URL] [--org ORG]
@@ -125,56 +128,89 @@ harumi projects rename PROJECT_ID NAME [--api-url URL] [--org ORG]
 harumi projects delete PROJECT_ID [--yes] [--api-url URL] [--org ORG]
 ```
 
-- **`create`**: `POST /projects`, then `GET /projects/{id}/repo` to fetch the Gitea repo and (unless `--no-bind`) bind the current directory the same way `harumi init` does. If the repo fetch 404s (Harumi Git not configured for this backend), the project is still created — the CLI prints a warning and skips binding instead of failing. The project is created in the configured org (`config set-org` / `--org` / `HARUMI_ORG`) unless you pass `--customer-id` to pick a different one or `--personal` to create it in your personal workspace; the command prints which workspace it landed in.
+- **`create`**: `POST /projects`. A pure creation primitive — it does **not** touch the local directory or git, unlike `new`/`push`/`clone`. Prints the new project's id and a `harumi clone <id>` hint. The project is created in the configured org (`config set-org` / `--org` / `HARUMI_ORG`) unless you pass `--customer-id` to pick a different one or `--personal` to create it in your personal workspace; the command prints which workspace it landed in. For a normal interactive flow, use `harumi new` instead — it does this same step, then clones the result.
 - **`list`**: `GET /projects` → table of `id`, `name`, `kernel_spec`, `role`.
 - **`get`**: `GET /projects/{id}` → detail view.
 - **`rename`**: `PUT /projects/{id}` with `{name}`.
 - **`delete`**: `DELETE /projects/{id}`. Prompts you to type the exact project name to confirm unless `--yes`.
 
-## `init`
+## Onboarding: `new` / `push` / `clone` / `link` / `start`
+
+Three journeys, three commands — plus the narrower `link` primitive and the interactive `start` entry point. All of `new`/`push`/`clone` leave the target directory bound (`.harumi/config.json` written, `harumi` git remote configured) and ready for `harumi run`.
+
+### `new`
 
 ```
-harumi init --project PROJECT_ID [--api-url URL] [--git-url URL] [--org ORG]
+harumi new NAME [--dir PATH] [--customer-id ID] [--personal] [--blueprint SLUG]
+          [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
-**Run once per project directory.** Binds the current working directory to a Harumi project:
+Use when there's nothing yet.
 
-1. Calls `GET /projects/{id}/repo`.
-2. Writes `.harumi/config.json` in the current directory with `project_id` + repo metadata.
-3. Configures the `harumi` git remote with an authenticated HTTPS URL (requires a `git_token` in credentials from `harumi login` and the repo to be a git working tree).
+1. `POST /projects` to create the project (seeds a runnable `harumi.toml` + `main.py` + `dashboard.toml` server-side, or a blueprint's files if `--blueprint` is given — see `harumi blueprints`).
+2. `GET /projects/{id}/repo` to fetch the Gitea repo.
+3. Clones that repo into `--dir` (default: `./<slugified-name>`, refuses to clone into an existing non-empty directory).
+4. Binds the clone the same way `link` does (writes `.harumi/config.json`, configures the `harumi` git remote).
 
-After `harumi init`, `harumi run`, `harumi runs`, `harumi repo`, `harumi outputs`, `harumi datasources`, `harumi schedules`, and `harumi secrets` all work without any `--project` flag.
-
-**Note:** `.harumi/config.json` is searched upward from cwd, so these commands work from subdirectories.
-
-## `import`
+### `push`
 
 ```
-harumi import [PATH] [--project-name NAME] [--from-git URL] [--bind/--no-bind] [--personal]
-              [--api-url URL] [--git-url URL] [--org ORG]
+harumi push [PATH] [--project-name NAME] [--from-git URL] [--bind/--no-bind] [--personal]
+           [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
-Turns a downloaded/unzipped project export (e.g. from the web app's "Download
-project" button) into a brand-new git-based Harumi project. `PATH` defaults to
-the current directory and **must be a directory** — unzip the export first
-(`import` fails with `Not a directory: <path>` on a `.zip`).
+Use when you already have code on your machine — from anywhere: an old GitHub repo, a colleague's zip, a script you've been iterating on locally. `PATH` defaults to the current directory.
 
 | Flag | Meaning |
 |---|---|
-| `PATH` | Folder to import (positional). Default: current directory. |
+| `PATH` | Folder to push (positional). Default: current directory. |
 | `--project-name` | Name for the new project. Default: the folder's name. |
-| `--from-git` | Also clone this git URL (e.g. the project's old GitHub repo) flat into the folder — `.git` stripped, files copied alongside the exported ones — before importing. On a filename collision the exported file wins; the CLI warns and lists the first few colliding paths. |
-| `--bind / --no-bind` | Bind the folder to the new project afterward, like `harumi init`. Default: `--bind`. |
+| `--from-git` | Also clone this git URL (e.g. an old GitHub repo) flat into the folder — `.git` stripped, files copied alongside the existing ones — before pushing. On a filename collision the existing (folder's own) file wins; the CLI warns and lists the first few colliding paths. |
+| `--bind / --no-bind` | Bind the folder to the new project afterward. Default: `--bind`. |
 | `--personal` | Create the project in your personal workspace, ignoring the configured org. |
 
 Sequence:
 
 1. `POST /projects` to create the project (`name` = `--project-name` or the folder name), in the configured org unless `--personal` is passed.
 2. If `--from-git` is set, shallow-clones that URL into a temp dir and copies its tree (minus `.git`) flat into the folder first.
-3. If the backend didn't provision a Gitea repo for the project (`project.repo is None`), prints a warning and stops — nothing is pushed, no binding happens.
-4. Otherwise, requires a Gitea token from `harumi login` (prints a warning and stops if missing — never fails hard), then commits and pushes the **entire folder** as one commit ("Import project") to the new repo's default branch.
-5. If the folder contains a `HARUMI_IMPORT.md` (part of the export, with follow-ups like re-adding datasource credentials or the old GitHub URL), prints a pointer to it.
-6. Unless `--no-bind`, binds the folder the same way `harumi init` does.
+3. If the folder has no `harumi.toml`, writes a minimal one (`command = "python main.py"`, `kernel = "or_python_small"`) — `push` force-pushes over the server-seeded scaffold, so without this the first `harumi run` afterward would fail with a missing manifest.
+4. If the backend didn't provision a Gitea repo for the project (`project.repo is None`), prints a warning and stops — nothing is pushed, no binding happens.
+5. Otherwise, requires a Gitea token from `harumi login` (prints a warning and stops if missing — never fails hard), then force-pushes the **entire folder** as one commit ("Push local project") to the new repo's default branch, overwriting the seeded scaffold.
+6. Unless `--no-bind`, binds the folder the same way `link` does.
+
+### `clone`
+
+```
+harumi clone PROJECT_ID [--dir PATH] [--api-url URL] [--git-url URL] [--org ORG]
+```
+
+Use for a project that already exists in Harumi — created via the web app, by a teammate, or in an earlier session.
+
+1. `GET /projects/{id}/repo` and `GET /projects/{id}` to fetch the repo and project name.
+2. Clones the repo into `--dir` (default: `./<slugified-project-name>`, refuses to clone into an existing non-empty directory).
+3. Binds the clone the same way `link` does.
+
+### `link`
+
+```
+harumi link [--project PROJECT_ID] [--api-url URL] [--git-url URL] [--org ORG]
+```
+
+The narrower primitive underneath `clone` — binds an **already-checked-out** directory to a project, without cloning or fetching anything. For the rare case where the code is already on disk by hand (or you're re-binding after moving the folder).
+
+1. Calls `GET /projects/{id}/repo` (prompts you to pick from `harumi projects list` if `--project` is omitted).
+2. Writes `.harumi/config.json` in the current directory with `project_id` + repo metadata.
+3. Configures the `harumi` git remote with an authenticated HTTPS URL (requires a `git_token` in credentials from `harumi login` and the current directory to already be a git working tree — `link` warns and skips remote setup otherwise).
+
+After binding (via `new`/`push`/`clone`/`link`), `harumi run`, `harumi runs`, `harumi repo`, `harumi outputs`, `harumi datasources`, `harumi schedules`, and `harumi secrets` all work without any `--project` flag. `.harumi/config.json` is searched upward from cwd, so these commands work from subdirectories too.
+
+### `start`
+
+```
+harumi start
+```
+
+Interactive entry point for a confused or new user: asks "What do you have?" (nothing yet / a local folder / an existing Harumi project) and dispatches to `new`/`push`/`clone` accordingly. Equivalent to picking the right one yourself.
 
 ## `run`
 
@@ -184,7 +220,7 @@ harumi run [--branch B] [--commit SHA] [--command C] [--kernel K]
            [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
-Requires the directory (or a parent) to be bound via `harumi init`.
+Requires the directory (or a parent) to be bound — via `harumi new`, `harumi push`, `harumi clone`, or `harumi link`.
 
 | Flag | Meaning |
 |---|---|
@@ -449,7 +485,7 @@ Within the active environment, URL/org overrides (highest first): **CLI flags > 
 - `~/.harumi/config.json` — global; stores only the selected `environment`.
 - `~/.harumi/environments/<env>/credentials.json` — per-environment `access_token`, `refresh_token`, `git_token`, `git_url`, `user_id`, `email`, `expires_at`; mode `0600`.
 - `~/.harumi/environments/<env>/config.json` — per-environment `org_id` (and any local `api_url`/`git_url` overrides).
-- `.harumi/config.json` (per-project) — `project_id`, `repo.owner/name/clone_url/default_branch`; written by `harumi init` / `harumi projects create`, searched upward from cwd.
+- `.harumi/config.json` (per-project) — `project_id`, `repo.owner/name/clone_url/default_branch`; written by `harumi new` / `harumi push` / `harumi clone` / `harumi link`, searched upward from cwd.
 - Override the home dir with `HARUMI_HOME`.
 - **Upgrading from a pre-environments install:** the old flat `~/.harumi/credentials.json` + `config.json` are migrated automatically into the `production` environment on first run.
 
@@ -459,7 +495,7 @@ Within the active environment, URL/org overrides (highest first): **CLI flags > 
 |---|---|---|
 | `Error: Not logged in. Run harumi login first.` | No/expired session | Ask user to run `harumi login` |
 | `harumi-api returned HTTP 422: ... Signups not allowed for otp` | New email, no account | Re-run `harumi login --signup` |
-| `Provide --project or run from a directory with a .harumi binding` | No `--project` and `.harumi/config.json` missing in cwd + parents | `harumi init --project <ID>` or pass `--project` |
+| `Provide --project or run from a directory with a .harumi binding` | No `--project` and `.harumi/config.json` missing in cwd + parents | `harumi new`/`harumi clone <ID>` (nothing/existing project) or `harumi push` (existing folder) or `harumi link --project <ID>` (already checked out), or pass `--project` |
 | `No Gitea token found. Run harumi login` | `git_token` absent in credentials | `harumi login` again |
 | `git push failed: ...` | Network (VPN not connected) or bad credentials | Check VPN; re-run `harumi login` to refresh token |
 | `git not found` | git missing from PATH | Install git |

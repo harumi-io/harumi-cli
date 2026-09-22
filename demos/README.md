@@ -15,8 +15,9 @@ writing your own solver code first.
 `harumi run` executes whatever is committed on the bound project's git ref (or a scratch branch of your dirty working tree) — it doesn't take a file path directly. Point a project's `harumi.toml` `command` at one of these files (or push it as `main.py`), then run it:
 
 ```bash
-# bind this directory to a project (once)
-harumi init --project <PROJECT_ID>
+# bind this directory to a project (once) — this folder already has code checked
+# out, so `link` is the right verb (not `new`/`push`/`clone`)
+harumi link --project <PROJECT_ID>
 
 # run the demo committed here, streaming stdout/stderr, and watch for completion
 harumi run --command "python demos/hello_world.py" --watch
