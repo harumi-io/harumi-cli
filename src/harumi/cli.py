@@ -2660,15 +2660,15 @@ def _prompt_credentials(current: str = "credentials") -> str:
     return typer.prompt(f"Enter {current} (hidden)", hide_input=True)
 
 
-def _read_pem(path: Path, field: str) -> str:
+def _read_pem(path: Path, flag: str) -> str:
     """Read a certificate/key file as text, failing clearly if it can't be used."""
     try:
         text = path.read_text()
     except OSError as exc:
-        _fail(f"Could not read {field} from {str(path)!r}: {exc}")
+        _fail(f"Could not read {flag} from {str(path)!r}: {exc}")
         raise AssertionError("unreachable")  # _fail always raises
     if not text.strip():
-        _fail(f"{str(path)!r} is empty — {field} needs the PEM contents.")
+        _fail(f"{str(path)!r} is empty — {flag} needs the PEM contents.")
     return text
 
 
@@ -2683,11 +2683,15 @@ def _proxy_tls_material(
     inline would mean the certificate ends up in the user's shell history.
     """
     paths = {
-        "proxy_tls_ca_cert": ca_cert,
-        "proxy_tls_client_cert": client_cert,
-        "proxy_tls_client_key": client_key,
+        "proxy_tls_ca_cert": (ca_cert, "--proxy-tls-ca-cert"),
+        "proxy_tls_client_cert": (client_cert, "--proxy-tls-client-cert"),
+        "proxy_tls_client_key": (client_key, "--proxy-tls-client-key"),
     }
-    return {field: _read_pem(path, field) for field, path in paths.items() if path is not None}
+    return {
+        field: _read_pem(path, flag)
+        for field, (path, flag) in paths.items()
+        if path is not None
+    }
 
 
 def _require_complete_proxy_config(
@@ -2715,6 +2719,28 @@ def _require_complete_proxy_config(
     ]
     if missing:
         _fail("--use-proxy also needs: " + ", ".join(missing) + ".")
+
+
+def _reject_orphan_proxy_flags(
+    use_proxy: bool,
+    proxy_host: Optional[str],
+    proxy_port: Optional[int],
+    proxy_server_name: Optional[str],
+    material: dict,
+) -> None:
+    """Catch the inverse mistake: proxy flags given without --use-proxy.
+
+    Without this, `_proxy_tls_material` would already have read the PEM
+    files for nothing and the datasource would be silently created as a
+    plain, non-proxied connection with no warning that the proxy flags were
+    ignored — easy to get wrong when scripting `datasources add`/`test`.
+    """
+    if use_proxy:
+        return
+    if proxy_host or proxy_port or proxy_server_name or material:
+        _fail(
+            "--proxy-host/--proxy-port/--proxy-server-name/--proxy-tls-* require --use-proxy."
+        )
 
 
 @datasources_app.command("list")
@@ -2787,6 +2813,8 @@ def datasources_add(
     tls_material = _proxy_tls_material(proxy_tls_ca_cert, proxy_tls_client_cert, proxy_tls_client_key)
     if use_proxy:
         _require_complete_proxy_config(proxy_host, proxy_port, tls_material)
+    else:
+        _reject_orphan_proxy_flags(use_proxy, proxy_host, proxy_port, proxy_server_name, tls_material)
 
     credentials = _prompt_credentials()
 
@@ -2918,6 +2946,8 @@ def datasources_test(
     tls_material = _proxy_tls_material(proxy_tls_ca_cert, proxy_tls_client_cert, proxy_tls_client_key)
     if use_proxy:
         _require_complete_proxy_config(proxy_host, proxy_port, tls_material)
+    else:
+        _reject_orphan_proxy_flags(use_proxy, proxy_host, proxy_port, proxy_server_name, tls_material)
 
     credentials = _prompt_credentials()
 

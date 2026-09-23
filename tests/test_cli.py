@@ -1691,8 +1691,27 @@ def test_datasources_add_reports_an_unreadable_cert_path(api, tmp_path):
     )
 
     assert result.exit_code == 1
-    assert "proxy_tls_ca_cert" in result.output
+    assert "--proxy-tls-ca-cert" in result.output
     assert "nope.pem" in result.output
+
+
+def test_datasources_add_rejects_proxy_flags_given_without_use_proxy(api):
+    """Without --use-proxy, --proxy-* flags would otherwise be silently
+    dropped — the datasource gets created as a plain, non-proxied
+    connection with no warning that the flags were ignored."""
+    result = runner.invoke(
+        cli.app,
+        [
+            "datasources", "add", "sales_db",
+            "--type", "postgresql",
+            "--proxy-host", "vpnproxy.harumi.io",
+            "--project", "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--use-proxy" in result.output
+    assert api.requests == []
 
 
 def test_datasources_add_reports_a_binary_cert_file_without_a_traceback(api, tmp_path):
