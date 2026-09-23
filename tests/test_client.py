@@ -412,6 +412,72 @@ def test_client_get_project_returns_project():
     assert project.name == "Routing"
 
 
+def test_client_get_credit_usage_parses_the_allowance():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/billing/usage"
+        return httpx.Response(
+            200,
+            json={
+                "billing_account_id": "acct-1",
+                "plan_code": "free",
+                "balance_credits": 1500,
+                "included_credits": 2000,
+                "period_start": "2026-09-01T00:00:00Z",
+                "period_end": "2026-10-01T00:00:00Z",
+                "overage_enabled": False,
+                "overage_cap_credits": 0,
+                "entries": [
+                    {
+                        "id": "led-1",
+                        "kind": "debit",
+                        "delta_credits": -500,
+                        "source_kind": "chat_turn",
+                        "source_id": "msg-1",
+                        "created_at": "2026-09-05T00:00:00Z",
+                    }
+                ],
+            },
+        )
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    usage = client.get_credit_usage()
+
+    assert usage.plan_code == "free"
+    assert usage.balance_credits == 1500
+    assert usage.included_credits == 2000
+    assert usage.entries[0].delta_credits == -500
+
+
+def test_client_get_credit_usage_sends_the_configured_org_header():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["X-Organization"] == "org-1"
+        return httpx.Response(
+            200,
+            json={
+                "billing_account_id": "acct-org-1",
+                "plan_code": "enterprise",
+                "balance_credits": 100,
+                "included_credits": 100,
+                "period_start": "2026-09-01T00:00:00Z",
+                "period_end": "2026-10-01T00:00:00Z",
+                "overage_enabled": False,
+                "overage_cap_credits": 0,
+                "entries": [],
+            },
+        )
+
+    client = Client(
+        api_url="https://harumi-api.test/api", org_id="org-1", transport=httpx.MockTransport(handler)
+    )
+    usage = client.get_credit_usage()
+
+    assert usage.plan_code == "enterprise"
+
+
 def test_client_update_project_sends_patch_body():
     _write_credentials()
 
@@ -1065,6 +1131,24 @@ def test_client_upload_file_to_presigned_url_raises_on_error_status(tmp_path):
         client.upload_file_to_presigned_url(upload_url, local, "text/csv")
 
 
+def test_client_upload_file_to_presigned_url_wraps_a_dropped_connection(tmp_path):
+    """Same reasoning as the download side: a bare httpx exception must not
+    escape past `_handle_errors` as a raw traceback."""
+    _write_credentials()
+    local = tmp_path / "data.csv"
+    local.write_text("x")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    from harumi.models import FileUploadUrl
+
+    upload_url = FileUploadUrl(url="https://uploads.test/proj-1/data.csv", key="proj-1/data.csv", expires_in=900)
+    with pytest.raises(ApiError):
+        client.upload_file_to_presigned_url(upload_url, local, "text/csv")
+
+
 def test_client_download_file_from_presigned_url_carries_no_auth_header(tmp_path):
     _write_credentials()
 
@@ -1081,6 +1165,28 @@ def test_client_download_file_from_presigned_url_carries_no_auth_header(tmp_path
     client.download_file_from_presigned_url(download_url, dest)
 
     assert dest.read_bytes() == b"a,b\n1,2\n"
+
+
+def test_client_download_file_from_presigned_url_leaves_no_partial_file_on_a_dropped_connection(tmp_path):
+    """A network failure mid-transfer must not leave a truncated, silently
+    corrupt file at dest_path, and must raise ApiError (which
+    `_handle_errors` has a clause for) rather than a bare httpx exception."""
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadError("connection reset")
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    from harumi.models import FileDownloadUrl
+
+    dest = tmp_path / "data.csv"
+    download_url = FileDownloadUrl(url="https://uploads.test.s3.amazonaws.com/proj-1/data.csv", expires_in=900)
+
+    with pytest.raises(ApiError):
+        client.download_file_from_presigned_url(download_url, dest)
+
+    assert not dest.exists()
+    assert not dest.with_name(dest.name + ".part").exists()
 
 
 def test_client_delete_project_file():

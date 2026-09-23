@@ -272,7 +272,7 @@ def api(monkeypatch) -> FakeApi:
 
 @pytest.fixture
 def bound_dir(tmp_path, monkeypatch):
-    """A cwd containing a .harumi/config.json binding, as `harumi init` writes."""
+    """A cwd containing a .harumi/config.json binding, as `harumi link` writes."""
     import json
 
     harumi_dir = tmp_path / "work" / ".harumi"
@@ -342,6 +342,105 @@ def test_api_error_exits_nonzero_with_a_message(api):
     assert "Error" in result.output
 
 
+def test_a_402_from_a_run_points_at_usage_and_the_billing_settings_page(api, bound_dir):
+    # A billing denial ("harumi-api returned HTTP 402: ...") is technically
+    # correct but doesn't tell the user what to do about it — this pins the
+    # friendlier message _format_api_error swaps in for exactly this status.
+    api.route(
+        "POST",
+        "/api/projects/proj-bound/execute",
+        {"detail": "Included credits exhausted for this period."},
+        status=402,
+    )
+
+    result = runner.invoke(cli.app, ["run", "--branch", "main"])
+
+    assert result.exit_code == 1
+    assert "Included credits exhausted for this period." in result.output
+    assert "harumi usage" in result.output
+    assert "settings?tab=billing" in result.output
+
+
+def test_usage_shows_the_balance_and_plan(api):
+    api.route(
+        "GET",
+        "/api/billing/usage",
+        {
+            "billing_account_id": "acct-1",
+            "plan_code": "free",
+            "balance_credits": 1500,
+            "included_credits": 2000,
+            "period_start": "2026-09-01T00:00:00Z",
+            "period_end": "2026-10-01T00:00:00Z",
+            "overage_enabled": False,
+            "overage_cap_credits": 0,
+            "entries": [],
+        },
+    )
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "free" in result.output
+    assert "1,500" in result.output
+    assert "2,000" in result.output
+    assert "2026-10-01" in result.output
+    assert "disabled" in result.output
+
+
+def test_usage_flags_an_exhausted_balance_with_no_overage(api):
+    api.route(
+        "GET",
+        "/api/billing/usage",
+        {
+            "billing_account_id": "acct-1",
+            "plan_code": "free",
+            "balance_credits": 0,
+            "included_credits": 2000,
+            "period_start": "2026-09-01T00:00:00Z",
+            "period_end": "2026-10-01T00:00:00Z",
+            "overage_enabled": False,
+            "overage_cap_credits": 0,
+            "entries": [],
+        },
+    )
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "exhausted" in result.output
+    assert "settings?tab=billing" in result.output
+
+
+def test_usage_reports_the_overage_cap_when_enabled(api):
+    api.route(
+        "GET",
+        "/api/billing/usage",
+        {
+            "billing_account_id": "acct-1",
+            "plan_code": "individual",
+            "balance_credits": -50,
+            "included_credits": 2000,
+            "period_start": "2026-09-01T00:00:00Z",
+            "period_end": "2026-10-01T00:00:00Z",
+            "overage_enabled": True,
+            "overage_cap_credits": 500,
+            "entries": [],
+        },
+    )
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "enabled" in result.output
+    assert "500" in result.output
+    # A negative balance renders as 0, not a confusing negative count.
+    assert "0 / 2,000" in result.output
+    # Overage is on, so the exhausted-allowance warning must not fire even
+    # though the balance itself is negative.
+    assert "exhausted" not in result.output
+
+
 def test_secrets_list_prints_names_but_never_values(api):
     api.route("GET", "/api/projects/proj-1/secrets", [{"name": "API_KEY", "value": "super-secret"}])
 
@@ -377,6 +476,238 @@ def test_unknown_command_is_rejected():
     result = runner.invoke(cli.app, ["projects", "frobnicate"])
 
     assert result.exit_code != 0
+
+
+def test_projects_create_does_not_touch_local_directory_or_git(api, tmp_path, monkeypatch):
+    """`projects create` is the pure API primitive now — binding/cloning moved
+    to `new`/`push`/`clone`/`link`. This pins that it stays that way."""
+    monkeypatch.chdir(tmp_path)
+    clone_calls = []
+    remote_calls = []
+    monkeypatch.setattr(cli, "clone_repo", lambda **kw: clone_calls.append(kw))
+    monkeypatch.setattr(cli, "ensure_remote", lambda **kw: remote_calls.append(kw))
+    api.route("POST", "/api/projects", {"id": "proj-1", "name": "Widget", "notebook_ids": []})
+    api.route(
+        "GET",
+        "/api/projects/proj-1/repo",
+        {
+            "owner": "acme",
+            "name": "widget",
+            "clone_url": "https://git.harumi.test/acme/widget.git",
+            "default_branch": "main",
+        },
+    )
+
+    result = runner.invoke(cli.app, ["projects", "create", "Widget"])
+
+    assert result.exit_code == 0, result.output
+    assert "harumi clone proj-1" in result.output
+    assert not (tmp_path / ".harumi").exists()
+    assert clone_calls == []
+    assert remote_calls == []
+
+
+# ---------------------------------------------------------------------------
+# harumi new / push / clone / link / start
+#
+# Each of these ends by binding a directory (writing .harumi/config.json)
+# and, unless the directory isn't a real git repo yet, configuring the
+# `harumi` remote — so the git subprocess helpers are stubbed the same way
+# the `git` fixture stubs them for `run`, below.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def git_ops(monkeypatch):
+    """Stub the git helpers `new`/`push`/`clone`/`link` call, so these tests
+    never shell out to real git. `clone_repo` creates the destination
+    directory (mirroring what a real `git clone` would leave behind) so the
+    binding step that follows has somewhere to write `.harumi/config.json`.
+    """
+    calls: dict[str, list[dict]] = {"clone": [], "ensure_remote": [], "push_folder": []}
+
+    def fake_clone_repo(*, clone_url, username, token, dest, remote="harumi"):
+        calls["clone"].append({"clone_url": clone_url, "dest": dest})
+        Path(dest).mkdir(parents=True, exist_ok=True)
+
+    def fake_ensure_remote(*, clone_url, username, token, cwd):
+        calls["ensure_remote"].append({"clone_url": clone_url, "cwd": cwd})
+
+    def fake_push_folder(folder, *, clone_url, username, token, branch, message):
+        calls["push_folder"].append({"folder": folder, "clone_url": clone_url, "branch": branch})
+
+    monkeypatch.setattr(cli, "clone_repo", fake_clone_repo)
+    monkeypatch.setattr(cli, "ensure_remote", fake_ensure_remote)
+    monkeypatch.setattr(cli, "push_folder", fake_push_folder)
+    # Every directory these tests touch is a fresh tmp_path, never a real git
+    # checkout — treat it as one so the binding step doesn't bail out early.
+    monkeypatch.setattr(cli, "repo_root", lambda cwd=None: cwd or Path.cwd())
+    return calls
+
+
+def _route_project_repo(api, project_id: str, name: str) -> None:
+    api.route(
+        "GET",
+        f"/api/projects/{project_id}/repo",
+        {
+            "owner": "acme",
+            "name": name,
+            "clone_url": f"https://git.harumi.test/acme/{name}.git",
+            "default_branch": "main",
+        },
+    )
+
+
+def test_new_creates_project_clones_and_binds(api, git_ops, tmp_path, monkeypatch):
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    api.route("POST", "/api/projects", {"id": "proj-new", "name": "Widget", "notebook_ids": []})
+    _route_project_repo(api, "proj-new", "widget")
+
+    result = runner.invoke(cli.app, ["new", "Widget"])
+
+    assert result.exit_code == 0, result.output
+    dest = tmp_path / "widget"
+    assert (dest / ".harumi" / "config.json").exists()
+    assert git_ops["clone"][0]["clone_url"] == "https://git.harumi.test/acme/widget.git"
+    assert git_ops["ensure_remote"][0]["cwd"] == dest
+
+
+def test_new_reports_a_clear_error_when_dir_is_an_existing_file(api, git_ops, tmp_path):
+    """`--dir` pointing at a regular file makes `dest.iterdir()` raise
+    NotADirectoryError — must give the same clear message as a non-empty
+    directory, not a raw OSError."""
+    from harumi.config import save_git_token
+
+    save_git_token("gitea-token", username="dev@harumi.test")
+    dest_file = tmp_path / "notes.txt"
+    dest_file.write_text("existing content")
+    api.route("POST", "/api/projects", {"id": "proj-new", "name": "Widget", "notebook_ids": []})
+    _route_project_repo(api, "proj-new", "widget")
+
+    result = runner.invoke(cli.app, ["new", "Widget", "--dir", str(dest_file)])
+
+    assert result.exit_code != 0
+    assert "already exists and isn't empty" in result.output
+    assert git_ops["clone"] == []
+
+
+def test_push_writes_a_minimal_manifest_when_the_folder_has_none(api, git_ops, tmp_path):
+    from harumi.config import save_git_token
+
+    save_git_token("gitea-token", username="dev@harumi.test")
+    folder = tmp_path / "myfolder"
+    folder.mkdir()
+    (folder / "main.py").write_text("print('hi')\n")
+    api.route("POST", "/api/projects", {"id": "proj-push", "name": "myfolder", "notebook_ids": []})
+    _route_project_repo(api, "proj-push", "myfolder")
+
+    result = runner.invoke(cli.app, ["push", str(folder)])
+
+    assert result.exit_code == 0, result.output
+    assert "or_python_small" in (folder / "harumi.toml").read_text()
+    assert git_ops["push_folder"][0]["folder"] == folder
+    assert (folder / ".harumi" / "config.json").exists()
+
+
+def test_push_never_overwrites_an_existing_manifest(api, git_ops, tmp_path):
+    from harumi.config import save_git_token
+
+    save_git_token("gitea-token", username="dev@harumi.test")
+    folder = tmp_path / "myfolder"
+    folder.mkdir()
+    (folder / "harumi.toml").write_text('[run]\ncommand = "python custom.py"\n')
+    api.route("POST", "/api/projects", {"id": "proj-push", "name": "myfolder", "notebook_ids": []})
+    _route_project_repo(api, "proj-push", "myfolder")
+
+    result = runner.invoke(cli.app, ["push", str(folder)])
+
+    assert result.exit_code == 0, result.output
+    assert "python custom.py" in (folder / "harumi.toml").read_text()
+
+
+def test_clone_fetches_an_existing_project_and_binds(api, git_ops, tmp_path, monkeypatch):
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    api.route("GET", "/api/projects/proj-1", {"id": "proj-1", "name": "Solver", "notebook_ids": []})
+    _route_project_repo(api, "proj-1", "solver")
+
+    result = runner.invoke(cli.app, ["clone", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    dest = tmp_path / "solver"
+    assert (dest / ".harumi" / "config.json").exists()
+    assert git_ops["clone"][0]["clone_url"] == "https://git.harumi.test/acme/solver.git"
+
+
+def test_clone_reports_a_clear_error_when_dir_is_an_existing_file(api, git_ops, tmp_path):
+    """Same fix as `new --dir`: a file at `--dir` must give the "already
+    exists and isn't empty" message, not a raw NotADirectoryError."""
+    from harumi.config import save_git_token
+
+    save_git_token("gitea-token", username="dev@harumi.test")
+    dest_file = tmp_path / "notes.txt"
+    dest_file.write_text("existing content")
+    api.route("GET", "/api/projects/proj-1", {"id": "proj-1", "name": "Solver", "notebook_ids": []})
+    _route_project_repo(api, "proj-1", "solver")
+
+    result = runner.invoke(cli.app, ["clone", "proj-1", "--dir", str(dest_file)])
+
+    assert result.exit_code != 0
+    assert "already exists and isn't empty" in result.output
+    assert git_ops["clone"] == []
+
+
+def test_link_binds_an_already_checked_out_directory(api, git_ops, tmp_path, monkeypatch):
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    _route_project_repo(api, "proj-1", "solver")
+
+    result = runner.invoke(cli.app, ["link", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / ".harumi" / "config.json").exists()
+    assert git_ops["ensure_remote"][0]["cwd"] == tmp_path
+    # `link` never fetches code — only `new`/`push`/`clone` do.
+    assert git_ops["clone"] == []
+
+
+def test_new_without_a_gitea_token_warns_but_does_not_fail(api, git_ops, tmp_path, monkeypatch):
+    """A missing Gitea token is a soft warning, not a hard failure — the
+    project was already created server-side by the time this check runs
+    (mirrors `push`'s convention for the same precondition, see
+    `_clone_and_bind`)."""
+    monkeypatch.chdir(tmp_path)
+    api.route("POST", "/api/projects", {"id": "proj-new", "name": "Widget", "notebook_ids": []})
+    _route_project_repo(api, "proj-new", "widget")
+
+    result = runner.invoke(cli.app, ["new", "Widget"])
+
+    assert result.exit_code == 0, result.output
+    assert "Created" in result.output
+    assert "can't clone" in result.output
+    assert git_ops["clone"] == []
+    assert not (tmp_path / "widget").exists()
+
+
+def test_start_dispatches_to_new_when_the_user_has_nothing_yet(api, git_ops, tmp_path, monkeypatch):
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    api.route("POST", "/api/projects", {"id": "proj-new", "name": "Widget", "notebook_ids": []})
+    _route_project_repo(api, "proj-new", "widget")
+
+    result = runner.invoke(cli.app, ["start"], input="1\nWidget\n")
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "widget" / ".harumi" / "config.json").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -764,6 +1095,28 @@ def test_files_put_does_not_count_the_file_it_replaces_against_the_cap(api, tmp_
     result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
+    assert "Uploaded" in result.output
+
+
+def test_files_put_skips_the_cap_check_with_a_warning_when_the_listing_is_truncated(api, tmp_path, monkeypatch):
+    """A truncated listing under-counts existing files/bytes, so a local
+    'OK' would be a false negative worse than no check at all — skip the
+    check and say so, rather than silently approving an upload the server
+    may still reject."""
+    local = tmp_path / "one-more.csv"
+    local.write_text("x")
+    api.route("GET", "/api/projects/proj-1/files", {"files": [], "is_truncated": True})
+    api.route(
+        "POST",
+        "/api/projects/proj-1/files/upload-url",
+        {"url": "https://s3.test/proj-1/one-more.csv", "key": "proj-1/one-more.csv", "expires_in": 900},
+    )
+    monkeypatch.setattr(Client, "upload_file_to_presigned_url", lambda *a, **k: None)
+
+    result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "truncated" in result.output
     assert "Uploaded" in result.output
 
 
@@ -1338,8 +1691,27 @@ def test_datasources_add_reports_an_unreadable_cert_path(api, tmp_path):
     )
 
     assert result.exit_code == 1
-    assert "proxy_tls_ca_cert" in result.output
+    assert "--proxy-tls-ca-cert" in result.output
     assert "nope.pem" in result.output
+
+
+def test_datasources_add_rejects_proxy_flags_given_without_use_proxy(api):
+    """Without --use-proxy, --proxy-* flags would otherwise be silently
+    dropped — the datasource gets created as a plain, non-proxied
+    connection with no warning that the flags were ignored."""
+    result = runner.invoke(
+        cli.app,
+        [
+            "datasources", "add", "sales_db",
+            "--type", "postgresql",
+            "--proxy-host", "vpnproxy.harumi.io",
+            "--project", "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--use-proxy" in result.output
+    assert api.requests == []
 
 
 def test_datasources_add_reports_a_binary_cert_file_without_a_traceback(api, tmp_path):
@@ -1552,13 +1924,16 @@ def git(monkeypatch):
     return state
 
 
-def test_run_without_a_binding_points_at_init(api, git, tmp_path, monkeypatch):
+def test_run_without_a_binding_points_at_onboarding_verbs(api, git, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(cli.app, ["run"])
 
     assert result.exit_code == 1
-    assert "harumi init" in result.output
+    output = " ".join(result.output.split())
+    assert "harumi new" in output
+    assert "harumi clone" in output
+    assert "harumi link" in output
     assert api.requests == []
 
 

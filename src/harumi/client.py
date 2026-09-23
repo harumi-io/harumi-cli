@@ -22,6 +22,7 @@ from harumi.models import (
     BranchInfo,
     BlueprintSummary,
     ConnectionTestResponse,
+    CreditUsage,
     Datasource,
     DatasourceList,
     DeleteFilesResult,
@@ -203,6 +204,16 @@ class Client:
     def update_profile(self, body: dict[str, Any]) -> UserProfile:
         response = self.api.request("POST", "/users/profile", json=body)
         return UserProfile.model_validate(response.json())
+
+    # -- Billing --------------------------------------------------------
+    # /billing/usage — the caller's personal credit allowance, or (with the
+    # client's configured org — see `--org`/`X-Organization`) that org's
+    # pooled one, same scoping every other org-aware method here already gets
+    # for free via `ApiClient._headers()`.
+
+    def get_credit_usage(self) -> CreditUsage:
+        response = self.api.request("GET", "/billing/usage")
+        return CreditUsage.model_validate(response.json())
 
     # -- Git credentials ------------------------------------------------
     # POST /git/credentials — provisions (idempotently) the current user's
@@ -768,13 +779,19 @@ class Client:
         and not `Transfer-Encoding: chunked` — S3 rejects chunked on a
         presigned PUT.
         """
-        with httpx.Client(timeout=300.0, transport=self.api.transport) as http_client:
-            with open(local_path, "rb") as f:
-                response = http_client.put(
-                    upload_url.url,
-                    content=f,
-                    headers={"Content-Type": content_type},
-                )
+        try:
+            with httpx.Client(timeout=300.0, transport=self.api.transport) as http_client:
+                with open(local_path, "rb") as f:
+                    response = http_client.put(
+                        upload_url.url,
+                        content=f,
+                        headers={"Content-Type": content_type},
+                    )
+        except httpx.HTTPError as exc:
+            # A dropped connection here would otherwise be a bare httpx
+            # exception _handle_errors doesn't have a clause for, surfacing
+            # as a raw traceback instead of the CLI's normal error message.
+            raise ApiError(0, f"Upload failed: {exc}") from exc
         if response.status_code >= 400:
             raise ApiError(response.status_code, response.text or response.reason_phrase)
 
@@ -782,14 +799,30 @@ class Client:
         self, download_url: FileDownloadUrl, dest_path: Path
     ) -> None:
         """GET a file straight from S3 to `dest_path`. No Authorization header,
-        same reasoning as `upload_file_to_presigned_url`."""
+        same reasoning as `upload_file_to_presigned_url`.
+
+        Streams to a `.part` sibling and renames into place only on success,
+        so a dropped connection never leaves a truncated, silently-corrupt
+        file sitting at `dest_path`.
+        """
         dest_path.parent.mkdir(parents=True, exist_ok=True)
-        with httpx.Client(timeout=300.0, transport=self.api.transport) as http_client:
-            with http_client.stream("GET", download_url.url) as response:
-                if response.status_code >= 400:
-                    response.read()
-                    raise ApiError(response.status_code, response.text or response.reason_phrase)
-                with open(dest_path, "wb") as f:
-                    for chunk in response.iter_bytes():
-                        f.write(chunk)
+        tmp_path = dest_path.with_name(dest_path.name + ".part")
+        try:
+            with httpx.Client(timeout=300.0, transport=self.api.transport) as http_client:
+                with http_client.stream("GET", download_url.url) as response:
+                    if response.status_code >= 400:
+                        response.read()
+                        raise ApiError(response.status_code, response.text or response.reason_phrase)
+                    with open(tmp_path, "wb") as f:
+                        for chunk in response.iter_bytes():
+                            f.write(chunk)
+        except httpx.HTTPError as exc:
+            tmp_path.unlink(missing_ok=True)
+            # Same reasoning as upload: don't let a bare httpx exception
+            # escape _handle_errors as a raw traceback.
+            raise ApiError(0, f"Download failed: {exc}") from exc
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        tmp_path.replace(dest_path)
 

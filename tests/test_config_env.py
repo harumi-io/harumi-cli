@@ -42,8 +42,8 @@ def test_staging_environment_urls():
 
 
 def test_active_platform_url_follows_active_environment():
-    # Regression: user-facing output (e.g. `harumi import`) must link to the
-    # Harumi platform, never the underlying Gitea git_url.
+    # Regression: user-facing output (e.g. `harumi new`/`harumi push`) must link
+    # to the Harumi platform, never the underlying Gitea git_url.
     Config.load(environment="production")
     assert config.active_platform_url() == "https://platform.harumi.io"
 

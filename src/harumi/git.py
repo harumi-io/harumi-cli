@@ -1,11 +1,12 @@
 """Git helpers for harumi-dev-cli.
 
 All operations shell out to the system `git` binary via subprocess — no
-extra Python dependency.  The functions here assume the caller is inside a
+extra Python dependency.  Most functions here assume the caller is inside a
 git working tree that is already bound to a Harumi project (i.e. `harumi
-init` has been run).  Any function that requires a bound repo raises
-`NotAHarumiRepoError` with a clear "run harumi init" message when the
-precondition is not met.
+link` — or `harumi new`/`harumi clone`, which bind as part of creating the
+checkout — has been run).  Any function that requires a bound repo raises
+`NotAHarumiRepoError` with a clear next-step message when the precondition
+is not met.
 
 The scratch-branch flow (used by `harumi run` on an un-pushed/dirty tree):
 
@@ -34,12 +35,15 @@ from harumi.errors import HarumiError
 
 
 class NotAHarumiRepoError(HarumiError):
-    """Raised when a git operation is attempted outside a harumi-init'd repo."""
+    """Raised when a git operation is attempted outside a directory `harumi`
+    has bound to a project."""
 
     def __init__(self) -> None:
         super().__init__(
             "No Harumi project found in this directory (or any parent). "
-            "Run `harumi init --project <PROJECT_ID>` first."
+            "Run `harumi new` to start one, `harumi clone <PROJECT_ID>` to fetch "
+            "an existing one, or `harumi link --project <PROJECT_ID>` if this "
+            "directory already has the project's code."
         )
 
 
@@ -62,8 +66,19 @@ def _run(
     cwd: Optional[Path] = None,
     env: Optional[dict[str, str]] = None,
     check: bool = True,
+    redact: Optional[str] = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a git sub-command, returning the CompletedProcess on success."""
+    """Run a git sub-command, returning the CompletedProcess on success.
+
+    `redact`, when given, is scrubbed from the command/stderr embedded in a
+    raised `GitError` — a token-bearing authenticated URL in `args` must
+    never end up verbatim in a message that gets printed to the terminal or
+    logged. Callers pass the raw token, but `args` may actually embed its
+    percent-encoded form (see `_authenticated_url`), so both forms are
+    scrubbed — otherwise a token with URL-reserved characters (`+`, `/`,
+    `=`, ...) would survive redaction in its (trivially reversible)
+    encoded form.
+    """
     full_args = ["git"] + args
     merged_env = {**os.environ, **(env or {})}
     try:
@@ -76,9 +91,16 @@ def _run(
             check=check,
         )
     except subprocess.CalledProcessError as exc:
-        raise GitError(" ".join(args), exc.stderr) from exc
+        command = " ".join(args)
+        stderr = exc.stderr
+        if redact:
+            for needle in {redact, quote(redact, safe="")}:
+                command = command.replace(needle, "***")
+                stderr = stderr.replace(needle, "***")
+        raise GitError(command, stderr) from exc
     except FileNotFoundError:
         raise HarumiError(
+
             "git not found. Install git and make sure it is on your PATH."
         )
 
@@ -184,9 +206,9 @@ def ensure_remote(
 
     result = _run(["remote", "get-url", name], cwd=cwd, check=False)
     if result.returncode == 0:
-        _run(["remote", "set-url", name, authed_url], cwd=cwd)
+        _run(["remote", "set-url", name, authed_url], cwd=cwd, redact=token)
     else:
-        _run(["remote", "add", name, authed_url], cwd=cwd)
+        _run(["remote", "add", name, authed_url], cwd=cwd, redact=token)
 
 
 def refresh_remote_token(
@@ -198,6 +220,33 @@ def refresh_remote_token(
 ) -> None:
     """Re-embed a fresh token into an existing remote URL (e.g. after token rotation)."""
     ensure_remote(clone_url, username, token, name=name, cwd=cwd)
+
+
+# ---------------------------------------------------------------------------
+# Clone: fetch an existing project's repo into a fresh local directory
+# ---------------------------------------------------------------------------
+
+def clone_repo(
+    clone_url: str,
+    username: str,
+    token: str,
+    dest: Path,
+    remote: str = "harumi",
+) -> None:
+    """Clone `clone_url` into `dest` (must not already exist), authenticated
+    with `username`/`token`, and name the resulting remote `harumi`.
+
+    Used by `harumi clone`/`harumi new` to fetch a project's existing repo
+    (which always has at least a scaffold commit — see `harumi-api`'s
+    `_seed_scaffold`) rather than trying to push into it, which would fail as
+    a non-fast-forward push against history the caller doesn't have.
+    """
+    authed_url = _authenticated_url(clone_url, username, token)
+    _run(
+        ["clone", "--origin", remote, authed_url, str(dest)],
+        redact=token,
+    )
+
 
 
 # ---------------------------------------------------------------------------
@@ -304,8 +353,8 @@ def push_folder(
 ) -> str:
     """Commit everything in ``folder`` and push it to ``remote/branch``.
 
-    Used by ``harumi import`` to seed a freshly-provisioned project repo from a
-    downloaded/exported folder. Initializes a git repo in-place if the folder is
+    Used by ``harumi push`` to seed a freshly-provisioned project repo from a
+    local folder. Initializes a git repo in-place if the folder is
     not already one, force-updates the target branch to a single commit of the
     current tree, and pushes. Returns the commit SHA.
 
@@ -332,5 +381,5 @@ def push_folder(
         cwd=folder,
     )
     sha = head_sha(cwd=folder)
-    _run(["push", "--force", remote, f"HEAD:refs/heads/{branch}"], cwd=folder)
+    _run(["push", "--force", remote, f"HEAD:refs/heads/{branch}"], cwd=folder, redact=token)
     return sha

@@ -17,8 +17,10 @@ Three separate things live in this module, on purpose:
   real person, needs a customer's database, needs a one-time code from a real
   mailbox — is recorded *with the reason*. That turns "untested" from an
   oversight into a documented decision.
-* ``PLAN`` is the ordered list of steps actually executed, against a single
-  disposable "canary" project that the harness creates and then deletes.
+* ``PLAN`` is the ordered list of steps actually executed, against a
+  disposable "canary" project (plus two more self-contained ones for the
+  `new`/`push`/`clone` onboarding verbs) that the harness creates and then
+  deletes.
 * ``ledger()`` diffs the two, so every run says which of the 70 commands it
   actually covered and which it did not.
 
@@ -79,6 +81,7 @@ TIERS: dict[str, tuple[str, str]] = {
     "login": (MANUAL, "needs a one-time code from a real mailbox; there is no --code flag"),
     "logout": (LOCAL, "clears the throwaway credentials, so it runs last"),
     "whoami": (READ, "cannot be faked by a same-named binary, so it proves the session"),
+    "usage": (READ, "read-only credit-allowance lookup, safe against any environment"),
     "profile show": (READ, ""),
     "profile set": (MANUAL, "would mutate the real signed-in user's name/bio"),
     "env list": (LOCAL, ""),
@@ -103,9 +106,16 @@ TIERS: dict[str, tuple[str, str]] = {
     "projects get": (READ, ""),
     "projects create": (CANARY, "creates the canary project the rest of the plan uses"),
     "projects rename": (CANARY, ""),
-    "projects delete": (CANARY, "teardown; only ever the canary id"),
-    "init": (CANARY, "binds a throwaway directory to the canary"),
-    "import": (CANARY, "creates a project from a throwaway folder, so it is self-contained like `projects create`"),
+    "projects delete": (CANARY, "teardown; only ever a project this run created"),
+    "link": (CANARY, "binds a throwaway directory to the canary"),
+    "new": (CANARY, "creates + clones its own project, self-contained like `push`"),
+    "push": (CANARY, "creates a project from a throwaway folder, so it is self-contained like `projects create`"),
+    "clone": (CANARY, "clones the canary's repo into a second throwaway directory"),
+    "start": (
+        MANUAL,
+        "interactive menu (reads a raw prompt response); the three journeys it "
+        "dispatches to (`new`/`push`/`clone`) are already exercised directly",
+    ),
     # -- repo -----------------------------------------------------------------
     "repo ls": (READ, ""),
     "repo dir": (READ, ""),
@@ -205,6 +215,7 @@ PLAN: tuple[Step, ...] = (
     Step("env current"),
     Step("env list", ("--all",)),
     Step("whoami"),
+    Step("usage"),
     Step("specs"),
     Step("blueprints"),
     Step("profile show"),
@@ -217,13 +228,14 @@ PLAN: tuple[Step, ...] = (
     Step("skill path"),
     Step("skill install", ("--dry-run",)),
     # -- create the canary ----------------------------------------------------
-    # --bind writes .harumi/config.json in the temp cwd, which is both how we
-    # recover the project id without scraping output and what lets the
-    # binding-dependent commands (`run`, `outputs`) work with no --project.
+    # `projects create` is the pure primitive: it makes the project but binds
+    # nothing locally, unlike `new`/`push`/`clone`. `link` (formerly `init`)
+    # does the binding+remote-config step afterward, using the same seeded
+    # git repo the harness already set up in `workdir`.
     Step("projects create", ("{canary}",), capture="project"),
     Step("projects get", ("{project}",)),
     Step("projects rename", ("{project}", "{canary}-renamed")),
-    Step("init", ("--project", "{project}")),
+    Step("link", ("--project", "{project}")),
     # -- repo: write, read, move, branch, promote -----------------------------
     Step("repo branches", ("--project", "{project}")),
     Step("repo ls", ("--project", "{project}")),
@@ -250,11 +262,17 @@ PLAN: tuple[Step, ...] = (
     Step("files ls", ("--project", "{project}")),
     Step("files get", ("livecheck.py", "--output", "{tmp}/livecheck-downloaded.py", "--project", "{project}")),
     Step("files rm", ("livecheck.py", "--yes", "--project", "{project}")),
-    # -- import: turns a plain folder into its own second project ------------
-    # Independent of the canary project above — `import` never takes
+    # -- push: turns a plain folder into its own second project --------------
+    # Independent of the canary project above — `push` never takes
     # --project, it always creates a new one — so it gets its own capture
     # key and its own teardown delete instead of reusing {project}.
-    Step("import", ("{import_folder}", "--project-name", "{canary}-import"), capture="import_project"),
+    Step("push", ("{push_folder}", "--project-name", "{canary}-push"), capture="push_project"),
+    # -- new / clone: the other two onboarding journeys ------------------------
+    # Also independent of the canary — `new` creates+clones its own project
+    # into its own throwaway directory, and `clone` re-fetches that same
+    # project's repo into a second directory to prove the fetch-only path.
+    Step("new", ("{canary}-new", "--dir", "{tmp}/new-project"), capture="new_project"),
+    Step("clone", ("{new_project}", "--dir", "{tmp}/cloned-project")),
     # -- secrets --------------------------------------------------------------
     Step("secrets set", ("LIVECHECK_TOKEN", "--project", "{project}"), stdin="livecheck-value\n"),
     Step("secrets list", ("--project", "{project}")),
@@ -295,7 +313,8 @@ PLAN: tuple[Step, ...] = (
     # -- teardown -------------------------------------------------------------
     Step("config set-org", ("{org}",)),
     Step("env use", ("{env}",)),
-    Step("projects delete", ("{import_project}", "--yes"), teardown=True),
+    Step("projects delete", ("{push_project}", "--yes"), teardown=True),
+    Step("projects delete", ("{new_project}", "--yes"), teardown=True),
     Step("projects delete", ("{project}", "--yes"), teardown=True),
     Step("logout", teardown=True),
 )
@@ -421,7 +440,7 @@ def _split_opts(param: dict) -> set[str]:
 
 
 # Placeholders filled from the environment rather than captured from output.
-_RUNTIME_PLACEHOLDERS = frozenset({"canary", "seed", "spec", "import_folder", "tmp", "org", "env"})
+_RUNTIME_PLACEHOLDERS = frozenset({"canary", "seed", "spec", "push_folder", "tmp", "org", "env"})
 
 
 def ledger(exercised: Optional[set[str]] = None) -> dict[str, list[str]]:
@@ -538,20 +557,9 @@ class Runner:
     def _capture(self, step: Step, stdout: str) -> str:
         """Pull an id out of a successful command's output.
 
-        `projects create` binds the directory, so prefer reading the id back out
-        of .harumi/config.json — that is a contract, whereas the printed line is
-        cosmetic. Everything else falls back to the first UUID printed, which is
-        unambiguous because the canary starts empty.
+        The first UUID printed is unambiguous because every command here
+        creates something new in a project that started empty.
         """
-        if step.capture == "project":
-            binding = self.workdir / ".harumi" / "config.json"
-            if binding.exists():
-                try:
-                    project_id = json.loads(binding.read_text()).get("project_id", "")
-                except (json.JSONDecodeError, OSError):
-                    project_id = ""
-                if project_id:
-                    return str(project_id)
         if step.capture_re:
             match = re.search(step.capture_re, stdout)
             return match.group(1) if match else ""
@@ -564,7 +572,7 @@ class Runner:
                 "canary": _canary_name(),
                 "seed": str(self._seed_file()),
                 "spec": str(self._seed_dashboard()),
-                "import_folder": str(self._seed_import_folder()),
+                "push_folder": str(self._seed_push_folder()),
                 "tmp": str(self.tmpdir),
                 "org": self.org,
                 "env": self.env_name,
@@ -602,22 +610,22 @@ class Runner:
         path.write_text('print("harumi live check ok")\n')
         return path
 
-    def _seed_import_folder(self) -> Path:
-        """A plain folder for `harumi import` to turn into a new project.
+    def _seed_push_folder(self) -> Path:
+        """A plain folder for `harumi push` to turn into a new project.
 
-        `import` accepts any directory — there is no export manifest or
+        `push` accepts any directory — there is no export manifest or
         schema to satisfy — and `push_folder()` (git.py) `git init`s its own
         throwaway repo in-place, so this just needs something in it.
         """
-        folder = self.tmpdir / "import-seed"
+        folder = self.tmpdir / "push-seed"
         folder.mkdir(exist_ok=True)
-        (folder / "main.py").write_text('print("harumi live check import ok")\n')
+        (folder / "main.py").write_text('print("harumi live check push ok")\n')
         return folder
 
     def _seed_git_repo(self) -> None:
-        """`harumi init` and `harumi run` both assume the bound directory came
+        """`harumi link` and `harumi run` both assume the bound directory came
         from `git clone`/`git init` — a real project checkout, never an empty
-        folder. Without this, `init` silently skips remote setup ("Not inside
+        folder. Without this, `link` silently skips remote setup ("Not inside
         a git repo") and `run`'s dirty/unpushed check (plain `git status` /
         `git rev-list`) fails outright with "not a git repository". Seed one
         commit so the canary's workdir has the same shape a real checkout
