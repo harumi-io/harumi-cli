@@ -1131,6 +1131,24 @@ def test_client_upload_file_to_presigned_url_raises_on_error_status(tmp_path):
         client.upload_file_to_presigned_url(upload_url, local, "text/csv")
 
 
+def test_client_upload_file_to_presigned_url_wraps_a_dropped_connection(tmp_path):
+    """Same reasoning as the download side: a bare httpx exception must not
+    escape past `_handle_errors` as a raw traceback."""
+    _write_credentials()
+    local = tmp_path / "data.csv"
+    local.write_text("x")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    from harumi.models import FileUploadUrl
+
+    upload_url = FileUploadUrl(url="https://uploads.test/proj-1/data.csv", key="proj-1/data.csv", expires_in=900)
+    with pytest.raises(ApiError):
+        client.upload_file_to_presigned_url(upload_url, local, "text/csv")
+
+
 def test_client_download_file_from_presigned_url_carries_no_auth_header(tmp_path):
     _write_credentials()
 
@@ -1147,6 +1165,28 @@ def test_client_download_file_from_presigned_url_carries_no_auth_header(tmp_path
     client.download_file_from_presigned_url(download_url, dest)
 
     assert dest.read_bytes() == b"a,b\n1,2\n"
+
+
+def test_client_download_file_from_presigned_url_leaves_no_partial_file_on_a_dropped_connection(tmp_path):
+    """A network failure mid-transfer must not leave a truncated, silently
+    corrupt file at dest_path, and must raise ApiError (which
+    `_handle_errors` has a clause for) rather than a bare httpx exception."""
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadError("connection reset")
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    from harumi.models import FileDownloadUrl
+
+    dest = tmp_path / "data.csv"
+    download_url = FileDownloadUrl(url="https://uploads.test.s3.amazonaws.com/proj-1/data.csv", expires_in=900)
+
+    with pytest.raises(ApiError):
+        client.download_file_from_presigned_url(download_url, dest)
+
+    assert not dest.exists()
+    assert not dest.with_name(dest.name + ".part").exists()
 
 
 def test_client_delete_project_file():
