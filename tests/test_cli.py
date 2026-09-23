@@ -575,6 +575,25 @@ def test_new_creates_project_clones_and_binds(api, git_ops, tmp_path, monkeypatc
     assert git_ops["ensure_remote"][0]["cwd"] == dest
 
 
+def test_new_reports_a_clear_error_when_dir_is_an_existing_file(api, git_ops, tmp_path):
+    """`--dir` pointing at a regular file makes `dest.iterdir()` raise
+    NotADirectoryError — must give the same clear message as a non-empty
+    directory, not a raw OSError."""
+    from harumi.config import save_git_token
+
+    save_git_token("gitea-token", username="dev@harumi.test")
+    dest_file = tmp_path / "notes.txt"
+    dest_file.write_text("existing content")
+    api.route("POST", "/api/projects", {"id": "proj-new", "name": "Widget", "notebook_ids": []})
+    _route_project_repo(api, "proj-new", "widget")
+
+    result = runner.invoke(cli.app, ["new", "Widget", "--dir", str(dest_file)])
+
+    assert result.exit_code != 0
+    assert "already exists and isn't empty" in result.output
+    assert git_ops["clone"] == []
+
+
 def test_push_writes_a_minimal_manifest_when_the_folder_has_none(api, git_ops, tmp_path):
     from harumi.config import save_git_token
 
@@ -623,6 +642,24 @@ def test_clone_fetches_an_existing_project_and_binds(api, git_ops, tmp_path, mon
     dest = tmp_path / "solver"
     assert (dest / ".harumi" / "config.json").exists()
     assert git_ops["clone"][0]["clone_url"] == "https://git.harumi.test/acme/solver.git"
+
+
+def test_clone_reports_a_clear_error_when_dir_is_an_existing_file(api, git_ops, tmp_path):
+    """Same fix as `new --dir`: a file at `--dir` must give the "already
+    exists and isn't empty" message, not a raw NotADirectoryError."""
+    from harumi.config import save_git_token
+
+    save_git_token("gitea-token", username="dev@harumi.test")
+    dest_file = tmp_path / "notes.txt"
+    dest_file.write_text("existing content")
+    api.route("GET", "/api/projects/proj-1", {"id": "proj-1", "name": "Solver", "notebook_ids": []})
+    _route_project_repo(api, "proj-1", "solver")
+
+    result = runner.invoke(cli.app, ["clone", "proj-1", "--dir", str(dest_file)])
+
+    assert result.exit_code != 0
+    assert "already exists and isn't empty" in result.output
+    assert git_ops["clone"] == []
 
 
 def test_link_binds_an_already_checked_out_directory(api, git_ops, tmp_path, monkeypatch):

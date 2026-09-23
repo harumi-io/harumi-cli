@@ -1231,7 +1231,7 @@ def _new_impl(
         return
 
     dest = (dir or Path.cwd() / _slugify(project.name)).resolve()
-    if dest.exists() and any(dest.iterdir()):
+    if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
         _fail(f"{dest} already exists and isn't empty. Pass --dir to clone somewhere else.")
 
     _clone_and_bind(project.id, project.repo, dest)
@@ -1319,7 +1319,7 @@ def _clone_impl(
 
     proj = client.get_project(project)
     dest = (dir or Path.cwd() / _slugify(proj.name)).resolve()
-    if dest.exists() and any(dest.iterdir()):
+    if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
         _fail(f"{dest} already exists and isn't empty. Pass --dir to clone somewhere else.")
 
     _clone_and_bind(project, repo, dest)
