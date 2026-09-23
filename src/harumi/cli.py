@@ -2183,23 +2183,33 @@ def files_put(
 
     existing = client.list_project_files(project_id)
     file_size = local_path.stat().st_size
-    # Uploading to a path that already exists overwrites that object, so the file
-    # it displaces must not be counted — otherwise replacing a file in a project
-    # sitting at the cap is refused even though the totals wouldn't move.
-    violation = check_project_sync_cap(
-        [f.size for f in existing.files if f.name != dest_path], [file_size]
-    )
-    if violation:
-        if violation.reason == "file-count":
-            _fail(
-                f"That upload would bring this project to {violation.would_be} files, "
-                f"over the {violation.limit}-file limit every run enforces. Remove some files first."
-            )
-        else:
-            _fail(
-                f"That upload would bring this project to {_format_bytes(violation.would_be)}, "
-                f"over the {_format_bytes(violation.limit)} limit every run enforces. Remove some files first."
-            )
+    if existing.is_truncated:
+        # A false "OK" here is worse than no local check at all — the
+        # server-side cap still applies on upload, so skip a check that
+        # would silently under-count against a listing we know is partial.
+        console.print(
+            "[yellow]Warning: couldn't verify this project's total file count/size "
+            "(the listing was truncated); the upload may still be rejected by the "
+            "server-side cap.[/yellow]"
+        )
+    else:
+        # Uploading to a path that already exists overwrites that object, so the file
+        # it displaces must not be counted — otherwise replacing a file in a project
+        # sitting at the cap is refused even though the totals wouldn't move.
+        violation = check_project_sync_cap(
+            [f.size for f in existing.files if f.name != dest_path], [file_size]
+        )
+        if violation:
+            if violation.reason == "file-count":
+                _fail(
+                    f"That upload would bring this project to {violation.would_be} files, "
+                    f"over the {violation.limit}-file limit every run enforces. Remove some files first."
+                )
+            else:
+                _fail(
+                    f"That upload would bring this project to {_format_bytes(violation.would_be)}, "
+                    f"over the {_format_bytes(violation.limit)} limit every run enforces. Remove some files first."
+                )
 
     content_type = mimetypes.guess_type(str(local_path))[0] or "application/octet-stream"
     upload_url = client.create_file_upload_url(project_id, dest_path, content_type)

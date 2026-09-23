@@ -1098,6 +1098,28 @@ def test_files_put_does_not_count_the_file_it_replaces_against_the_cap(api, tmp_
     assert "Uploaded" in result.output
 
 
+def test_files_put_skips_the_cap_check_with_a_warning_when_the_listing_is_truncated(api, tmp_path, monkeypatch):
+    """A truncated listing under-counts existing files/bytes, so a local
+    'OK' would be a false negative worse than no check at all — skip the
+    check and say so, rather than silently approving an upload the server
+    may still reject."""
+    local = tmp_path / "one-more.csv"
+    local.write_text("x")
+    api.route("GET", "/api/projects/proj-1/files", {"files": [], "is_truncated": True})
+    api.route(
+        "POST",
+        "/api/projects/proj-1/files/upload-url",
+        {"url": "https://s3.test/proj-1/one-more.csv", "key": "proj-1/one-more.csv", "expires_in": 900},
+    )
+    monkeypatch.setattr(Client, "upload_file_to_presigned_url", lambda *a, **k: None)
+
+    result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "truncated" in result.output
+    assert "Uploaded" in result.output
+
+
 def test_files_get_downloads_to_the_remote_files_basename_by_default(api, tmp_path, monkeypatch):
     api.route("GET", "/api/projects/proj-1/files/download-url", {"url": "https://s3.test/proj-1/data.csv", "expires_in": 900})
 
