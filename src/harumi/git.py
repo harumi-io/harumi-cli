@@ -381,5 +381,5 @@ def push_folder(
         cwd=folder,
     )
     sha = head_sha(cwd=folder)
-    _run(["push", "--force", remote, f"HEAD:refs/heads/{branch}"], cwd=folder)
+    _run(["push", "--force", remote, f"HEAD:refs/heads/{branch}"], cwd=folder, redact=token)
     return sha

@@ -13,7 +13,7 @@ import subprocess
 
 import pytest
 
-from harumi.git import GitError, _authenticated_url, _run
+from harumi.git import GitError, _authenticated_url, _run, push_folder
 from urllib.parse import quote
 
 
@@ -85,3 +85,33 @@ def test_run_redacts_a_token_containing_url_reserved_chars(monkeypatch, tmp_path
     assert token not in message
     assert quote(token, safe="") not in message
     assert "***" in message
+
+
+def test_push_folder_redacts_the_token_on_a_failed_push(monkeypatch, tmp_path):
+    """`push_folder`'s final `git push` is the one call site `ensure_remote`
+    already redacts for (via the `harumi` remote URL written to
+    `.git/config`) but that this diff's own `push` call originally skipped —
+    a failed HTTPS push commonly echoes the remote URL, credentials and
+    all, in git's stderr."""
+    token = "ab+cd/ef=12"
+    clone_url = "https://git.dev.harumi.io/o/repo.git"
+    authed_url = _authenticated_url(clone_url, username="u-abc123", token=token)
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    (folder / "main.py").write_text("print('hi')\n")
+
+    def fake_run(full_args, **_kwargs):
+        if full_args[1:3] == ["push", "--force"]:
+            raise subprocess.CalledProcessError(
+                128, full_args, output="", stderr=f"fatal: unable to access '{authed_url}'"
+            )
+        return subprocess.CompletedProcess(full_args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(GitError) as exc_info:
+        push_folder(folder, clone_url, "u-abc123", token)
+
+    message = str(exc_info.value)
+    assert token not in message
+    assert quote(token, safe="") not in message

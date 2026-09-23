@@ -575,6 +575,25 @@ def test_new_creates_project_clones_and_binds(api, git_ops, tmp_path, monkeypatc
     assert git_ops["ensure_remote"][0]["cwd"] == dest
 
 
+def test_new_reports_a_clear_error_when_dir_is_an_existing_file(api, git_ops, tmp_path):
+    """`--dir` pointing at a regular file makes `dest.iterdir()` raise
+    NotADirectoryError — must give the same clear message as a non-empty
+    directory, not a raw OSError."""
+    from harumi.config import save_git_token
+
+    save_git_token("gitea-token", username="dev@harumi.test")
+    dest_file = tmp_path / "notes.txt"
+    dest_file.write_text("existing content")
+    api.route("POST", "/api/projects", {"id": "proj-new", "name": "Widget", "notebook_ids": []})
+    _route_project_repo(api, "proj-new", "widget")
+
+    result = runner.invoke(cli.app, ["new", "Widget", "--dir", str(dest_file)])
+
+    assert result.exit_code != 0
+    assert "already exists and isn't empty" in result.output
+    assert git_ops["clone"] == []
+
+
 def test_push_writes_a_minimal_manifest_when_the_folder_has_none(api, git_ops, tmp_path):
     from harumi.config import save_git_token
 
@@ -623,6 +642,24 @@ def test_clone_fetches_an_existing_project_and_binds(api, git_ops, tmp_path, mon
     dest = tmp_path / "solver"
     assert (dest / ".harumi" / "config.json").exists()
     assert git_ops["clone"][0]["clone_url"] == "https://git.harumi.test/acme/solver.git"
+
+
+def test_clone_reports_a_clear_error_when_dir_is_an_existing_file(api, git_ops, tmp_path):
+    """Same fix as `new --dir`: a file at `--dir` must give the "already
+    exists and isn't empty" message, not a raw NotADirectoryError."""
+    from harumi.config import save_git_token
+
+    save_git_token("gitea-token", username="dev@harumi.test")
+    dest_file = tmp_path / "notes.txt"
+    dest_file.write_text("existing content")
+    api.route("GET", "/api/projects/proj-1", {"id": "proj-1", "name": "Solver", "notebook_ids": []})
+    _route_project_repo(api, "proj-1", "solver")
+
+    result = runner.invoke(cli.app, ["clone", "proj-1", "--dir", str(dest_file)])
+
+    assert result.exit_code != 0
+    assert "already exists and isn't empty" in result.output
+    assert git_ops["clone"] == []
 
 
 def test_link_binds_an_already_checked_out_directory(api, git_ops, tmp_path, monkeypatch):
@@ -1058,6 +1095,28 @@ def test_files_put_does_not_count_the_file_it_replaces_against_the_cap(api, tmp_
     result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
+    assert "Uploaded" in result.output
+
+
+def test_files_put_skips_the_cap_check_with_a_warning_when_the_listing_is_truncated(api, tmp_path, monkeypatch):
+    """A truncated listing under-counts existing files/bytes, so a local
+    'OK' would be a false negative worse than no check at all — skip the
+    check and say so, rather than silently approving an upload the server
+    may still reject."""
+    local = tmp_path / "one-more.csv"
+    local.write_text("x")
+    api.route("GET", "/api/projects/proj-1/files", {"files": [], "is_truncated": True})
+    api.route(
+        "POST",
+        "/api/projects/proj-1/files/upload-url",
+        {"url": "https://s3.test/proj-1/one-more.csv", "key": "proj-1/one-more.csv", "expires_in": 900},
+    )
+    monkeypatch.setattr(Client, "upload_file_to_presigned_url", lambda *a, **k: None)
+
+    result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "truncated" in result.output
     assert "Uploaded" in result.output
 
 
@@ -1632,8 +1691,27 @@ def test_datasources_add_reports_an_unreadable_cert_path(api, tmp_path):
     )
 
     assert result.exit_code == 1
-    assert "proxy_tls_ca_cert" in result.output
+    assert "--proxy-tls-ca-cert" in result.output
     assert "nope.pem" in result.output
+
+
+def test_datasources_add_rejects_proxy_flags_given_without_use_proxy(api):
+    """Without --use-proxy, --proxy-* flags would otherwise be silently
+    dropped — the datasource gets created as a plain, non-proxied
+    connection with no warning that the flags were ignored."""
+    result = runner.invoke(
+        cli.app,
+        [
+            "datasources", "add", "sales_db",
+            "--type", "postgresql",
+            "--proxy-host", "vpnproxy.harumi.io",
+            "--project", "proj-1",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--use-proxy" in result.output
+    assert api.requests == []
 
 
 def test_datasources_add_reports_a_binary_cert_file_without_a_traceback(api, tmp_path):
