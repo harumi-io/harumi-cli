@@ -41,13 +41,13 @@ Get the live, in-code reference with `harumi dashboard widgets` (add `--type met
 | `table` | `rows_key`, `columns` | — |
 | `detail` | `items_key`, `id_key` | `fields` |
 | `filter` | `items_key`, `id_key` | `label_key` |
-| `treemap` | `items_key`, `value_key`, `name_key` | `color_key`, `capacity_key` |
+| `treemap` | `items_key`, `value_key`, `name_key` | `color_key`, `colors`, `capacity_key` |
 | `heatmap` | `items_key` | `resource_key`, `bucket_key`, `value_key`, `unit` |
 | `chart` | `variant` (`line`\|`bar`), `data_key`, `x_key`, `series` | — |
 | `line-chart` | `data_key`, `x_key`, `series` | — |
 | `bar-chart` | `data_key`, `x_key`, `series` | — |
-| `gantt-chart` | `tasks_key` | `resource_key`, `label_key`, `start_key`, `end_key`, `duration_key`, `color_key`, `time_unit` |
-| `timeline` | `items_key` | `resource_key`, `label_key`, `start_key`, `end_key`, `duration_key`, `color_key`, `id_key`, `regions_key`, `region_start_key`, `region_end_key`, `region_label_key`, `region_resource_key`, `time_unit` |
+| `gantt-chart` | `tasks_key` | `resource_key`, `label_key`, `start_key`, `end_key`, `duration_key`, `color_key`, `colors`, `time_unit` |
+| `timeline` | `items_key` | `resource_key`, `label_key`, `start_key`, `end_key`, `duration_key`, `color_key`, `colors`, `id_key`, `regions_key`, `region_start_key`, `region_end_key`, `region_label_key`, `region_resource_key`, `time_unit` |
 
 `line-chart`/`bar-chart` and `gantt-chart` are deprecated in favor of `chart` (variant-based) and `timeline` respectively — kept only so a spec written before those existed keeps rendering; write new widgets against `chart`/`timeline` instead.
 
@@ -144,7 +144,7 @@ value_key = "cost"
 name_key = "name"
 ```
 
-Matching `output.json`: `{"categories": [{"name": "Materials", "cost": 41200}]}`. Rectangle area is proportional to `value_key`; `color_key` optionally groups rectangles into a categorical color. `capacity_key` is a dot-path to a total-capacity number — when the rows' summed `value_key` is less than this, a synthetic "Free" tile fills the remainder, so area doubles as a capacity gauge; omitted, or at/below the summed value, adds no tile.
+Matching `output.json`: `{"categories": [{"name": "Materials", "cost": 41200}]}`. Rectangle area is proportional to `value_key`; `color_key` optionally groups rectangles into a categorical color. `colors` pins specific `color_key` values to specific hex colors, e.g. `colors = { "Late job" = "#ef4444", "Unassigned" = "#6b7280" }` — every other value keeps auto-cycling through the default palette (skipping any color pinned here). `capacity_key` is a dot-path to a total-capacity number — when the rows' summed `value_key` is less than this, a synthetic "Free" tile fills the remainder, so area doubles as a capacity gauge; omitted, or at/below the summed value, adds no tile.
 
 ### `heatmap` — entity x time-bucket grid
 
@@ -210,6 +210,7 @@ Semantics worth knowing:
 - `resource_key`/`label_key`/`start_key`/`end_key` default to `resource`/`task`/`start`/`end` and are fields within each task object, not dot-paths.
 - Set either `end_key` or `duration_key` (added to the start). If both are set, `end_key` wins. A task resolving neither is dropped from the chart.
 - `color_key` names a field grouping tasks into a categorical color (e.g. tasks belonging to the same job).
+- `colors` pins specific `color_key` values to specific hex colors, e.g. `colors = { "Late job" = "#ef4444", "Unassigned" = "#6b7280" }` — every other value keeps auto-cycling through the default palette (skipping any color pinned here). Same field on `timeline`.
 - `time_unit` is either a plain display suffix (e.g. `"min"`, the default reading — start/end/duration are bare numbers with that unit) or a wall-clock sentinel: `"epoch"` (seconds since epoch), `"epoch_ms"` (milliseconds), or `"iso"` (an ISO 8601 string) — any of the three render as a real date/time instead of a bare number, and scale a `[clock]` transport bar's playback speed accordingly.
 
 `timeline` is the same shape plus more: fragmented tasks fold into one item with gaps (`id_key`), non-working spans render as background bands (`regions_key` + `region_*`), and a `[clock]` section (see below) drives a now-marker over it.
