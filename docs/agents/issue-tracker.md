@@ -2,6 +2,11 @@
 
 Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
+**Confirm before acting.** The operations below are visible and hard to reverse: commenting,
+labeling, closing, or editing an issue or PR. Only run them when a human has explicitly asked
+for issue-tracker work in this session (e.g. invoked `/wayfinder`, `/triage`, or asked directly
+to file/close/label something) — never as a side effect of unrelated work in this repo.
+
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
