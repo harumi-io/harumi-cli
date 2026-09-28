@@ -36,7 +36,7 @@ _EXPECTED_WIDGET_CONTRACT = {
     "table": ["rows_key!*", "columns!"],
     "detail": ["items_key!*", "id_key!", "fields"],
     "filter": ["items_key!*", "id_key!", "label_key"],
-    "treemap": ["items_key!*", "value_key!", "name_key!", "color_key", "capacity_key*"],
+    "treemap": ["items_key!*", "value_key!", "name_key!", "color_key", "colors", "capacity_key*"],
     "heatmap": [
         "items_key!*",
         "resource_key",
@@ -55,6 +55,7 @@ _EXPECTED_WIDGET_CONTRACT = {
         "end_key",
         "duration_key",
         "color_key",
+        "colors",
         "time_unit",
     ],
     "timeline": [
@@ -65,6 +66,7 @@ _EXPECTED_WIDGET_CONTRACT = {
         "end_key",
         "duration_key",
         "color_key",
+        "colors",
         "id_key",
         "regions_key*",
         "region_start_key",
@@ -359,6 +361,44 @@ class TestParseWidgetEntry:
         assert issue is None
         assert widget is not None
         assert widget["columns"] == [{"key": "name", "label": "name"}]
+
+    def test_treemap_colors_table_pins_specific_group_hex_colors(self):
+        widget, issue = parse_widget_entry(
+            {
+                "type": "treemap",
+                "id": "t",
+                "title": "T",
+                "items_key": "rows",
+                "value_key": "cost",
+                "name_key": "name",
+                "colors": {"Late job": "#ef4444", "Unassigned": "#6b7280"},
+            }
+        )
+        assert issue is None
+        assert widget is not None
+        assert widget["colors"] == {"Late job": "#ef4444", "Unassigned": "#6b7280"}
+
+    def test_colors_table_drops_a_non_hex_entry_but_keeps_the_valid_ones(self):
+        widget, issue = parse_widget_entry(
+            {
+                "type": "gantt-chart",
+                "id": "g",
+                "title": "G",
+                "tasks_key": "schedule",
+                "colors": {"Good": "#ef4444", "Bad": "not-a-color"},
+            }
+        )
+        assert issue is None
+        assert widget is not None
+        assert widget["colors"] == {"Good": "#ef4444"}
+
+    def test_colors_field_is_absent_when_every_entry_is_invalid(self):
+        widget, issue = parse_widget_entry(
+            {"type": "timeline", "id": "s", "title": "S", "items_key": "schedule", "colors": {"Bad": "not-a-color"}}
+        )
+        assert issue is None
+        assert widget is not None
+        assert "colors" not in widget
 
     def test_kpi_rail_drops_invalid_items_but_keeps_valid_ones(self):
         entry = {

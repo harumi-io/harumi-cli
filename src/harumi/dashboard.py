@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
@@ -84,7 +85,7 @@ class DashboardSchemaError(RuntimeError):
 # set would fall through to "no value is ever valid", quietly making a required
 # field impossible to satisfy and an optional one impossible to use — so a typo
 # in the artifact is rejected at load rather than silently weakening validation.
-_KNOWN_FIELD_KINDS = frozenset({"string", "number", "enum", "columns", "series", "kpiItems"})
+_KNOWN_FIELD_KINDS = frozenset({"string", "number", "enum", "columns", "series", "kpiItems", "colorMap"})
 
 
 @lru_cache(maxsize=1)
@@ -196,6 +197,21 @@ def _coerce_series(value: Any) -> Optional[List[Dict[str, str]]]:
 _KPI_ITEM_FORMATS = ("number", "currency", "percent")
 _KPI_ITEM_TONES = ("good", "warn", "bad", "neutral")
 
+# Matches harumi-platform's `isValidHexColor` in colors.ts — a syntactically
+# valid CSS hex color (`#rgb`, `#rgba`, `#rrggbb`, or `#rrggbbaa`).
+_HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+
+
+def _coerce_color_map(value: Any) -> Optional[Dict[str, str]]:
+    """Mirrors `coerceColorMap` in schema.ts: a `colors` table (e.g.
+    `colors = { "Late job" = "#ef4444" }`) keeping only entries whose value is
+    a syntactically valid hex color. Drops the whole field (returns `None`)
+    when nothing survives, same as every other list/table field here."""
+    if not isinstance(value, dict):
+        return None
+    color_map = {key: hex_value for key, hex_value in value.items() if isinstance(hex_value, str) and _HEX_COLOR_RE.match(hex_value)}
+    return color_map or None
+
 
 def _coerce_kpi_items(value: Any) -> Optional[List[Dict[str, Any]]]:
     """Mirrors `coerceKpiItems` in schema.ts: each entry is a `metric`-shaped
@@ -253,6 +269,8 @@ def _coerce_field(value: Any, field: WidgetField) -> Any:
         return _coerce_kpi_items(value)
     if field.kind == "series":
         return _coerce_series(value)
+    if field.kind == "colorMap":
+        return _coerce_color_map(value)
     return None
 
 

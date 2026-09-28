@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 10,
   "discovery": {
     "dashboardDir": "dashboard",
     "rootPath": "dashboard.toml"
@@ -243,6 +243,14 @@
           "doc": "Row field grouped into a stable color per distinct value. Omit for one palette color per rectangle in source order."
         },
         {
+          "tomlKey": "colors",
+          "as": "colorMap",
+          "type": "colorMap",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Pins specific `color_key` values to specific hex colors, e.g. `colors = { \"Late job\" = \"#ef4444\", \"Unassigned\" = \"#6b7280\" }`. Every other value still cycles through the default palette (skipping any color pinned here). House style for a corporate dashboard: leave this unset unless a group's color needs to carry real meaning — reserve red/orange/amber for something genuinely wrong or at-risk, and pin a boring bucket like \"Other\"/\"Unassigned\" to a gray (`#f9fafb` through `#030712`) rather than letting it land a bright hue by cycling position. Don't pin every group just to add color for its own sake."
+        },
+        {
           "tomlKey": "capacity_key",
           "as": "capacityKey",
           "type": "string",
@@ -361,7 +369,7 @@
           "type": "series",
           "required": true,
           "isOutputPath": false,
-          "doc": "One or more `{ key, label?, color? }` entries — each renders as its own line/bar."
+          "doc": "One or more `{ key, label?, color? }` entries — each renders as its own line/bar. `color` is any hex string and defaults to the shared palette (see `colors.ts`) cycled in declaration order when unset. House style for a corporate dashboard: leave `color` unset for an ordinary series and let it draw from the default palette, rather than hand-picking a color for every series. Reserve red/orange/amber for a series that actually means error/warning/danger (e.g. \"Late\"), and prefer a gray (`#f9fafb` through `#030712`) for something intentionally low-emphasis."
         }
       ],
       "dataExample": {
@@ -404,7 +412,7 @@
           "type": "series",
           "required": true,
           "isOutputPath": false,
-          "doc": "One or more `{ key, label?, color? }` entries — each renders as its own line/bar."
+          "doc": "One or more `{ key, label?, color? }` entries — each renders as its own line/bar. `color` is any hex string and defaults to the shared palette (see `colors.ts`) cycled in declaration order when unset. House style for a corporate dashboard: leave `color` unset for an ordinary series and let it draw from the default palette, rather than hand-picking a color for every series. Reserve red/orange/amber for a series that actually means error/warning/danger (e.g. \"Late\"), and prefer a gray (`#f9fafb` through `#030712`) for something intentionally low-emphasis."
         }
       ],
       "dataExample": {
@@ -459,7 +467,7 @@
           "type": "series",
           "required": true,
           "isOutputPath": false,
-          "doc": "One or more `{ key, label?, color? }` entries — each renders as its own line/bar."
+          "doc": "One or more `{ key, label?, color? }` entries — each renders as its own line/bar. `color` is any hex string and defaults to the shared palette (see `colors.ts`) cycled in declaration order when unset. House style for a corporate dashboard: leave `color` unset for an ordinary series and let it draw from the default palette, rather than hand-picking a color for every series. Reserve red/orange/amber for a series that actually means error/warning/danger (e.g. \"Late\"), and prefer a gray (`#f9fafb` through `#030712`) for something intentionally low-emphasis."
         }
       ],
       "dataExample": {
@@ -535,6 +543,14 @@
           "required": false,
           "isOutputPath": false,
           "doc": "Task field naming a categorical group (e.g. a job spanning several tasks), colored from a stable palette."
+        },
+        {
+          "tomlKey": "colors",
+          "as": "colorMap",
+          "type": "colorMap",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Pins specific `color_key` values to specific hex colors, e.g. `colors = { \"Late job\" = \"#ef4444\", \"Unassigned\" = \"#6b7280\" }`. Every other value still cycles through the default palette (skipping any color pinned here). House style for a corporate dashboard: leave this unset unless a group's color needs to carry real meaning — reserve red/orange/amber for something genuinely wrong or at-risk (e.g. a late job), and pin a boring bucket like \"Idle\"/\"Unassigned\" to a gray (`#f9fafb` through `#030712`) rather than letting it land a bright hue by cycling position. Don't pin every group just to add color for its own sake."
         },
         {
           "tomlKey": "time_unit",
@@ -629,6 +645,14 @@
           "required": false,
           "isOutputPath": false,
           "doc": "Item field naming a categorical group, colored from a stable palette."
+        },
+        {
+          "tomlKey": "colors",
+          "as": "colorMap",
+          "type": "colorMap",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Pins specific `color_key` values to specific hex colors, e.g. `colors = { \"Late job\" = \"#ef4444\", \"Unassigned\" = \"#6b7280\" }`. Every other value still cycles through the default palette (skipping any color pinned here). House style for a corporate dashboard: leave this unset unless a group's color needs to carry real meaning — reserve red/orange/amber for something genuinely wrong or at-risk, and pin a boring bucket like \"Idle\"/\"Unassigned\" to a gray (`#f9fafb` through `#030712`) rather than letting it land a bright hue by cycling position. Don't pin every group just to add color for its own sake."
         },
         {
           "tomlKey": "id_key",
