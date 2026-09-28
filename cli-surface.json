@@ -4402,20 +4402,6 @@
         },
         {
           "opts": [
-            "--io-control"
-          ],
-          "secondary_opts": [
-            "--no-io-control"
-          ],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": false,
-          "help": "Let visitors control/edit this project's inputs and outputs."
-        },
-        {
-          "opts": [
             "--project",
             "-p"
           ],
@@ -4894,20 +4880,6 @@
           "multiple": false,
           "default": null,
           "help": "Let signed-in visitors run now, override the kernel, and manage schedules."
-        },
-        {
-          "opts": [
-            "--io-control"
-          ],
-          "secondary_opts": [
-            "--no-io-control"
-          ],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Let visitors control/edit this project's inputs and outputs."
         },
         {
           "opts": [

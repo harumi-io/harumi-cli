@@ -1327,7 +1327,6 @@ SHARE_LINK = {
     "chat_enabled": False,
     "run_history_enabled": False,
     "run_control_enabled": False,
-    "io_control_enabled": False,
     "password_set": False,
     "created_at": "2026-01-01T00:00:00Z",
     "updated_at": "2026-01-01T00:00:00Z",
@@ -1384,7 +1383,6 @@ def test_share_add_defaults_every_flag_to_false(api):
         "chat_enabled": False,
         "run_history_enabled": False,
         "run_control_enabled": False,
-        "io_control_enabled": False,
     }
 
 
@@ -1411,7 +1409,6 @@ def test_share_add_forwards_label_and_permission_flags(api):
     assert body["chat_enabled"] is True
     assert body["run_history_enabled"] is True
     assert body["run_control_enabled"] is True
-    assert body["io_control_enabled"] is False
 
 
 def test_share_update_only_sends_provided_fields(api):
