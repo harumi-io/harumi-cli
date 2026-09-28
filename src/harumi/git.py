@@ -238,8 +238,9 @@ def clone_repo(
 
     Used by `harumi clone`/`harumi new` to fetch a project's existing repo
     (which always has at least a scaffold commit — see `harumi-api`'s
-    `_seed_scaffold`) rather than trying to push into it, which would fail as
-    a non-fast-forward push against history the caller doesn't have.
+    `provision_from_blueprint`/`_seed_repo_files`) rather than trying to push
+    into it, which would fail as a non-fast-forward push against history the
+    caller doesn't have.
     """
     authed_url = _authenticated_url(clone_url, username, token)
     _run(
