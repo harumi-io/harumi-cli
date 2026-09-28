@@ -325,10 +325,10 @@ No backend endpoint — a dashboard spec is a plain file in the project's Gitea 
 harumi share list [--project ID]
 harumi share get LINK_ID [--project ID]
 harumi share add [--label TEXT] [--app/--no-app] [--chat/--no-chat] [--run-history/--no-run-history]
-                  [--run-control/--no-run-control] [--io-control/--no-io-control] [--project ID]
+                  [--run-control/--no-run-control] [--project ID]
 harumi share update LINK_ID [--label TEXT] [--enable/--disable] [--app/--no-app] [--chat/--no-chat]
                      [--run-history/--no-run-history] [--run-control/--no-run-control]
-                     [--io-control/--no-io-control] [--project ID]
+                     [--project ID]
 harumi share remove LINK_ID [--yes] [--project ID]
 harumi share rotate LINK_ID [--yes] [--project ID]
 harumi share set-password LINK_ID [--project ID]
@@ -339,12 +339,11 @@ Manages `/projects/{id}/share-links*` — a project's public, unauthenticated da
 
 - **`list`**: `GET /projects/{id}/share-links` → `ProjectShareLinkList {links: [ProjectShareLink]}`. Prints a table with each link's id, label, `enabled`, its enabled permissions, and whether it's password protected.
 - **`get`**: same list call, filtered to one link — prints its full viewer URL (built client-side as `{platform_url}/share/{token}`, since the API doesn't know its own public origin) and every permission flag.
-- **`add`**: `POST /projects/{id}/share-links` → `ProjectShareLink`. Every permission flag (`--app`, `--chat`, `--run-history`, `--run-control`, `--io-control`) defaults to off, so creating a link never silently grants more than a bare read-only, latest-run-only dashboard view.
+- **`add`**: `POST /projects/{id}/share-links` → `ProjectShareLink`. Every permission flag (`--app`, `--chat`, `--run-history`, `--run-control`) defaults to off, so creating a link never silently grants more than a bare read-only, latest-run-only dashboard view.
   - `--app`: let visitors open the project's deployed Streamlit app.
   - `--chat`: read-only assistant for signed-in visitors.
   - `--run-history`: browse past runs instead of only ever the latest.
   - `--run-control`: signed-in visitors can run now, override the kernel, and manage schedules.
-  - `--io-control`: control/edit inputs and outputs.
 - **`update`**: `PATCH /projects/{id}/share-links/{link_id}`. Only the flags you pass are changed; `--enable`/`--disable` toggles the link without touching its permissions.
 - **`remove`**: `DELETE /projects/{id}/share-links/{link_id}`. The old URL stops working immediately. Prompts for confirmation unless `--yes`.
 - **`rotate`**: `POST /projects/{id}/share-links/{link_id}/rotate` — invalidates the current token and mints a new one; permission flags are unchanged. Prompts for confirmation unless `--yes`.

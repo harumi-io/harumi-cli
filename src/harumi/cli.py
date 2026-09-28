@@ -2434,8 +2434,7 @@ def _print_share_link(link: ProjectShareLink) -> None:
         f"app={'on' if link.app_enabled else 'off'}, "
         f"assistant={'on' if link.chat_enabled else 'off'}, "
         f"run history={'on' if link.run_history_enabled else 'off'}, "
-        f"run control={'on' if link.run_control_enabled else 'off'}, "
-        f"inputs/outputs={'on' if link.io_control_enabled else 'off'}"
+        f"run control={'on' if link.run_control_enabled else 'off'}"
     )
 
 
@@ -2463,7 +2462,6 @@ def share_list(
                 ("chat", link.chat_enabled),
                 ("run_history", link.run_history_enabled),
                 ("run_control", link.run_control_enabled),
-                ("io_control", link.io_control_enabled),
             )
             if on
         )
@@ -2506,7 +2504,6 @@ def share_add(
     chat: bool = typer.Option(False, "--chat/--no-chat", help="Let signed-in visitors ask the read-only assistant about this project."),
     run_history: bool = typer.Option(False, "--run-history/--no-run-history", help="Let visitors browse past runs, not just the latest one."),
     run_control: bool = typer.Option(False, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
-    io_control: bool = typer.Option(False, "--io-control/--no-io-control", help="Let visitors control/edit this project's inputs and outputs."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -2520,7 +2517,6 @@ def share_add(
         "chat_enabled": chat,
         "run_history_enabled": run_history,
         "run_control_enabled": run_control,
-        "io_control_enabled": io_control,
     }
     if label:
         body["label"] = label
@@ -2540,7 +2536,6 @@ def share_update(
     chat: Optional[bool] = typer.Option(None, "--chat/--no-chat", help="Let signed-in visitors ask the read-only assistant about this project."),
     run_history: Optional[bool] = typer.Option(None, "--run-history/--no-run-history", help="Let visitors browse past runs, not just the latest one."),
     run_control: Optional[bool] = typer.Option(None, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
-    io_control: Optional[bool] = typer.Option(None, "--io-control/--no-io-control", help="Let visitors control/edit this project's inputs and outputs."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -2562,8 +2557,6 @@ def share_update(
         body["run_history_enabled"] = run_history
     if run_control is not None:
         body["run_control_enabled"] = run_control
-    if io_control is not None:
-        body["io_control_enabled"] = io_control
 
     if not body:
         _fail("No fields to update. Pass at least one flag (e.g. --label, --chat).")
