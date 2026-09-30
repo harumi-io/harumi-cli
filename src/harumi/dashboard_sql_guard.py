@@ -214,17 +214,17 @@ _IS_DISTINCT_FROM_RE = re.compile(r"\bDISTINCT\s+FROM\s*$", re.IGNORECASE)
 # the same text is an ordinary value or column (`SELECT t."report.json"`).
 _TABLE_SEPARATOR_RE = re.compile(r"[,.]\s*$")
 _CLAUSE_KEYWORD_RE = re.compile(
-    r"\b(SELECT|FROM|WHERE|GROUP|ORDER|HAVING|WINDOW|QUALIFY|LIMIT|ON|USING|JOIN)\b", re.IGNORECASE
+    r"\b(SELECT|FROM|WHERE|GROUP|ORDER|HAVING|WINDOW|QUALIFY|LIMIT|JOIN)\b", re.IGNORECASE
 )
 # A name DuckDB's replacement scan would open as a file or URL.
 _FILE_LIKE_RE = re.compile(
-    r"[/\\:]|\.(csv|tsv|parquet|json|jsonl|ndjson|txt|xlsx|gz|zst|db|duckdb|sqlite|arrow|avro)$", re.IGNORECASE
+    r"[/\\:]|\.(csv|tsv|parquet|json|jsonl|ndjson|txt|xlsx|gz|zst|db|duckdb|sqlite|arrow|avro|orc|geojson|shp|xls|tab|feather|ipc|log)$", re.IGNORECASE
 )
 # Stricter, for a token after a comma or a dot, where an ordinary column name or
 # value (`'N/A'`, `'12:30'`) is far more likely: only a URL, a rooted or relative
 # path, or a data-file extension.
 _STRICT_FILE_LIKE_RE = re.compile(
-    r"^[a-z][a-z0-9+.-]*://|^\.{0,2}/|\.(csv|tsv|parquet|json|jsonl|ndjson|txt|xlsx|gz|zst|db|duckdb|sqlite|arrow|avro)$", re.IGNORECASE
+    r"^(?:[a-z][a-z0-9+.-]*://|\.{0,2}/)|\.(csv|tsv|parquet|json|jsonl|ndjson|txt|xlsx|gz|zst|db|duckdb|sqlite|arrow|avro|orc|geojson|shp|xls|tab|feather|ipc|log)$", re.IGNORECASE
 )
 
 
