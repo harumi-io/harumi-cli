@@ -388,9 +388,10 @@ def _format_api_error(exc: ApiError) -> str:
         # Not every ApiError(0, ...) qualifies: a failed presigned S3 transfer is not Harumi being down.
         return f"{escape(str(exc))}\nCheck {active_status_url()} for platform status, or run [bold]harumi status[/bold]."
     if exc.status_code != 402:
-        return str(exc)
+        # `_fail` prints through Rich markup, and server text can hold `[/x]`-style brackets.
+        return escape(str(exc))
     return (
-        f"{exc.detail}\nRun [bold]harumi usage[/bold] to see your current allowance, "
+        f"{escape(exc.detail)}\nRun [bold]harumi usage[/bold] to see your current allowance, "
         f"or visit {active_platform_url()}/settings?tab=billing to upgrade, enable "
         "overage, or buy a top-up."
     )

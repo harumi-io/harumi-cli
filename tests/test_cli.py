@@ -470,13 +470,20 @@ def test_status_treats_a_malformed_latest_result_as_unknown(monkeypatch):
     assert "unknown" in result.output
 
 
-def test_error_text_from_the_transport_cannot_break_the_error_printer():
-    """The unreachable-API message embeds exception text (paths, URLs). A stray `[/x]` in it is
-    Rich markup and used to crash the printer with MarkupError instead of showing the error."""
-    message = cli._format_api_error(ApiUnreachableError("Could not reach harumi-api: bad path [/tmp/x] [red]y"))
-
-    cli.err_console.print(message)  # must not raise
-    assert "[/tmp/x]" in message.replace("\\[", "[")
+@pytest.mark.parametrize(
+    "error",
+    [
+        ApiUnreachableError("Could not reach harumi-api: bad path [/tmp/x] [red]y"),
+        ApiError(404, "no such file [/data/x.csv]"),
+        ApiError(422, "field [/body/name] is required"),
+        ApiError(402, "credits exhausted for [/plan/free]"),
+        ApiError(503, "upstream [/db] unavailable"),
+    ],
+)
+def test_server_text_cannot_break_the_error_printer(error):
+    """Exception and server text is Rich markup once it reaches `_fail`. A stray `[/x]` used to
+    crash the printer with MarkupError instead of showing the error."""
+    cli.err_console.print(cli._format_api_error(error))  # must not raise
 
 
 def test_a_failed_s3_transfer_does_not_blame_the_harumi_platform():
