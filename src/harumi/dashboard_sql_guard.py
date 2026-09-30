@@ -150,6 +150,8 @@ def _mask_literals_and_comments(
                 if close == -1:
                     unterminated = unterminated or "dollar-quoted string"
                 stop = n if close == -1 else close + len(tag)
+                if quoted is not None and close != -1:
+                    quoted.append((i, stop, "$", sql[tag_end + 1 : close]))
                 blank(i, stop)
                 i = stop
                 continue
@@ -207,6 +209,19 @@ def _split_statements(masked: str) -> List[Tuple[int, int]]:
 
 _FROM_OR_JOIN_RE = re.compile(r"\b(FROM|JOIN)\s*$", re.IGNORECASE)
 _IS_DISTINCT_FROM_RE = re.compile(r"\bDISTINCT\s+FROM\s*$", re.IGNORECASE)
+# Where DuckDB may read a quoted token as a table: after FROM/JOIN, after a comma
+# in a FROM list, or as the last part of a qualified name (`main."/etc/hosts"`).
+_TABLE_SEPARATOR_RE = re.compile(r"[,.]\s*$")
+# A name DuckDB's replacement scan would open as a file or URL.
+_FILE_LIKE_RE = re.compile(
+    r"[/\\:]|\.(csv|tsv|parquet|json|jsonl|ndjson|txt|xlsx|gz|zst|db|duckdb|sqlite|arrow|avro)$", re.IGNORECASE
+)
+# Stricter, for a token after a comma or a dot, where an ordinary column name or
+# value (`'N/A'`, `'12:30'`) is far more likely: only a URL, a rooted or relative
+# path, or a data-file extension.
+_STRICT_FILE_LIKE_RE = re.compile(
+    r"^[a-z][a-z0-9+.-]*://|^\.{0,2}/|\.(csv|tsv|parquet|json|jsonl|ndjson|txt|xlsx|gz|zst|db|duckdb|sqlite|arrow|avro)$", re.IGNORECASE
+)
 
 
 def _quoted_source_hazard(masked: str, quoted: List[Tuple[int, int, str, str]]) -> Optional[str]:
@@ -215,19 +230,24 @@ def _quoted_source_hazard(masked: str, quoted: List[Tuple[int, int, str, str]]) 
     Masking blanks quoted text, so two ways in slip past the keyword and
     function checks. A quoted function name (`"read_csv"('https://...')`) is
     still the function. And DuckDB reads a string or identifier in table
-    position as a file or URL (`FROM 'https://...'`, `FROM "/etc/hosts"`).
+    position as a file or URL (`FROM 'https://...'`, `FROM "/etc/hosts"`,
+    `FROM t, 'x.csv'`, `FROM main."x.csv"`). Table position is approximated
+    from the token before: this is a denylist, so the engine setting that turns
+    external access off is the real boundary where there is an engine.
     """
     for start, end, quote, content in quoted:
-        if quote != "'" and re.match(r"\s*\(", masked[end:]) and content.lower() in _FORBIDDEN_FUNCTIONS:
+        if quote in ('"', "`") and re.match(r"\s*\(", masked[end:]) and content.lower() in _FORBIDDEN_FUNCTIONS:
             return content
         before = masked[:start]
-        if not _FROM_OR_JOIN_RE.search(before):
-            continue
-        if quote == "'":
+        file_like = _FILE_LIKE_RE.search(content) is not None
+        if _FROM_OR_JOIN_RE.search(before):
             # `a IS DISTINCT FROM 'x'` is a comparison, not a table.
-            if not _IS_DISTINCT_FROM_RE.search(before):
+            if quote in ("'", "$"):
+                if not _IS_DISTINCT_FROM_RE.search(before):
+                    return content
+            elif file_like:
                 return content
-        elif any(c in content for c in "/\\:"):
+        elif _TABLE_SEPARATOR_RE.search(before) and _STRICT_FILE_LIKE_RE.search(content):
             return content
     return None
 

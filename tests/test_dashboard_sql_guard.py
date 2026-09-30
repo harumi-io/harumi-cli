@@ -291,6 +291,11 @@ BYPASSES = [
     "SELECT * FROM \"read_csv\"('https://example.com/a.csv')",
     "SELECT * FROM 'https://example.com/x.csv'",
     'SELECT * FROM "/etc/hosts"',
+    "SELECT * FROM t, 'https://e.com/x.csv'",
+    'SELECT * FROM t, "/etc/hosts"',
+    'SELECT * FROM main."/etc/hosts"',
+    'SELECT * FROM "secret.csv"',
+    'SELECT * FROM $$/etc/hosts$$',
     "SELECT getenv('HOME')",
     "SELECT * FROM duckdb_secrets()",
     "SELECT * FROM query('SELECT 1')",
@@ -302,6 +307,9 @@ STILL_ACCEPTED = [
     "SELECT * FROM t WHERE a IS DISTINCT FROM 'x'",
     "SELECT 'a' LIKE 'a%' ESCAPE '!'",
     "SELECT E'it\\'s' AS s",
+    "SELECT a, 'N/A', '12:30' FROM t",
+    "SELECT * FROM t WHERE k IN ('a/b', 'c:d')",
+    'SELECT "a.b", "c/d" FROM t',
 ]
 
 
