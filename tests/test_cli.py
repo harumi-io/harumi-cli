@@ -17,6 +17,7 @@ from typer.testing import CliRunner
 
 import harumi.cli as cli
 from harumi.client import Client
+from harumi.errors import ApiError, ApiUnreachableError
 
 runner = CliRunner()
 
@@ -441,6 +442,39 @@ def test_status_exits_nonzero_and_names_the_service_that_is_down(monkeypatch):
 
     assert result.exit_code == 1
     assert "Git" in result.output and "down" in result.output
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{"error": "bad gateway"}, [], None, ["not-an-object"], "<html>captive portal</html>"],
+)
+def test_status_rejects_a_payload_that_is_not_a_list_of_monitors(monkeypatch, payload):
+    """A proxy/captive-portal reply or an empty list must not be reported as "all up"."""
+    _statuses(monkeypatch, payload)
+
+    result = runner.invoke(cli.app, ["status"])
+
+    assert result.exit_code == 1
+    # An empty body (payload=None) fails earlier, as unparseable JSON; every other shape is
+    # "unexpected". Either way: a clean error, never a traceback or a false "all up".
+    assert "the status page" in result.output
+    assert not isinstance(result.exception, (AttributeError, TypeError))
+
+
+def test_status_treats_a_malformed_latest_result_as_unknown(monkeypatch):
+    _statuses(monkeypatch, [{"name": "API", "group": "platform", "results": ["oops"]}])
+
+    result = runner.invoke(cli.app, ["status"])
+
+    assert result.exit_code == 0
+    assert "unknown" in result.output
+
+
+def test_a_failed_s3_transfer_does_not_blame_the_harumi_platform():
+    """`ApiError(0, ...)` is also used for presigned S3 upload/download failures, which say
+    nothing about whether Harumi itself is up."""
+    assert "status.harumi.io" not in cli._format_api_error(ApiError(0, "Upload failed: S3 timed out"))
+    assert "status.harumi.io" in cli._format_api_error(ApiUnreachableError("Could not reach harumi-api: x"))
 
 
 def test_status_reports_an_unreachable_status_page(monkeypatch):

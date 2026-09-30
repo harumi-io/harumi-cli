@@ -144,6 +144,7 @@ from typing import Optional
 import httpx
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from harumi import __version__, auth
@@ -171,7 +172,7 @@ from harumi.dashboard import (
     validate_dashboard_toml,
     widget_schemas,
 )
-from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
+from harumi.errors import ApiError, ApiUnreachableError, HarumiError, NotAuthenticatedError
 from harumi.git import (
     GitError,
     NotAHarumiRepoError,
@@ -382,8 +383,9 @@ def _format_api_error(exc: ApiError) -> str:
     payment problem, so there's exactly one message to show regardless of
     which command triggered it.
     """
-    if exc.status_code == 0 or exc.status_code >= 500:
-        # No answer at all, or a server-side failure: likely an outage, not user error.
+    if isinstance(exc, ApiUnreachableError) or exc.status_code >= 500:
+        # harumi-api gave no answer, or a server-side failure: likely an outage, not user error.
+        # Not every ApiError(0, ...) qualifies: a failed presigned S3 transfer is not Harumi being down.
         return f"{exc}\nCheck {active_status_url()} for platform status, or run [bold]harumi status[/bold]."
     if exc.status_code != 402:
         return str(exc)
@@ -561,20 +563,25 @@ def status() -> None:
         response.raise_for_status()
         endpoints = response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        _fail(f"Could not read the status page at {url}: {exc}")
+        _fail(f"Could not read the status page at {url}: {escape(str(exc))}")
+    # Anything but a non-empty list of objects (a proxy/captive-portal reply, an error
+    # object) means nothing was actually read; "all up" would be a lie.
+    if not isinstance(endpoints, list) or not endpoints or not all(isinstance(e, dict) for e in endpoints):
+        _fail(f"Unexpected response from the status page at {url}.")
 
     table = Table("group", "service", "status")
     down = 0
     for endpoint in endpoints:
         results = endpoint.get("results") or []
-        if not results:
+        latest = results[-1] if results and isinstance(results[-1], dict) else None
+        if latest is None:
             state = "[dim]unknown[/dim]"
-        elif results[-1].get("success"):
+        elif latest.get("success"):
             state = "[green]up[/green]"
         else:
             state = "[bold red]down[/bold red]"
             down += 1
-        table.add_row(endpoint.get("group") or "-", endpoint.get("name", "?"), state)
+        table.add_row(str(endpoint.get("group") or "-"), str(endpoint.get("name", "?")), state)
     console.print(table)
     if down:
         _fail(f"{down} service(s) down. Details: {url}")

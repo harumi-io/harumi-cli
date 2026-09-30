@@ -138,7 +138,9 @@ class ApiClient:
         url = f"{self.config.api_url}{path}"
         headers = self._headers()
 
-        with httpx.Client(timeout=timeout or self.timeout, transport=self.transport) as client:
+        with transport_errors_as_api_error(), httpx.Client(
+            timeout=timeout or self.timeout, transport=self.transport
+        ) as client:
             with client.stream(method, url, json=json, params=params, headers=headers) as response:
                 if response.status_code == 401:
                     creds = auth.current_credentials()

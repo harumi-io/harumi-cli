@@ -11,7 +11,7 @@ import pytest
 
 from harumi.client import ApiClient, Client
 from harumi.config import Config
-from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
+from harumi.errors import ApiError, ApiUnreachableError, HarumiError, NotAuthenticatedError
 
 
 @pytest.fixture(autouse=True)
@@ -1220,3 +1220,17 @@ def test_request_reports_a_transport_failure_as_an_api_error(exc):
         api.request("GET", "/users/me")
 
     assert caught.value.status_code == 0
+
+
+def test_stream_reports_a_transport_failure_as_an_api_error():
+    """`stream()` (file/export downloads) had the same raw-traceback gap as `request()`."""
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    api = ApiClient(_config(), transport=httpx.MockTransport(handler))
+
+    with pytest.raises(ApiUnreachableError):
+        with api.stream("GET", "/projects/p/files/x"):
+            pass
