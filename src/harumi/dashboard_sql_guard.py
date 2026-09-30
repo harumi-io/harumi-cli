@@ -209,9 +209,13 @@ def _split_statements(masked: str) -> List[Tuple[int, int]]:
 
 _FROM_OR_JOIN_RE = re.compile(r"\b(FROM|JOIN)\s*$", re.IGNORECASE)
 _IS_DISTINCT_FROM_RE = re.compile(r"\bDISTINCT\s+FROM\s*$", re.IGNORECASE)
-# Where DuckDB may read a quoted token as a table: after FROM/JOIN, after a comma
-# in a FROM list, or as the last part of a qualified name (`main."/etc/hosts"`).
+# After a comma or a dot a quoted token may still be a table (`FROM t, 'x.csv'`,
+# `FROM main."/etc/hosts"`), but only inside a FROM clause: in a select or IN list
+# the same text is an ordinary value or column (`SELECT t."report.json"`).
 _TABLE_SEPARATOR_RE = re.compile(r"[,.]\s*$")
+_CLAUSE_KEYWORD_RE = re.compile(
+    r"\b(SELECT|FROM|WHERE|GROUP|ORDER|HAVING|WINDOW|QUALIFY|LIMIT|ON|USING|JOIN)\b", re.IGNORECASE
+)
 # A name DuckDB's replacement scan would open as a file or URL.
 _FILE_LIKE_RE = re.compile(
     r"[/\\:]|\.(csv|tsv|parquet|json|jsonl|ndjson|txt|xlsx|gz|zst|db|duckdb|sqlite|arrow|avro)$", re.IGNORECASE
@@ -222,6 +226,24 @@ _FILE_LIKE_RE = re.compile(
 _STRICT_FILE_LIKE_RE = re.compile(
     r"^[a-z][a-z0-9+.-]*://|^\.{0,2}/|\.(csv|tsv|parquet|json|jsonl|ndjson|txt|xlsx|gz|zst|db|duckdb|sqlite|arrow|avro)$", re.IGNORECASE
 )
+
+
+def _in_from_clause(before: str) -> bool:
+    """Whether the innermost clause keyword before this point is FROM or JOIN.
+
+    Parenthesized groups that have already closed are skipped, so a subselect
+    (`FROM (SELECT 1) a, 'x.csv'`) does not hide the FROM around it.
+    """
+    levels: List[str] = [""]
+    for ch in before:
+        if ch == "(":
+            levels.append("")
+        elif ch == ")" and len(levels) > 1:
+            levels.pop()
+        else:
+            levels[-1] += ch
+    keywords = _CLAUSE_KEYWORD_RE.findall(levels[-1])
+    return bool(keywords) and keywords[-1].upper() in ("FROM", "JOIN")
 
 
 def _quoted_source_hazard(masked: str, quoted: List[Tuple[int, int, str, str]]) -> Optional[str]:
@@ -241,13 +263,12 @@ def _quoted_source_hazard(masked: str, quoted: List[Tuple[int, int, str, str]]) 
         before = masked[:start]
         file_like = _FILE_LIKE_RE.search(content) is not None
         if _FROM_OR_JOIN_RE.search(before):
-            # `a IS DISTINCT FROM 'x'` is a comparison, not a table.
-            if quote in ("'", "$"):
-                if not _IS_DISTINCT_FROM_RE.search(before):
-                    return content
-            elif file_like:
+            # Only a file-shaped name is a read: `substring(c FROM 'regex')` and
+            # `EXTRACT(year FROM '2024-01-01'::date)` put a string here too, and
+            # `a IS DISTINCT FROM 'x'` is a comparison.
+            if file_like and not _IS_DISTINCT_FROM_RE.search(before):
                 return content
-        elif _TABLE_SEPARATOR_RE.search(before) and _STRICT_FILE_LIKE_RE.search(content):
+        elif _TABLE_SEPARATOR_RE.search(before) and _STRICT_FILE_LIKE_RE.search(content) and _in_from_clause(before):
             return content
     return None
 

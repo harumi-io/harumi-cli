@@ -308,6 +308,13 @@ STILL_ACCEPTED = [
     "SELECT 'a' LIKE 'a%' ESCAPE '!'",
     "SELECT E'it\\'s' AS s",
     "SELECT a, 'N/A', '12:30' FROM t",
+    "SELECT substring(c FROM 'a+') FROM t",
+    "SELECT EXTRACT(year FROM '2024-01-01'::date)",
+    "SELECT * FROM t WHERE url IN ('a', 'https://x.com/p')",
+    "SELECT name, 'report.csv' AS label FROM t",
+    'SELECT t."report.json" FROM t',
+    'SELECT "orders.csv" FROM t',
+    'SELECT * FROM t GROUP BY a, "b.csv"',
     "SELECT * FROM t WHERE k IN ('a/b', 'c:d')",
     'SELECT "a.b", "c/d" FROM t',
 ]
