@@ -17,7 +17,7 @@ import httpx
 
 from harumi import auth
 from harumi.config import Config
-from harumi.errors import ApiError, NotAuthenticatedError
+from harumi.errors import ApiError, NotAuthenticatedError, transport_errors_as_api_error
 from harumi.models import (
     BranchInfo,
     BlueprintSummary,
@@ -96,7 +96,9 @@ class ApiClient:
         headers = self._headers()
         headers.update(kwargs.pop("headers", {}) or {})
 
-        with httpx.Client(timeout=timeout or self.timeout, transport=self.transport) as client:
+        with transport_errors_as_api_error(), httpx.Client(
+            timeout=timeout or self.timeout, transport=self.transport
+        ) as client:
             response = client.request(
                 method, url, json=json, params=params, headers=headers, **kwargs
             )

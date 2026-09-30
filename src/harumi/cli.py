@@ -3,6 +3,7 @@
     harumi login [--signup]
     harumi logout
     harumi whoami
+    harumi status
     harumi profile show|set
     harumi specs
     harumi blueprints
@@ -140,6 +141,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+import httpx
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -154,6 +156,7 @@ from harumi.config import (
     ProjectBinding,
     active_environment,
     active_platform_url,
+    active_status_url,
     load_git_token,
     load_git_username,
     resolve_environment,
@@ -379,6 +382,9 @@ def _format_api_error(exc: ApiError) -> str:
     payment problem, so there's exactly one message to show regardless of
     which command triggered it.
     """
+    if exc.status_code == 0 or exc.status_code >= 500:
+        # No answer at all, or a server-side failure: likely an outage, not user error.
+        return f"{exc}\nCheck {active_status_url()} for platform status, or run [bold]harumi status[/bold]."
     if exc.status_code != 402:
         return str(exc)
     return (
@@ -544,6 +550,34 @@ def logout() -> None:
     Config.load()
     auth.logout()
     console.print(f"Logged out of [bold]{active_environment()}[/bold].")
+
+
+@app.command()
+def status() -> None:
+    """Show the live status of the Harumi platform (from the public status page)."""
+    url = active_status_url()  # honors --env / HARUMI_ENV / the saved default
+    try:
+        response = httpx.get(f"{url}/api/v1/endpoints/statuses", timeout=10.0)
+        response.raise_for_status()
+        endpoints = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        _fail(f"Could not read the status page at {url}: {exc}")
+
+    table = Table("group", "service", "status")
+    down = 0
+    for endpoint in endpoints:
+        results = endpoint.get("results") or []
+        if not results:
+            state = "[dim]unknown[/dim]"
+        elif results[-1].get("success"):
+            state = "[green]up[/green]"
+        else:
+            state = "[bold red]down[/bold red]"
+            down += 1
+        table.add_row(endpoint.get("group") or "-", endpoint.get("name", "?"), state)
+    console.print(table)
+    if down:
+        _fail(f"{down} service(s) down. Details: {url}")
 
 
 @app.command()

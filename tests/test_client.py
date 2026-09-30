@@ -1203,3 +1203,20 @@ def test_client_delete_project_file():
 
 
 
+
+
+@pytest.mark.parametrize("exc", [httpx.ConnectError("refused"), httpx.ReadTimeout("slow")])
+def test_request_reports_a_transport_failure_as_an_api_error(exc):
+    """A request that never gets an answer must surface as `ApiError(0, ...)`, not a
+    bare httpx exception that escapes `_handle_errors` as a traceback."""
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise exc
+
+    api = ApiClient(_config(), transport=httpx.MockTransport(handler))
+
+    with pytest.raises(ApiError) as caught:
+        api.request("GET", "/users/me")
+
+    assert caught.value.status_code == 0

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from typing import Iterator
+
+import httpx
+
 
 class HarumiError(Exception):
     """Base class for all harumi SDK/CLI errors."""
@@ -21,6 +26,21 @@ class ApiError(HarumiError):
         self.status_code = status_code
         self.detail = detail
         super().__init__(f"harumi-api returned HTTP {status_code}: {detail}")
+
+
+@contextmanager
+def transport_errors_as_api_error() -> Iterator[None]:
+    """Report a request that never got an answer (refused connection, DNS failure,
+    timeout) as `ApiError(0, ...)`.
+
+    Without this a bare `httpx` exception escapes `_handle_errors` as a raw
+    traceback. Status 0 means "no HTTP response", which is what tells the CLI to
+    point the user at the status page.
+    """
+    try:
+        yield
+    except httpx.HTTPError as exc:
+        raise ApiError(0, f"Could not reach harumi-api: {exc}") from exc
 
 
 class ExecutionError(HarumiError):

@@ -361,6 +361,108 @@ def test_a_402_from_a_run_points_at_usage_and_the_billing_settings_page(api, bou
     assert "settings?tab=billing" in result.output
 
 
+def test_a_5xx_points_at_the_status_page(api, bound_dir):
+    api.route("POST", "/api/projects/proj-bound/execute", {"detail": "boom"}, status=503)
+
+    result = runner.invoke(cli.app, ["run", "--branch", "main"])
+
+    assert result.exit_code == 1
+    assert "https://status.harumi.io" in result.output
+    assert "harumi status" in result.output
+
+
+def test_a_4xx_does_not_point_at_the_status_page(api, bound_dir):
+    api.route("POST", "/api/projects/proj-bound/execute", {"detail": "nope"}, status=422)
+
+    result = runner.invoke(cli.app, ["run", "--branch", "main"])
+
+    assert result.exit_code == 1
+    assert "status.harumi.io" not in result.output
+
+
+def test_a_connection_failure_is_an_error_message_not_a_traceback(monkeypatch, bound_dir):
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(
+        cli,
+        "_get_client",
+        lambda api_url=None, git_url=None, org=None: Client(
+            api_url="https://harumi-api.test/api", transport=httpx.MockTransport(refuse)
+        ),
+    )
+
+    result = runner.invoke(cli.app, ["run", "--branch", "main"])
+
+    assert result.exit_code == 1
+    assert "Could not reach harumi-api" in result.output
+    assert "https://status.harumi.io" in result.output
+    assert not isinstance(result.exception, httpx.HTTPError)
+
+
+def _statuses(monkeypatch, payload, status=200):
+    seen = []
+
+    def fake_get(url, **_):
+        seen.append(url)
+        return httpx.Response(status, json=payload, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(cli.httpx, "get", fake_get)
+    return seen
+
+
+def test_status_lists_services_and_exits_zero_when_all_are_up(monkeypatch):
+    seen = _statuses(
+        monkeypatch,
+        [
+            {"name": "API", "group": "platform", "results": [{"success": False}, {"success": True}]},
+            {"name": "Database", "group": "infra", "results": [{"success": True}]},
+        ],
+    )
+
+    result = runner.invoke(cli.app, ["status"])
+
+    assert result.exit_code == 0
+    assert seen == ["https://status.harumi.io/api/v1/endpoints/statuses"]
+    assert "API" in result.output and "Database" in result.output
+    assert "down" not in result.output
+
+
+def test_status_exits_nonzero_and_names_the_service_that_is_down(monkeypatch):
+    _statuses(
+        monkeypatch,
+        [
+            {"name": "API", "group": "platform", "results": [{"success": True}]},
+            {"name": "Git", "group": "platform", "results": [{"success": True}, {"success": False}]},
+        ],
+    )
+
+    result = runner.invoke(cli.app, ["status"])
+
+    assert result.exit_code == 1
+    assert "Git" in result.output and "down" in result.output
+
+
+def test_status_reports_an_unreachable_status_page(monkeypatch):
+    def fail(url, **_):
+        raise httpx.ConnectError("no route")
+
+    monkeypatch.setattr(cli.httpx, "get", fail)
+
+    result = runner.invoke(cli.app, ["status"])
+
+    assert result.exit_code == 1
+    assert "Could not read the status page" in result.output
+
+
+def test_status_targets_the_staging_page_for_the_staging_env(monkeypatch):
+    seen = _statuses(monkeypatch, [])
+
+    runner.invoke(cli.app, ["--env", "staging", "status"])
+
+    assert seen == ["https://status.dev.harumi.io/api/v1/endpoints/statuses"]
+
+
 def test_usage_shows_the_balance_and_plan(api):
     api.route(
         "GET",
