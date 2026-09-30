@@ -283,3 +283,33 @@ def test_refuses_a_non_string_query(not_sql):
 def test_raises_sql_guard_error_so_callers_can_tell_a_guard_refusal_from_a_duckdb_error():
     with pytest.raises(SqlGuardError):
         ensure_read_only_select("DROP TABLE t")
+
+
+# Bypasses confirmed against a real DuckDB (mirrors ai-solver's guard and its tests).
+BYPASSES = [
+    "SELECT 'a' LIKE 'a' ESCAPE'\\' ; CREATE TABLE pwned AS SELECT 42 AS x ; -- '",
+    "SELECT * FROM \"read_csv\"('https://example.com/a.csv')",
+    "SELECT * FROM 'https://example.com/x.csv'",
+    'SELECT * FROM "/etc/hosts"',
+    "SELECT getenv('HOME')",
+    "SELECT * FROM duckdb_secrets()",
+    "SELECT * FROM query('SELECT 1')",
+]
+
+STILL_ACCEPTED = [
+    "SELECT * FROM \"orders\" WHERE \"order date\" > '2024-01-01'",
+    "SELECT EXTRACT(year FROM \"order date\") FROM orders",
+    "SELECT * FROM t WHERE a IS DISTINCT FROM 'x'",
+    "SELECT 'a' LIKE 'a%' ESCAPE '!'",
+    "SELECT E'it\\'s' AS s",
+]
+
+
+@pytest.mark.parametrize("sql", BYPASSES)
+def test_confirmed_bypass_is_rejected(sql):
+    assert _rejects(sql) is not None
+
+
+@pytest.mark.parametrize("sql", STILL_ACCEPTED)
+def test_legitimate_quoting_still_passes(sql):
+    assert _rejects(sql) is None
