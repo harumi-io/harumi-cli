@@ -3,6 +3,7 @@
     harumi login [--signup]
     harumi logout
     harumi whoami
+    harumi status
     harumi profile show|set
     harumi specs
     harumi blueprints
@@ -140,8 +141,10 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+import httpx
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from harumi import __version__, auth
@@ -154,6 +157,7 @@ from harumi.config import (
     ProjectBinding,
     active_environment,
     active_platform_url,
+    active_status_url,
     load_git_token,
     load_git_username,
     resolve_environment,
@@ -168,7 +172,7 @@ from harumi.dashboard import (
     validate_dashboard_toml,
     widget_schemas,
 )
-from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
+from harumi.errors import ApiError, ApiUnreachableError, HarumiError, NotAuthenticatedError
 from harumi.git import (
     GitError,
     NotAHarumiRepoError,
@@ -379,10 +383,15 @@ def _format_api_error(exc: ApiError) -> str:
     payment problem, so there's exactly one message to show regardless of
     which command triggered it.
     """
+    if isinstance(exc, ApiUnreachableError) or exc.status_code >= 500:
+        # harumi-api gave no answer, or a server-side failure: likely an outage, not user error.
+        # Not every ApiError(0, ...) qualifies: a failed presigned S3 transfer is not Harumi being down.
+        return f"{escape(str(exc))}\nCheck {active_status_url()} for platform status, or run [bold]harumi status[/bold]."
     if exc.status_code != 402:
-        return str(exc)
+        # `_fail` prints through Rich markup, and server text can hold `[/x]`-style brackets.
+        return escape(str(exc))
     return (
-        f"{exc.detail}\nRun [bold]harumi usage[/bold] to see your current allowance, "
+        f"{escape(exc.detail)}\nRun [bold]harumi usage[/bold] to see your current allowance, "
         f"or visit {active_platform_url()}/settings?tab=billing to upgrade, enable "
         "overage, or buy a top-up."
     )
@@ -544,6 +553,39 @@ def logout() -> None:
     Config.load()
     auth.logout()
     console.print(f"Logged out of [bold]{active_environment()}[/bold].")
+
+
+@app.command()
+def status() -> None:
+    """Show the live status of the Harumi platform (from the public status page)."""
+    url = active_status_url()  # honors --env / HARUMI_ENV / the saved default
+    try:
+        response = httpx.get(f"{url}/api/v1/endpoints/statuses", timeout=10.0)
+        response.raise_for_status()
+        endpoints = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        _fail(f"Could not read the status page at {url}: {escape(str(exc))}")
+    # Anything but a non-empty list of objects (a proxy/captive-portal reply, an error
+    # object) means nothing was actually read; "all up" would be a lie.
+    if not isinstance(endpoints, list) or not endpoints or not all(isinstance(e, dict) for e in endpoints):
+        _fail(f"Unexpected response from the status page at {url}.")
+
+    table = Table("group", "service", "status")
+    down = 0
+    for endpoint in endpoints:
+        results = endpoint.get("results") or []
+        latest = results[-1] if results and isinstance(results[-1], dict) else None
+        if latest is None:
+            state = "[dim]unknown[/dim]"
+        elif latest.get("success"):
+            state = "[green]up[/green]"
+        else:
+            state = "[bold red]down[/bold red]"
+            down += 1
+        table.add_row(str(endpoint.get("group") or "-"), str(endpoint.get("name", "?")), state)
+    console.print(table)
+    if down:
+        _fail(f"{down} service(s) down. Details: {url}")
 
 
 @app.command()

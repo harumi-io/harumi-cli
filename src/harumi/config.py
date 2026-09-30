@@ -30,6 +30,9 @@ class Environment:
     # user-facing project links. Never print `git_url` directly to the user;
     # Gitea is an implementation detail, not something we surface.
     platform_url: str
+    # Public status page (Gatus) for this environment, linked from network-error
+    # hints and read by `harumi status`.
+    status_url: str
     # Internal envs are VPN-only and hidden from `harumi env list` unless the
     # user opts in (HARUMI_INTERNAL=1 or `--all`). This is UX only — real access
     # is gated by needing an account in that environment's Supabase + the VPN.
@@ -46,6 +49,7 @@ ENVIRONMENTS: dict[str, Environment] = {
         api_url="https://api.harumi.io/api",
         git_url="https://git.harumi.io",
         platform_url="https://platform.harumi.io",
+        status_url="https://status.harumi.io",
         internal=False,
         description="Public production environment.",
     ),
@@ -54,6 +58,7 @@ ENVIRONMENTS: dict[str, Environment] = {
         api_url="https://api.dev.harumi.io/api",
         git_url="https://git.dev.harumi.io",
         platform_url="https://platform.dev.harumi.io",
+        status_url="https://status.dev.harumi.io",
         internal=True,
         description="Internal staging/dev environment (VPN-only).",
     ),
@@ -152,6 +157,11 @@ def active_platform_url() -> str:
         or ENVIRONMENTS[name].platform_url
     )
     return url.rstrip("/")
+
+
+def active_status_url() -> str:
+    """Status page URL for the active environment."""
+    return ENVIRONMENTS[active_environment()].status_url
 
 
 def save_environment(name: str) -> None:

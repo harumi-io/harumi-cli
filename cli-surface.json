@@ -5016,6 +5016,11 @@
       "params": []
     },
     {
+      "path": "status",
+      "help": "Show the live status of the Harumi platform (from the public status page).",
+      "params": []
+    },
+    {
       "path": "usage",
       "help": "Show your (or --org's) current credit allowance.",
       "params": [

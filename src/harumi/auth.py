@@ -21,7 +21,7 @@ from typing import Optional
 import httpx
 
 from harumi.config import Config, clear_credentials, load_credentials, save_credentials
-from harumi.errors import ApiError, NotAuthenticatedError
+from harumi.errors import ApiError, NotAuthenticatedError, transport_errors_as_api_error
 from harumi.models import LoggedUser
 
 # Refresh proactively if the access token expires within this many seconds,
@@ -41,7 +41,7 @@ def request_otp(
     Supabase account first (needed the first time a new email logs in).
     """
     path = "/users/sign_up" if sign_up else "/users/otp"
-    with httpx.Client(transport=transport, timeout=30.0) as client:
+    with transport_errors_as_api_error(), httpx.Client(transport=transport, timeout=30.0) as client:
         response = client.post(f"{config.api_url}{path}", json={"email": email})
     _raise_for_status(response)
 
@@ -50,7 +50,7 @@ def verify_otp(
     config: Config, email: str, token: str, transport: Optional[httpx.BaseTransport] = None
 ) -> LoggedUser:
     """Exchange an emailed OTP code for a session, and persist it."""
-    with httpx.Client(transport=transport, timeout=30.0) as client:
+    with transport_errors_as_api_error(), httpx.Client(transport=transport, timeout=30.0) as client:
         response = client.post(
             f"{config.api_url}/users/otp/verify", json={"email": email, "token": token}
         )
@@ -64,7 +64,7 @@ def refresh_session(
     config: Config, refresh_token: str, transport: Optional[httpx.BaseTransport] = None
 ) -> LoggedUser:
     """Exchange a refresh token for a new access token, and persist it."""
-    with httpx.Client(transport=transport, timeout=30.0) as client:
+    with transport_errors_as_api_error(), httpx.Client(transport=transport, timeout=30.0) as client:
         response = client.post(
             f"{config.api_url}/users/refresh", json={"refresh_token": refresh_token}
         )
