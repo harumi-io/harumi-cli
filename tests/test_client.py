@@ -1234,3 +1234,42 @@ def test_stream_reports_a_transport_failure_as_an_api_error():
     with pytest.raises(ApiUnreachableError):
         with api.stream("GET", "/projects/p/files/x"):
             pass
+
+
+def test_stream_reports_a_mid_download_drop_as_an_interrupted_transfer_not_an_outage():
+    """The connection worked, so this must not read as "could not reach harumi-api" (which
+    is what earns the status-page hint)."""
+    _write_credentials()
+
+    class Drops(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b"part"
+            raise httpx.ReadError("connection dropped")
+
+    api = ApiClient(_config(), transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=Drops())))
+
+    with pytest.raises(ApiError) as caught:
+        with api.stream("GET", "/projects/p/files/x") as response:
+            for _ in response.iter_bytes():
+                pass
+
+    assert not isinstance(caught.value, ApiUnreachableError)
+    assert "Transfer interrupted" in str(caught.value)
+
+
+def test_stream_retries_once_after_a_401_and_returns_the_second_response(monkeypatch):
+    """Guards the ExitStack restructure of the refresh path."""
+    _write_credentials(refresh_token="refresh-1")
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.headers.get("authorization"))
+        return httpx.Response(401 if len(calls) == 1 else 200, content=b"ok")
+
+    api = ApiClient(_config(), transport=httpx.MockTransport(handler))
+    monkeypatch.setattr("harumi.auth.refresh_session", lambda *a, **k: None)
+
+    with api.stream("GET", "/x") as response:
+        assert response.read() == b"ok"
+
+    assert len(calls) == 2
