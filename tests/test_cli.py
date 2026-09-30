@@ -470,6 +470,15 @@ def test_status_treats_a_malformed_latest_result_as_unknown(monkeypatch):
     assert "unknown" in result.output
 
 
+def test_error_text_from_the_transport_cannot_break_the_error_printer():
+    """The unreachable-API message embeds exception text (paths, URLs). A stray `[/x]` in it is
+    Rich markup and used to crash the printer with MarkupError instead of showing the error."""
+    message = cli._format_api_error(ApiUnreachableError("Could not reach harumi-api: bad path [/tmp/x] [red]y"))
+
+    cli.err_console.print(message)  # must not raise
+    assert "[/tmp/x]" in message.replace("\\[", "[")
+
+
 def test_a_failed_s3_transfer_does_not_blame_the_harumi_platform():
     """`ApiError(0, ...)` is also used for presigned S3 upload/download failures, which say
     nothing about whether Harumi itself is up."""

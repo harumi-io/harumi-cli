@@ -386,7 +386,7 @@ def _format_api_error(exc: ApiError) -> str:
     if isinstance(exc, ApiUnreachableError) or exc.status_code >= 500:
         # harumi-api gave no answer, or a server-side failure: likely an outage, not user error.
         # Not every ApiError(0, ...) qualifies: a failed presigned S3 transfer is not Harumi being down.
-        return f"{exc}\nCheck {active_status_url()} for platform status, or run [bold]harumi status[/bold]."
+        return f"{escape(str(exc))}\nCheck {active_status_url()} for platform status, or run [bold]harumi status[/bold]."
     if exc.status_code != 402:
         return str(exc)
     return (

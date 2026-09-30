@@ -1257,19 +1257,25 @@ def test_stream_reports_a_mid_download_drop_as_an_interrupted_transfer_not_an_ou
     assert "Transfer interrupted" in str(caught.value)
 
 
-def test_stream_retries_once_after_a_401_and_returns_the_second_response(monkeypatch):
-    """Guards the ExitStack restructure of the refresh path."""
-    _write_credentials(refresh_token="refresh-1")
-    calls = []
+def test_stream_retries_once_after_a_401_with_the_refreshed_token(monkeypatch):
+    """Guards the ExitStack restructure of the refresh path, including that the retry really
+    carries the new token rather than replaying the stale one."""
+    from harumi.config import save_credentials
+
+    _write_credentials(access_token="stale", refresh_token="refresh-1")
+    seen = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request.headers.get("authorization"))
-        return httpx.Response(401 if len(calls) == 1 else 200, content=b"ok")
+        seen.append(request.headers.get("authorization"))
+        return httpx.Response(401 if len(seen) == 1 else 200, content=b"ok")
+
+    def fake_refresh(config, refresh_token, transport=None):
+        save_credentials(access_token="fresh", refresh_token=refresh_token)
 
     api = ApiClient(_config(), transport=httpx.MockTransport(handler))
-    monkeypatch.setattr("harumi.auth.refresh_session", lambda *a, **k: None)
+    monkeypatch.setattr("harumi.auth.refresh_session", fake_refresh)
 
     with api.stream("GET", "/x") as response:
         assert response.read() == b"ok"
 
-    assert len(calls) == 2
+    assert seen == ["Bearer stale", "Bearer fresh"]
