@@ -58,6 +58,9 @@ _FORBIDDEN_FUNCTIONS = (
     "read_text", "read_blob", "parquet_scan", "csv_scan", "iceberg_scan",
     "delta_scan", "postgres_scan", "postgres_query", "sqlite_scan", "sqlite_query",
     "mysql_scan", "mysql_query", "glob", "sniff_csv", "parquet_metadata", "parquet_schema",
+    # Reach outside the run output too: spreadsheet/spatial readers, SQL-in-a-string,
+    # and process/secret introspection.
+    "read_xlsx", "st_read", "query", "query_table", "getenv", "duckdb_secrets",
 )
 _FORBIDDEN_FUNCTION_RE = re.compile(r"\b(" + "|".join(_FORBIDDEN_FUNCTIONS) + r")\s*\(", re.IGNORECASE)
 
@@ -66,7 +69,21 @@ class SqlGuardError(ValueError):
     """Raised when a `[[metrics]]` SQL string isn't a single read-only query."""
 
 
-def _mask_literals_and_comments(sql: str) -> Tuple[str, Optional[str]]:
+def _is_e_string_prefix(sql: str, i: int) -> bool:
+    """Whether the quote at `sql[i]` opens an `E'...'` string.
+
+    The `E` must be a token of its own. In `ESCAPE'\\'` the `E` ends a keyword,
+    and treating that quote as an E-string made the backslash swallow the closing
+    quote, hiding every later statement from the scanner.
+    """
+    if i == 0 or sql[i - 1] not in ("E", "e"):
+        return False
+    return i < 2 or not (sql[i - 2].isalnum() or sql[i - 2] in ("_", "$"))
+
+
+def _mask_literals_and_comments(
+    sql: str, quoted: Optional[List[Tuple[int, int, str, str]]] = None
+) -> Tuple[str, Optional[str]]:
     """`sql` with every string literal and comment blanked to spaces of the same
     length (offsets preserved, newlines kept), plus the first delimiter that was
     never closed, if any.
@@ -76,6 +93,10 @@ def _mask_literals_and_comments(sql: str) -> Tuple[str, Optional[str]]:
     `'...'` string (only `''` escapes a quote) and an *escape* only inside an
     `E'...'` string — getting this wrong let `SELECT 'a\\' ; DROP TABLE t` mask
     as one harmless statement against a real DuckDB.
+
+    When `quoted` is given, every closed quoted token is appended to it as
+    `(start, end, quote_char, content)`, since masking erases exactly the text
+    (`"read_csv"(...)`, `FROM 'https://...'`) the later checks need to see.
     """
     out: List[str] = []
     unterminated: Optional[str] = None
@@ -129,6 +150,8 @@ def _mask_literals_and_comments(sql: str) -> Tuple[str, Optional[str]]:
                 if close == -1:
                     unterminated = unterminated or "dollar-quoted string"
                 stop = n if close == -1 else close + len(tag)
+                if quoted is not None and close != -1:
+                    quoted.append((i, stop, "$", sql[tag_end + 1 : close]))
                 blank(i, stop)
                 i = stop
                 continue
@@ -137,8 +160,9 @@ def _mask_literals_and_comments(sql: str) -> Tuple[str, Optional[str]]:
             quote = ch
             # Only E'...' / e'...' opts into backslash escapes; a plain '...'
             # treats \ as a literal character.
-            backslash_escapes = quote == "'" and i > 0 and sql[i - 1] in ("E", "e")
+            backslash_escapes = quote == "'" and _is_e_string_prefix(sql, i)
             out.append(" ")
+            token_start = i
             i += 1
             closed = False
             while i < n:
@@ -152,6 +176,8 @@ def _mask_literals_and_comments(sql: str) -> Tuple[str, Optional[str]]:
                         i += 2
                         continue
                     out.append(" ")
+                    if quoted is not None:
+                        quoted.append((token_start, i + 1, quote, sql[token_start + 1 : i]))
                     i += 1
                     closed = True
                     break
@@ -181,6 +207,72 @@ def _split_statements(masked: str) -> List[Tuple[int, int]]:
     return spans
 
 
+_FROM_OR_JOIN_RE = re.compile(r"\b(FROM|JOIN)\s*$", re.IGNORECASE)
+_IS_DISTINCT_FROM_RE = re.compile(r"\bDISTINCT\s+FROM\s*$", re.IGNORECASE)
+# After a comma or a dot a quoted token may still be a table (`FROM t, 'x.csv'`,
+# `FROM main."/etc/hosts"`), but only inside a FROM clause: in a select or IN list
+# the same text is an ordinary value or column (`SELECT t."report.json"`).
+_TABLE_SEPARATOR_RE = re.compile(r"[,.]\s*$")
+_CLAUSE_KEYWORD_RE = re.compile(
+    r"\b(SELECT|FROM|WHERE|GROUP|ORDER|HAVING|WINDOW|QUALIFY|LIMIT|JOIN)\b", re.IGNORECASE
+)
+# A name DuckDB's replacement scan would open as a file or URL.
+_FILE_LIKE_RE = re.compile(
+    r"[/\\:]|\.(csv|tsv|parquet|json|jsonl|ndjson|txt|xlsx|gz|zst|db|duckdb|sqlite|arrow|avro|orc|geojson|shp|xls|tab|feather|ipc|log)$", re.IGNORECASE
+)
+# Stricter, for a token after a comma or a dot, where an ordinary column name or
+# value (`'N/A'`, `'12:30'`) is far more likely: only a URL, a rooted or relative
+# path, or a data-file extension.
+_STRICT_FILE_LIKE_RE = re.compile(
+    r"^(?:[a-z][a-z0-9+.-]*://|\.{0,2}/)|\.(csv|tsv|parquet|json|jsonl|ndjson|txt|xlsx|gz|zst|db|duckdb|sqlite|arrow|avro|orc|geojson|shp|xls|tab|feather|ipc|log)$", re.IGNORECASE
+)
+
+
+def _in_from_clause(before: str) -> bool:
+    """Whether the innermost clause keyword before this point is FROM or JOIN.
+
+    Parenthesized groups that have already closed are skipped, so a subselect
+    (`FROM (SELECT 1) a, 'x.csv'`) does not hide the FROM around it.
+    """
+    levels: List[str] = [""]
+    for ch in before:
+        if ch == "(":
+            levels.append("")
+        elif ch == ")" and len(levels) > 1:
+            levels.pop()
+        else:
+            levels[-1] += ch
+    keywords = _CLAUSE_KEYWORD_RE.findall(levels[-1])
+    return bool(keywords) and keywords[-1].upper() in ("FROM", "JOIN")
+
+
+def _quoted_source_hazard(masked: str, quoted: List[Tuple[int, int, str, str]]) -> Optional[str]:
+    """The first quoted token that names an outside source or hides a forbidden function.
+
+    Masking blanks quoted text, so two ways in slip past the keyword and
+    function checks. A quoted function name (`"read_csv"('https://...')`) is
+    still the function. And DuckDB reads a string or identifier in table
+    position as a file or URL (`FROM 'https://...'`, `FROM "/etc/hosts"`,
+    `FROM t, 'x.csv'`, `FROM main."x.csv"`). Table position is approximated
+    from the token before: this is a denylist, so the engine setting that turns
+    external access off is the real boundary where there is an engine.
+    """
+    for start, end, quote, content in quoted:
+        if quote in ('"', "`") and re.match(r"\s*\(", masked[end:]) and content.lower() in _FORBIDDEN_FUNCTIONS:
+            return content
+        before = masked[:start]
+        file_like = _FILE_LIKE_RE.search(content) is not None
+        if _FROM_OR_JOIN_RE.search(before):
+            # Only a file-shaped name is a read: `substring(c FROM 'regex')` and
+            # `EXTRACT(year FROM '2024-01-01'::date)` put a string here too, and
+            # `a IS DISTINCT FROM 'x'` is a comparison.
+            if file_like and not _IS_DISTINCT_FROM_RE.search(before):
+                return content
+        elif _TABLE_SEPARATOR_RE.search(before) and _STRICT_FILE_LIKE_RE.search(content) and _in_from_clause(before):
+            return content
+    return None
+
+
 def ensure_read_only_select(sql: str, *, max_chars: int = MAX_SQL_CHARS) -> None:
     """Raises `SqlGuardError` unless `sql` is exactly one read-only statement.
 
@@ -196,7 +288,8 @@ def ensure_read_only_select(sql: str, *, max_chars: int = MAX_SQL_CHARS) -> None
     if len(sql) > max_chars:
         raise SqlGuardError(f"Query is too large to validate ({len(sql)} characters, limit {max_chars}).")
 
-    masked, unterminated = _mask_literals_and_comments(sql)
+    quoted: List[Tuple[int, int, str, str]] = []
+    masked, unterminated = _mask_literals_and_comments(sql, quoted)
     if unterminated:
         raise SqlGuardError(f"Query has an unterminated {unterminated}.")
 
@@ -227,6 +320,16 @@ def ensure_read_only_select(sql: str, *, max_chars: int = MAX_SQL_CHARS) -> None
     if fn:
         raise SqlGuardError(
             f'"{fn.group(1)}" is not permitted in a dashboard metric — it reads a path or URL '
+            "outside the run output. Query the datasets declared in [[datasets]] instead; "
+            "for outside data, connect it as a datasource."
+        )
+
+    hazard = _quoted_source_hazard(
+        masked[start:end], [(a - start, b - start, q, c) for a, b, q, c in quoted if start <= a < end]
+    )
+    if hazard is not None:
+        raise SqlGuardError(
+            f'"{hazard[:60]}" is not permitted in a dashboard metric — it reads a path or URL '
             "outside the run output. Query the datasets declared in [[datasets]] instead; "
             "for outside data, connect it as a datasource."
         )
