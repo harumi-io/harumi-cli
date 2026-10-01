@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import json
 import math
-import re
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
@@ -188,7 +187,9 @@ def _coerce_series(value: Any) -> Optional[List[Dict[str, str]]]:
         if not isinstance(s, dict) or not isinstance(s.get("key"), str):
             continue
         entry = {"key": s["key"], "label": s.get("label") if isinstance(s.get("label"), str) else s["key"]}
-        if isinstance(s.get("color"), str):
+        # Mirrors `coerceSeries`: an invalid color (hex, typo'd name) is dropped
+        # so the series renders in the default gray, rather than dropping the series.
+        if _is_valid_color(s.get("color")):
             entry["color"] = s["color"]
         series.append(entry)
     return series or None
@@ -197,19 +198,25 @@ def _coerce_series(value: Any) -> Optional[List[Dict[str, str]]]:
 _KPI_ITEM_FORMATS = ("number", "currency", "percent")
 _KPI_ITEM_TONES = ("good", "warn", "bad", "neutral")
 
-# Matches harumi-platform's `isValidHexColor` in colors.ts — a syntactically
-# valid CSS hex color (`#rgb`, `#rgba`, `#rrggbb`, or `#rrggbbaa`).
-_HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
+def _is_valid_color(value: Any) -> bool:
+    """A Tailwind color name from the artifact's `colorNames` (`"green-600"`)
+    or a `{ light, dark }` table of two — mirrors `resolveChartColor` in
+    harumi-platform's colors.ts. Hex is not accepted: the platform no longer
+    renders it."""
+    names = _artifact().get("colorNames") or ()
+    if isinstance(value, str):
+        return value in names
+    return isinstance(value, dict) and value.get("light") in names and value.get("dark") in names
 
 
-def _coerce_color_map(value: Any) -> Optional[Dict[str, str]]:
+def _coerce_color_map(value: Any) -> Optional[Dict[str, Any]]:
     """Mirrors `coerceColorMap` in schema.ts: a `colors` table (e.g.
-    `colors = { "Late job" = "#ef4444" }`) keeping only entries whose value is
-    a syntactically valid hex color. Drops the whole field (returns `None`)
-    when nothing survives, same as every other list/table field here."""
+    `colors = { "Late job" = "red-600" }`) keeping only entries whose value is
+    a valid color (see `_is_valid_color`). Drops the whole field (returns
+    `None`) when nothing survives, same as every other list/table field here."""
     if not isinstance(value, dict):
         return None
-    color_map = {key: hex_value for key, hex_value in value.items() if isinstance(hex_value, str) and _HEX_COLOR_RE.match(hex_value)}
+    color_map = {key: color for key, color in value.items() if _is_valid_color(color)}
     return color_map or None
 
 

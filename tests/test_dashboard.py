@@ -75,6 +75,19 @@ _EXPECTED_WIDGET_CONTRACT = {
         "region_resource_key",
         "time_unit",
     ],
+    "map": [
+        "points_key*",
+        "lat_key",
+        "lng_key",
+        "label_key",
+        "id_key",
+        "color_key",
+        "routes_key*",
+        "route_path_key",
+        "route_color_key",
+        "tile_url",
+        "attribution",
+    ],
 }
 
 
@@ -312,6 +325,7 @@ class TestParseWidgetEntry:
             },
             "gantt-chart": {"type": "gantt-chart", "id": "g", "title": "G", "tasks_key": "schedule"},
             "timeline": {"type": "timeline", "id": "tl", "title": "TL", "items_key": "schedule"},
+            "map": {"type": "map", "id": "mp", "title": "MP", "points_key": "stops"},
         }
         for type_, entry in entries.items():
             widget, issue = parse_widget_entry(entry)
@@ -362,7 +376,7 @@ class TestParseWidgetEntry:
         assert widget is not None
         assert widget["columns"] == [{"key": "name", "label": "name"}]
 
-    def test_treemap_colors_table_pins_specific_group_hex_colors(self):
+    def test_treemap_colors_table_pins_specific_group_colors(self):
         widget, issue = parse_widget_entry(
             {
                 "type": "treemap",
@@ -371,26 +385,26 @@ class TestParseWidgetEntry:
                 "items_key": "rows",
                 "value_key": "cost",
                 "name_key": "name",
-                "colors": {"Late job": "#ef4444", "Unassigned": "#6b7280"},
+                "colors": {"Late job": "red-500", "Unassigned": {"light": "gray-500", "dark": "gray-400"}},
             }
         )
         assert issue is None
         assert widget is not None
-        assert widget["colors"] == {"Late job": "#ef4444", "Unassigned": "#6b7280"}
+        assert widget["colors"] == {"Late job": "red-500", "Unassigned": {"light": "gray-500", "dark": "gray-400"}}
 
-    def test_colors_table_drops_a_non_hex_entry_but_keeps_the_valid_ones(self):
+    def test_colors_table_drops_an_invalid_entry_but_keeps_the_valid_ones(self):
         widget, issue = parse_widget_entry(
             {
                 "type": "gantt-chart",
                 "id": "g",
                 "title": "G",
                 "tasks_key": "schedule",
-                "colors": {"Good": "#ef4444", "Bad": "not-a-color"},
+                "colors": {"Good": "red-500", "Hex": "#ef4444", "Bad": "not-a-color"},
             }
         )
         assert issue is None
         assert widget is not None
-        assert widget["colors"] == {"Good": "#ef4444"}
+        assert widget["colors"] == {"Good": "red-500"}
 
     def test_colors_field_is_absent_when_every_entry_is_invalid(self):
         widget, issue = parse_widget_entry(
