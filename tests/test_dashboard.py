@@ -200,6 +200,29 @@ def test_malformed_artifact_raises_a_clear_error(artifact, expected_fragment, tm
         dashboard_module.widget_schemas.cache_clear()
 
 
+@pytest.mark.parametrize("color_names", [None, [], ["red-500", 7]])
+def test_missing_or_malformed_color_names_raises_rather_than_dropping_every_color(color_names, tmp_path, monkeypatch):
+    """An empty fallback would silently drop every `colors` pin and series color."""
+    import harumi.dashboard as dashboard_module
+    from harumi.dashboard import DashboardSchemaError
+
+    artifact = {"version": 1, "widgetTypes": []}
+    if color_names is not None:
+        artifact["colorNames"] = color_names
+    path = tmp_path / "dashboard-schema.json"
+    path.write_text(json.dumps(artifact), encoding="utf-8")
+    monkeypatch.setattr(dashboard_module, "SCHEMA_ARTIFACT_PATH", path)
+
+    dashboard_module._artifact.cache_clear()
+    dashboard_module._color_names.cache_clear()
+    try:
+        with pytest.raises(DashboardSchemaError, match="no colorNames list"):
+            dashboard_module._is_valid_color("red-500")
+    finally:
+        dashboard_module._artifact.cache_clear()
+        dashboard_module._color_names.cache_clear()
+
+
 def test_bad_version_raises_rather_than_coercing(tmp_path, monkeypatch):
     """`int()` would turn 1.9 into 1 and blow up on "v1" with a TypeError."""
     import harumi.dashboard as dashboard_module
@@ -413,6 +436,45 @@ class TestParseWidgetEntry:
         assert issue is None
         assert widget is not None
         assert "colors" not in widget
+
+    def test_series_color_keeps_names_and_pairs_but_drops_hex_and_half_valid_pairs(self):
+        widget, issue = parse_widget_entry(
+            {
+                "type": "chart",
+                "id": "c",
+                "title": "C",
+                "variant": "line",
+                "data_key": "rows",
+                "x_key": "x",
+                "series": [
+                    {"key": "name", "color": "green-600"},
+                    {"key": "pair", "color": {"light": "gray-500", "dark": "gray-400"}},
+                    {"key": "hex", "color": "#ef4444"},
+                    {"key": "half", "color": {"light": "gray-500", "dark": "gray-typo"}},
+                    {"key": "one-sided", "color": {"light": "gray-500"}},
+                    {"key": "unhashable", "color": {"light": ["gray-500"], "dark": "gray-400"}},
+                ],
+            }
+        )
+        assert issue is None
+        assert widget is not None
+        # An invalid color drops only the color, never the series: it renders in the default gray.
+        assert [s.get("color") for s in widget["series"]] == [
+            "green-600",
+            {"light": "gray-500", "dark": "gray-400"},
+            None,
+            None,
+            None,
+            None,
+        ]
+
+    def test_map_with_neither_points_key_nor_routes_key_still_parses(self):
+        """Mirrors the platform: both keys are optional in the schema, and a map
+        with neither isn't dropped. It renders a config-error empty state
+        instead, so it parses here too rather than being reported as dropped."""
+        widget, issue = parse_widget_entry({"type": "map", "id": "m", "title": "M"})
+        assert issue is None
+        assert widget is not None and "points_key" not in widget and "routes_key" not in widget
 
     def test_kpi_rail_drops_invalid_items_but_keeps_valid_ones(self):
         entry = {

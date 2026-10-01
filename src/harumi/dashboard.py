@@ -198,15 +198,31 @@ def _coerce_series(value: Any) -> Optional[List[Dict[str, str]]]:
 _KPI_ITEM_FORMATS = ("number", "currency", "percent")
 _KPI_ITEM_TONES = ("good", "warn", "bad", "neutral")
 
+@lru_cache(maxsize=1)
+def _color_names() -> frozenset:
+    """The artifact's `colorNames`, validated. Loud on a missing or malformed
+    list, the same as `_artifact()` is on a missing `widgetTypes`: an empty
+    fallback would silently drop every `colors` pin and series `color`.
+    Checked here rather than in `_artifact()` because only color validation
+    needs it."""
+    names = _artifact().get("colorNames")
+    if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names):
+        raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name} has no colorNames list")
+    return frozenset(names)
+
+
 def _is_valid_color(value: Any) -> bool:
     """A Tailwind color name from the artifact's `colorNames` (`"green-600"`)
     or a `{ light, dark }` table of two — mirrors `resolveChartColor` in
     harumi-platform's colors.ts. Hex is not accepted: the platform no longer
     renders it."""
-    names = _artifact().get("colorNames") or ()
+    names = _color_names()
     if isinstance(value, str):
         return value in names
-    return isinstance(value, dict) and value.get("light") in names and value.get("dark") in names
+    if not isinstance(value, dict):
+        return False
+    light, dark = value.get("light"), value.get("dark")
+    return isinstance(light, str) and isinstance(dark, str) and light in names and dark in names
 
 
 def _coerce_color_map(value: Any) -> Optional[Dict[str, Any]]:

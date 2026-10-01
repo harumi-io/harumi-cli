@@ -145,7 +145,7 @@ value_key = "cost"
 name_key = "name"
 ```
 
-Matching `output.json`: `{"categories": [{"name": "Materials", "cost": 41200}]}`. Rectangle area is proportional to `value_key`; `color_key` optionally groups rectangles into a categorical color. `colors` pins specific `color_key` values to specific Tailwind color names (or a `{ light, dark }` pair of names), e.g. `colors = { "Late job" = "red-600", "Unassigned" = { light = "gray-500", dark = "gray-400" } }` — hex is not accepted — every other value keeps auto-cycling through the default palette (skipping any color pinned here). `capacity_key` is a dot-path to a total-capacity number — when the rows' summed `value_key` is less than this, a synthetic "Free" tile fills the remainder, so area doubles as a capacity gauge; omitted, or at/below the summed value, adds no tile.
+Matching `output.json`: `{"categories": [{"name": "Materials", "cost": 41200}]}`. Rectangle area is proportional to `value_key`; `color_key` optionally groups rectangles into a categorical color. `colors` pins specific `color_key` values to Tailwind color names, or `{ light, dark }` pairs of names. For example: `colors = { "Late job" = "red-600", "Unassigned" = { light = "neutral-400", dark = "neutral-600" } }`. Hex is not accepted. Every other value still cycles through the default grays, skipping any color pinned here. `capacity_key` is a dot-path to a total-capacity number — when the rows' summed `value_key` is less than this, a synthetic "Free" tile fills the remainder, so area doubles as a capacity gauge; omitted, or at/below the summed value, adds no tile.
 
 ### `heatmap` — entity x time-bucket grid
 
@@ -227,7 +227,7 @@ Semantics worth knowing:
 - `resource_key`/`label_key`/`start_key`/`end_key` default to `resource`/`task`/`start`/`end` and are fields within each task object, not dot-paths.
 - Set either `end_key` or `duration_key` (added to the start). If both are set, `end_key` wins. A task resolving neither is dropped from the chart.
 - `color_key` names a field grouping tasks into a categorical color (e.g. tasks belonging to the same job).
-- `colors` pins specific `color_key` values to specific Tailwind color names (or a `{ light, dark }` pair of names), e.g. `colors = { "Late job" = "red-600", "Unassigned" = { light = "gray-500", dark = "gray-400" } }` — hex is not accepted — every other value keeps auto-cycling through the default palette (skipping any color pinned here). Same field on `timeline`.
+- `colors` pins specific `color_key` values to Tailwind color names, or `{ light, dark }` pairs of names. For example: `colors = { "Late job" = "red-600", "Unassigned" = { light = "neutral-400", dark = "neutral-600" } }`. Hex is not accepted. Every other value still cycles through the default grays, skipping any color pinned here. Same field on `timeline`.
 - `time_unit` is either a plain display suffix (e.g. `"min"`, the default reading — start/end/duration are bare numbers with that unit) or a wall-clock sentinel: `"epoch"` (seconds since epoch), `"epoch_ms"` (milliseconds), or `"iso"` (an ISO 8601 string) — any of the three render as a real date/time instead of a bare number, and scale a `[clock]` transport bar's playback speed accordingly.
 
 `timeline` is the same shape plus more: fragmented tasks fold into one item with gaps (`id_key`), non-working spans render as background bands (`regions_key` + `region_*`), and a `[clock]` section (see below) drives a now-marker over it.
