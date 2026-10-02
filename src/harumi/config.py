@@ -153,7 +153,7 @@ def active_platform_url() -> str:
     env_config = _read_json(env_config_path(name))
     url = (
         os.environ.get("HARUMI_PLATFORM_URL")
-        or env_config.get("platform_url")
+        or _str_setting(env_config, "platform_url")
         or ENVIRONMENTS[name].platform_url
     )
     return url.rstrip("/")
@@ -342,19 +342,19 @@ class Config:
         resolved_api_url = (
             api_url
             or os.environ.get("HARUMI_API_URL")
-            or env_config.get("api_url")
+            or _str_setting(env_config, "api_url")
             or env.api_url
         )
         resolved_git_url = (
             git_url
             or os.environ.get("HARUMI_GIT_URL")
-            or env_config.get("git_url")
+            or _str_setting(env_config, "git_url")
             or env.git_url
         )
         resolved_org_id = (
             org_id
             or os.environ.get("HARUMI_ORG")
-            or env_config.get("org_id")
+            or _str_setting(env_config, "org_id")
         )
         return cls(
             api_url=resolved_api_url.rstrip("/"),

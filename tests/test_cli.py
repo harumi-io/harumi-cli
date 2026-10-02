@@ -521,10 +521,17 @@ def test_a_non_string_status_or_api_url_in_config_json_does_not_crash_the_error_
 
     path = env_config_path("production")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"status_url": 5, "api_url": ["x"]}))
+    path.write_text(json.dumps({"status_url": 5, "api_url": ["x"], "platform_url": 7, "git_url": {}, "org_id": 3}))
 
     err = ApiUnreachableError("Could not reach harumi-api: x")
     assert "status.harumi.io" in cli._format_api_error(err)
+    # Config.load and the platform URL read the same file and must not crash either.
+    from harumi.config import Config, active_platform_url
+
+    config = Config.load()
+    assert config.api_url == "https://api.harumi.io/api"
+    assert config.org_id is None
+    assert active_platform_url() == "https://platform.harumi.io"
 
 
 def test_status_command_honors_a_status_url_override(monkeypatch):
