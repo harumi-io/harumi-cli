@@ -131,7 +131,9 @@ def resolve_environment(explicit: Optional[str] = None) -> str:
         or _read_json(CONFIG_PATH).get("environment")
         or DEFAULT_ENVIRONMENT
     )
-    if name not in ENVIRONMENTS:
+    # `isinstance` first: a hand-edited non-string in config.json (a list is unhashable)
+    # would otherwise raise a TypeError from the `in` test instead of this message.
+    if not isinstance(name, str) or name not in ENVIRONMENTS:
         known = ", ".join(sorted(ENVIRONMENTS))
         raise ValueError(f"Unknown environment {name!r}. Known environments: {known}.")
     return name

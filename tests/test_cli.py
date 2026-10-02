@@ -534,6 +534,20 @@ def test_a_non_string_status_or_api_url_in_config_json_does_not_crash_the_error_
     assert active_platform_url() == "https://platform.harumi.io"
 
 
+@pytest.mark.parametrize("value", [["staging"], {"a": 1}, 5, True])
+def test_a_non_string_environment_in_the_global_config_is_a_clear_error_not_a_crash(value):
+    """An unknown *name* already raises a readable ValueError. A hand-edited non-string
+    (a list is unhashable) must get the same, not a TypeError -- and must not silently
+    fall back to production when the user meant something else."""
+    import json
+
+    from harumi import config
+
+    config.CONFIG_PATH.write_text(json.dumps({"environment": value}))
+    with pytest.raises(ValueError, match="Unknown environment"):
+        config.resolve_environment()
+
+
 def test_status_command_honors_a_status_url_override(monkeypatch):
     seen = []
 
