@@ -513,6 +513,20 @@ def test_a_stock_api_url_passed_explicitly_still_gets_the_hint(monkeypatch):
     assert "status.harumi.io" in cli._format_api_error(ApiUnreachableError("Could not reach harumi-api: x"))
 
 
+def test_a_non_string_status_or_api_url_in_config_json_does_not_crash_the_error_path(tmp_path):
+    """A hand-edited config.json is the one input here nobody validates."""
+    import json
+
+    from harumi.config import env_config_path
+
+    path = env_config_path("production")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"status_url": 5, "api_url": ["x"]}))
+
+    err = ApiUnreachableError("Could not reach harumi-api: x")
+    assert "status.harumi.io" in cli._format_api_error(err)
+
+
 def test_status_command_honors_a_status_url_override(monkeypatch):
     seen = []
 

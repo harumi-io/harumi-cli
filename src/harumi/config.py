@@ -159,6 +159,13 @@ def active_platform_url() -> str:
     return url.rstrip("/")
 
 
+def _str_setting(env_config: dict[str, Any], key: str) -> Optional[str]:
+    """A string from an env config.json, or `None` for anything else -- a hand-edited
+    `"status_url": 5` should fall back to the default, not crash the error path."""
+    value = env_config.get(key)
+    return value if isinstance(value, str) and value else None
+
+
 def active_status_url() -> str:
     """Status page URL for the active environment (honors the same
     HARUMI_STATUS_URL / env config.json `status_url` override as
@@ -167,7 +174,7 @@ def active_status_url() -> str:
     env_config = _read_json(env_config_path(name))
     url = (
         os.environ.get("HARUMI_STATUS_URL")
-        or env_config.get("status_url")
+        or _str_setting(env_config, "status_url")
         or ENVIRONMENTS[name].status_url
     )
     return url.rstrip("/")
@@ -183,9 +190,9 @@ def status_hint_url() -> Optional[str]:
     """
     name = active_environment()
     env_config = _read_json(env_config_path(name))
-    api_override = os.environ.get("HARUMI_API_URL") or env_config.get("api_url")
+    api_override = os.environ.get("HARUMI_API_URL") or _str_setting(env_config, "api_url")
     api_is_stock = not api_override or api_override.rstrip("/") == ENVIRONMENTS[name].api_url.rstrip("/")
-    status_override = os.environ.get("HARUMI_STATUS_URL") or env_config.get("status_url")
+    status_override = os.environ.get("HARUMI_STATUS_URL") or _str_setting(env_config, "status_url")
     return active_status_url() if (api_is_stock or status_override) else None
 
 
