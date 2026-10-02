@@ -346,7 +346,7 @@
     },
     {
       "type": "kpi-rail",
-      "description": "Several KPI tiles in one horizontal row — for a handful of related numbers that read better side by side than as separate `metric` widgets competing for grid columns.",
+      "description": "Several KPI tiles in one horizontal row — for a handful of related numbers that read better side by side than as separate `metric` widgets competing for grid columns. Keep a rail homogeneous: tiles of very different shapes are hard to lay out side by side, so use either 3–6 single-value tiles or 1–3 `rows_key` lists with a similar number of rows — not both in one rail. Put a per-entity breakdown (per machine, per shift) in a `table` or chart instead of a tall `rows_key` tile beside single values.",
       "fields": [
         {
           "tomlKey": "items",
