@@ -951,6 +951,20 @@ value_key = "objective"
         assert issues == []
 
 
+def test_every_color_bearing_field_kind_is_checked_for_ignored_values():
+    """`widget_warnings` scans the `series` and `colorMap` field kinds. If the vendored schema
+    ever adds another kind that carries colors, it would silently bypass the warnings; this
+    fails on a refresh that introduces one, so it gets a check (or is added here on purpose)."""
+    from harumi.dashboard import _KNOWN_FIELD_KINDS
+
+    checked = {"series", "colorMap"}
+    carries_no_color = {"string", "number", "enum", "columns", "kpiItems"}
+    assert _KNOWN_FIELD_KINDS == checked | carries_no_color, (
+        "a new field kind was added to the schema: decide whether it carries colors and, if so, "
+        "teach widget_warnings to check it"
+    )
+
+
 class TestColorAndMapWarnings:
     """`parse_widget_entry` mirrors the platform's permissive parse, which drops an
     invalid color or a non-https `tile_url` without a word. `validate` has to say so,

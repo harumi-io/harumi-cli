@@ -203,6 +203,7 @@ def isolated_harumi_home(tmp_path, monkeypatch):
     monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "credentials.json")
     monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "config.json")
     monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
+    monkeypatch.setattr("harumi.config._RESOLVED_API_URL", None)
     for var in ("HARUMI_ENV", "HARUMI_API_URL", "HARUMI_GIT_URL", "HARUMI_ORG", "HARUMI_STATUS_URL"):
         monkeypatch.delenv(var, raising=False)
     # Rich truncates table cells to the terminal width; widen it so assertions
@@ -261,7 +262,7 @@ def api(monkeypatch) -> FakeApi:
 
     def _get_client(api_url=None, git_url=None, org=None) -> Client:
         return Client(
-            api_url="https://harumi-api.test/api",
+            api_url="https://api.harumi.io/api",
             git_url=git_url,
             org_id=org,
             transport=transport,
@@ -389,7 +390,7 @@ def test_a_connection_failure_is_an_error_message_not_a_traceback(monkeypatch, b
         cli,
         "_get_client",
         lambda api_url=None, git_url=None, org=None: Client(
-            api_url="https://harumi-api.test/api", transport=httpx.MockTransport(refuse)
+            api_url="https://api.harumi.io/api", transport=httpx.MockTransport(refuse)
         ),
     )
 
@@ -506,6 +507,22 @@ def test_status_hint_returns_with_an_explicit_status_url_override(monkeypatch):
     monkeypatch.setenv("HARUMI_API_URL", "http://localhost:8000/api")
     monkeypatch.setenv("HARUMI_STATUS_URL", "http://localhost:8080/")
     assert "Check http://localhost:8080 for platform status" in cli._format_api_error(err)
+
+
+def test_no_status_hint_when_the_api_url_came_from_the_flag():
+    """`--api-url` is resolved in Config.load, not via the environment, so the hint has to
+    look at the URL the client actually used."""
+    from harumi.config import Config
+
+    Config.load(api_url="http://localhost:8000/api")
+    assert "status.harumi.io" not in cli._format_api_error(ApiUnreachableError("Could not reach harumi-api: x"))
+
+
+def test_a_stock_api_url_passed_as_the_flag_still_gets_the_hint():
+    from harumi.config import Config
+
+    Config.load(api_url="https://api.harumi.io/api/")
+    assert "status.harumi.io" in cli._format_api_error(ApiUnreachableError("Could not reach harumi-api: x"))
 
 
 def test_a_stock_api_url_passed_explicitly_still_gets_the_hint(monkeypatch):

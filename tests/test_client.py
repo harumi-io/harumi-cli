@@ -23,6 +23,7 @@ def isolated_harumi_home(tmp_path, monkeypatch):
     monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "credentials.json")
     monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "config.json")
     monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
+    monkeypatch.setattr("harumi.config._RESOLVED_API_URL", None)
     monkeypatch.delenv("HARUMI_ENV", raising=False)
     monkeypatch.delenv("HARUMI_API_URL", raising=False)
     monkeypatch.delenv("HARUMI_STATUS_URL", raising=False)

@@ -139,6 +139,12 @@ def resolve_environment(explicit: Optional[str] = None) -> str:
     return name
 
 
+# The API URL the most recent `Config.load` resolved -- including a one-off `--api-url`
+# flag, which never touches the environment or config.json. The unreachable-API hint reads
+# it so it can tell a stock stack from a local one.
+_RESOLVED_API_URL: Optional[str] = None
+
+
 def set_active_environment(name: str) -> None:
     global _ACTIVE_ENV
     _ACTIVE_ENV = name
@@ -185,15 +191,15 @@ def active_status_url() -> str:
 def status_hint_url() -> Optional[str]:
     """The status page to point an unreachable-API error at, or `None`.
 
-    The stock status page says nothing about a self-hosted or local stack, so
-    when the API URL is overridden (HARUMI_API_URL / env config.json `api_url`)
-    the hint is only shown if a `status_url` override says where that stack's
-    status lives. A one-off `--api-url` flag is not visible from here.
+    The stock status page says nothing about a self-hosted or local stack, so when the API
+    URL in use is not the environment's own (`--api-url`, HARUMI_API_URL, or `api_url` in
+    config.json) the hint is only shown if a `status_url` override says where that stack's
+    status lives.
     """
     name = active_environment()
     env_config = _read_json(env_config_path(name))
-    api_override = os.environ.get("HARUMI_API_URL") or _str_setting(env_config, "api_url")
-    api_is_stock = not api_override or api_override.rstrip("/") == ENVIRONMENTS[name].api_url.rstrip("/")
+    api_in_use = _RESOLVED_API_URL or os.environ.get("HARUMI_API_URL") or _str_setting(env_config, "api_url")
+    api_is_stock = not api_in_use or api_in_use.rstrip("/") == ENVIRONMENTS[name].api_url.rstrip("/")
     status_override = os.environ.get("HARUMI_STATUS_URL") or _str_setting(env_config, "status_url")
     return active_status_url() if (api_is_stock or status_override) else None
 
@@ -347,6 +353,8 @@ class Config:
             or _str_setting(env_config, "api_url")
             or env.api_url
         )
+        global _RESOLVED_API_URL
+        _RESOLVED_API_URL = resolved_api_url.rstrip("/")
         resolved_git_url = (
             git_url
             or os.environ.get("HARUMI_GIT_URL")

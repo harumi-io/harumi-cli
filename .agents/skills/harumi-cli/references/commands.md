@@ -480,6 +480,8 @@ Within the active environment, URL/org overrides (highest first): **CLI flags > 
 | API base URL | `HARUMI_API_URL` | `api_url` | environment's `api_url` |
 | Gitea URL | `HARUMI_GIT_URL` | `git_url` | environment's `git_url` |
 | Org id (`X-Organization`) | `HARUMI_ORG` | `org_id` | none (from login) |
+| Web app URL (printed project links) | `HARUMI_PLATFORM_URL` | `platform_url` | environment's `platform_url` |
+| Status page (`harumi status`, unreachable-API hint) | `HARUMI_STATUS_URL` | `status_url` | environment's `status_url` |
 
 - `~/.harumi/config.json` — global; stores only the selected `environment`.
 - `~/.harumi/environments/<env>/credentials.json` — per-environment `access_token`, `refresh_token`, `git_token`, `git_url`, `user_id`, `email`, `expires_at`; mode `0600`.
