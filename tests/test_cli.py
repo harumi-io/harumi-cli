@@ -203,7 +203,7 @@ def isolated_harumi_home(tmp_path, monkeypatch):
     monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "credentials.json")
     monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "config.json")
     monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
-    for var in ("HARUMI_ENV", "HARUMI_API_URL", "HARUMI_GIT_URL", "HARUMI_ORG"):
+    for var in ("HARUMI_ENV", "HARUMI_API_URL", "HARUMI_GIT_URL", "HARUMI_ORG", "HARUMI_STATUS_URL"):
         monkeypatch.delenv(var, raising=False)
     # Rich truncates table cells to the terminal width; widen it so assertions
     # can match full ids instead of ellipsized ones.
@@ -491,6 +491,74 @@ def test_a_failed_s3_transfer_does_not_blame_the_harumi_platform():
     nothing about whether Harumi itself is up."""
     assert "status.harumi.io" not in cli._format_api_error(ApiError(0, "Upload failed: S3 timed out"))
     assert "status.harumi.io" in cli._format_api_error(ApiUnreachableError("Could not reach harumi-api: x"))
+
+
+def test_no_status_hint_when_the_api_url_is_overridden(monkeypatch):
+    """The stock status page says nothing about a self-hosted or local stack."""
+    err = ApiUnreachableError("Could not reach harumi-api: x")
+    monkeypatch.setenv("HARUMI_API_URL", "http://localhost:8000/api")
+    assert "status.harumi.io" not in cli._format_api_error(err)
+    assert "harumi status" not in cli._format_api_error(err)
+
+
+def test_status_hint_returns_with_an_explicit_status_url_override(monkeypatch):
+    err = ApiUnreachableError("Could not reach harumi-api: x")
+    monkeypatch.setenv("HARUMI_API_URL", "http://localhost:8000/api")
+    monkeypatch.setenv("HARUMI_STATUS_URL", "http://localhost:8080/")
+    assert "Check http://localhost:8080 for platform status" in cli._format_api_error(err)
+
+
+def test_a_stock_api_url_passed_explicitly_still_gets_the_hint(monkeypatch):
+    monkeypatch.setenv("HARUMI_API_URL", "https://api.harumi.io/api/")
+    assert "status.harumi.io" in cli._format_api_error(ApiUnreachableError("Could not reach harumi-api: x"))
+
+
+def test_a_non_string_status_or_api_url_in_config_json_does_not_crash_the_error_path(tmp_path):
+    """A hand-edited config.json is the one input here nobody validates."""
+    import json
+
+    from harumi.config import env_config_path
+
+    path = env_config_path("production")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"status_url": 5, "api_url": ["x"], "platform_url": 7, "git_url": {}, "org_id": 3}))
+
+    err = ApiUnreachableError("Could not reach harumi-api: x")
+    assert "status.harumi.io" in cli._format_api_error(err)
+    # Config.load and the platform URL read the same file and must not crash either.
+    from harumi.config import Config, active_platform_url
+
+    config = Config.load()
+    assert config.api_url == "https://api.harumi.io/api"
+    assert config.org_id is None
+    assert active_platform_url() == "https://platform.harumi.io"
+
+
+@pytest.mark.parametrize("value", [["staging"], {"a": 1}, 5, True])
+def test_a_non_string_environment_in_the_global_config_is_a_clear_error_not_a_crash(value):
+    """An unknown *name* already raises a readable ValueError. A hand-edited non-string
+    (a list is unhashable) must get the same, not a TypeError -- and must not silently
+    fall back to production when the user meant something else."""
+    import json
+
+    from harumi import config
+
+    config.CONFIG_PATH.write_text(json.dumps({"environment": value}))
+    with pytest.raises(ValueError, match="Unknown environment"):
+        config.resolve_environment()
+
+
+def test_status_command_honors_a_status_url_override(monkeypatch):
+    seen = []
+
+    def fake_get(url, **_):
+        seen.append(url)
+        raise httpx.ConnectError("stop here")
+
+    monkeypatch.setenv("HARUMI_STATUS_URL", "http://status.internal/")
+    monkeypatch.setattr(cli.httpx, "get", fake_get)
+    runner.invoke(cli.app, ["status"])
+    assert seen == ["http://status.internal/api/v1/endpoints/statuses"]
 
 
 def test_status_reports_an_unreachable_status_page(monkeypatch):
@@ -1574,6 +1642,34 @@ def test_share_update_only_sends_provided_fields(api):
     assert result.exit_code == 0, result.output
     body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
     assert body == {"run_control_enabled": True}
+
+
+def test_share_add_still_accepts_the_removed_io_control_flag_with_a_warning(api):
+    """`--io-control` was dropped with the server permission. Scripts and CI jobs that
+    still pass it must keep working (exit 0), not fail with a usage error (exit 2)."""
+    api.route("POST", "/api/projects/proj-1/share-links", SHARE_LINK, status=201)
+
+    result = runner.invoke(cli.app, ["share", "add", "--io-control", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "no longer does anything" in result.output
+    body = api.body_for("POST", "/api/projects/proj-1/share-links")
+    assert "io_control_enabled" not in body
+
+
+def test_share_update_still_accepts_the_removed_io_control_flag_with_a_warning(api):
+    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
+
+    result = runner.invoke(cli.app, ["share", "update", "link-1", "--no-io-control", "--chat", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "no longer does anything" in result.output
+    assert api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1") == {"chat_enabled": True}
+
+
+def test_the_removed_io_control_flag_is_hidden_from_help():
+    result = runner.invoke(cli.app, ["share", "add", "--help"])
+    assert "io-control" not in result.output
 
 
 def test_share_update_forwards_app_flag(api):

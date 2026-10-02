@@ -321,7 +321,21 @@ STILL_ACCEPTED = [
     'SELECT * FROM t GROUP BY a, "b.csv"',
     "SELECT * FROM t WHERE k IN ('a/b', 'c:d')",
     'SELECT "a.b", "c/d" FROM t',
+    # `query` is a forbidden *function* (DuckDB's SQL-in-a-string table function),
+    # not a forbidden word: a column or alias that is merely called `query` is a
+    # plain identifier and must keep working.
+    "SELECT a.query FROM t a",
+    "SELECT query FROM searches",
+    "SELECT count(*) AS query FROM t",
 ]
+
+
+@pytest.mark.parametrize("sql", ["SELECT * FROM query('SELECT 1')", "SELECT * FROM query ('SELECT 1')", "SELECT * FROM QUERY('SELECT 1')"])
+def test_the_query_function_is_rejected_but_only_the_call(sql):
+    """The intended behaviour of the denylist entry: `query(` is refused, a column
+    named `query` (see STILL_ACCEPTED) is not. A user-defined macro called `query`
+    is refused too -- a known, acceptable false positive of a name-based denylist."""
+    assert _rejects(sql) is not None
 
 
 @pytest.mark.parametrize("sql", BYPASSES)

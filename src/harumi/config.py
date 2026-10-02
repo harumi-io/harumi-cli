@@ -131,7 +131,9 @@ def resolve_environment(explicit: Optional[str] = None) -> str:
         or _read_json(CONFIG_PATH).get("environment")
         or DEFAULT_ENVIRONMENT
     )
-    if name not in ENVIRONMENTS:
+    # `isinstance` first: a hand-edited non-string in config.json (a list is unhashable)
+    # would otherwise raise a TypeError from the `in` test instead of this message.
+    if not isinstance(name, str) or name not in ENVIRONMENTS:
         known = ", ".join(sorted(ENVIRONMENTS))
         raise ValueError(f"Unknown environment {name!r}. Known environments: {known}.")
     return name
@@ -153,15 +155,47 @@ def active_platform_url() -> str:
     env_config = _read_json(env_config_path(name))
     url = (
         os.environ.get("HARUMI_PLATFORM_URL")
-        or env_config.get("platform_url")
+        or _str_setting(env_config, "platform_url")
         or ENVIRONMENTS[name].platform_url
     )
     return url.rstrip("/")
 
 
+def _str_setting(env_config: dict[str, Any], key: str) -> Optional[str]:
+    """A string from an env config.json, or `None` for anything else -- a hand-edited
+    `"status_url": 5` should fall back to the default, not crash the error path."""
+    value = env_config.get(key)
+    return value if isinstance(value, str) and value else None
+
+
 def active_status_url() -> str:
-    """Status page URL for the active environment."""
-    return ENVIRONMENTS[active_environment()].status_url
+    """Status page URL for the active environment (honors the same
+    HARUMI_STATUS_URL / env config.json `status_url` override as
+    `active_platform_url`)."""
+    name = active_environment()
+    env_config = _read_json(env_config_path(name))
+    url = (
+        os.environ.get("HARUMI_STATUS_URL")
+        or _str_setting(env_config, "status_url")
+        or ENVIRONMENTS[name].status_url
+    )
+    return url.rstrip("/")
+
+
+def status_hint_url() -> Optional[str]:
+    """The status page to point an unreachable-API error at, or `None`.
+
+    The stock status page says nothing about a self-hosted or local stack, so
+    when the API URL is overridden (HARUMI_API_URL / env config.json `api_url`)
+    the hint is only shown if a `status_url` override says where that stack's
+    status lives. A one-off `--api-url` flag is not visible from here.
+    """
+    name = active_environment()
+    env_config = _read_json(env_config_path(name))
+    api_override = os.environ.get("HARUMI_API_URL") or _str_setting(env_config, "api_url")
+    api_is_stock = not api_override or api_override.rstrip("/") == ENVIRONMENTS[name].api_url.rstrip("/")
+    status_override = os.environ.get("HARUMI_STATUS_URL") or _str_setting(env_config, "status_url")
+    return active_status_url() if (api_is_stock or status_override) else None
 
 
 def save_environment(name: str) -> None:
@@ -310,19 +344,19 @@ class Config:
         resolved_api_url = (
             api_url
             or os.environ.get("HARUMI_API_URL")
-            or env_config.get("api_url")
+            or _str_setting(env_config, "api_url")
             or env.api_url
         )
         resolved_git_url = (
             git_url
             or os.environ.get("HARUMI_GIT_URL")
-            or env_config.get("git_url")
+            or _str_setting(env_config, "git_url")
             or env.git_url
         )
         resolved_org_id = (
             org_id
             or os.environ.get("HARUMI_ORG")
-            or env_config.get("org_id")
+            or _str_setting(env_config, "org_id")
         )
         return cls(
             api_url=resolved_api_url.rstrip("/"),

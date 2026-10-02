@@ -25,6 +25,7 @@ def isolated_harumi_home(tmp_path, monkeypatch):
     monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
     monkeypatch.delenv("HARUMI_ENV", raising=False)
     monkeypatch.delenv("HARUMI_API_URL", raising=False)
+    monkeypatch.delenv("HARUMI_STATUS_URL", raising=False)
     monkeypatch.delenv("HARUMI_GIT_URL", raising=False)
     monkeypatch.delenv("HARUMI_ORG", raising=False)
     yield
@@ -1279,3 +1280,42 @@ def test_stream_retries_once_after_a_401_with_the_refreshed_token(monkeypatch):
         assert response.read() == b"ok"
 
     assert seen == ["Bearer stale", "Bearer fresh"]
+
+
+def test_stream_closes_the_401_response_before_retrying(monkeypatch):
+    """Both attempts used to be entered on one ExitStack, so the rejected response (and
+    its connection) stayed open for the whole download. It must be closed before the
+    retry is opened."""
+    from harumi.config import save_credentials
+
+    _write_credentials(access_token="stale", refresh_token="refresh-1")
+    events = []
+
+    class Tracked(httpx.SyncByteStream):
+        def __init__(self, label):
+            self.label = label
+
+        def __iter__(self):
+            yield b"ok"
+
+        def close(self):
+            events.append(f"closed {self.label}")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        first = request.headers.get("authorization") == "Bearer stale"
+        events.append("opened 401" if first else "opened 200")
+        return httpx.Response(401 if first else 200, stream=Tracked("401" if first else "200"))
+
+    def fake_refresh(config, refresh_token, transport=None):
+        events.append("refreshed")
+        save_credentials(access_token="fresh", refresh_token=refresh_token)
+
+    api = ApiClient(_config(), transport=httpx.MockTransport(handler))
+    monkeypatch.setattr("harumi.auth.refresh_session", fake_refresh)
+
+    with api.stream("GET", "/x") as response:
+        assert response.read() == b"ok"
+        events.append("body read")
+
+    assert events.index("closed 401") < events.index("refreshed") < events.index("opened 200")
+    assert events.index("opened 200") < events.index("body read")
