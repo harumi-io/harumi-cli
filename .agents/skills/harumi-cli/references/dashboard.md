@@ -28,7 +28,7 @@ To add a second dashboard to a project that has the root file, leave it alone an
 
 The platform's parser (`parseDashboardConfig` in harumi-platform) is deliberately forgiving: a widget with an unknown `type`, a missing required key, or a renamed key (e.g. `valueKey` instead of `value_key`) is **silently dropped** — the dashboard renders everything else and the bad widget just doesn't appear, with no error surfaced to whoever edited the file. A widget whose dot-path doesn't resolve against a real run's `output.json` renders, but empty.
 
-Always run `harumi dashboard validate` before `harumi repo put` (or before telling the user a dashboard edit is done) — it's the only place in the toolchain that fails loudly.
+Always run `harumi dashboard validate` before `harumi repo put` (or before telling the user a dashboard edit is done) — it's the only place in the toolchain that fails loudly. Besides dropped entries it reports values the platform accepts but silently ignores (`ignored`): a color that isn't a Tailwind name like `red-600` or a `{ light, dark }` pair (hex is not accepted, so `color = "#ef4444"` falls back to the default color), a `map` with neither `points_key` nor `routes_key`, and a `tile_url` that isn't `https://`.
 
 ## The widget types
 

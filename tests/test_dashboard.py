@@ -951,6 +951,89 @@ value_key = "objective"
         assert issues == []
 
 
+class TestColorAndMapWarnings:
+    """`parse_widget_entry` mirrors the platform's permissive parse, which drops an
+    invalid color or a non-https `tile_url` without a word. `validate` has to say so,
+    or a spec that used hex before schema v12 passes clean while losing its colors."""
+
+    @staticmethod
+    def _validate(body: str):
+        return validate_dashboard_toml(body)
+
+    @staticmethod
+    def _series(color: str) -> str:
+        return (
+            "[[widgets]]\ntype = 'line-chart'\nid = 'c'\ntitle = 'C'\ndata_key = 'rows'\nx_key = 'x'\n"
+            f"series = [{{ key = 'v', color = {color} }}]\n"
+        )
+
+    @pytest.mark.parametrize(
+        "color",
+        ["'red-600'", "{ light = 'green-600', dark = 'green-400' }", "'black'"],
+    )
+    def test_a_valid_series_color_is_not_flagged(self, color):
+        widgets, issues = self._validate(self._series(color))
+        assert len(widgets) == 1
+        assert widgets[0]["series"][0]["color"]  # kept, not dropped
+        assert issues == []
+
+    def test_a_hex_series_color_is_flagged_and_the_widget_still_renders(self):
+        widgets, issues = self._validate(self._series("'#ef4444'"))
+        assert len(widgets) == 1
+        assert "color" not in widgets[0]["series"][0]  # dropped, as the platform does
+        assert len(issues) == 1
+        assert issues[0].dropped is False and issues[0].label == "ignored"
+        assert "#ef4444" in issues[0].message and "hex isn't supported" in issues[0].message
+        assert "series[1].color" in issues[0].message
+
+    @pytest.mark.parametrize(
+        "color",
+        [
+            "'reed-600'",  # typo
+            "'red'",  # a hue with no shade is not a name in colorNames
+            "{ light = 'green-600', dark = 'nope' }",  # pair with one bad half
+            "{ light = 'green-600' }",  # pair missing its dark half
+        ],
+    )
+    def test_other_invalid_series_colors_are_flagged(self, color):
+        widgets, issues = self._validate(self._series(color))
+        assert len(widgets) == 1
+        assert len(issues) == 1 and issues[0].dropped is False
+        assert "hex isn't supported" not in issues[0].message
+
+    def test_each_invalid_colors_table_entry_is_flagged_and_valid_ones_are_not(self):
+        raw = (
+            "[[widgets]]\ntype = 'treemap'\nid = 't'\ntitle = 'T'\nitems_key = 'rows'\n"
+            "value_key = 'cost'\nname_key = 'name'\n"
+            "colors = { Good = 'red-500', Hex = '#ef4444', Bad = 'not-a-color' }\n"
+        )
+        widgets, issues = self._validate(raw)
+        assert widgets[0]["colors"] == {"Good": "red-500"}
+        assert len(issues) == 2
+        assert any("'Hex'" in i.message for i in issues) and any("'Bad'" in i.message for i in issues)
+
+    def test_a_map_with_neither_points_nor_routes_is_flagged(self):
+        widgets, issues = self._validate("[[widgets]]\ntype = 'map'\nid = 'm'\ntitle = 'M'\n")
+        assert len(widgets) == 1
+        assert len(issues) == 1 and "renders nothing" in issues[0].message
+
+    @pytest.mark.parametrize("key", ["points_key", "routes_key"])
+    def test_a_map_with_either_key_is_fine(self, key):
+        _, issues = self._validate(f"[[widgets]]\ntype = 'map'\nid = 'm'\ntitle = 'M'\n{key} = 'rows'\n")
+        assert issues == []
+
+    @pytest.mark.parametrize("url", ["http://tiles.example.com/{z}/{x}/{y}.png", "//tiles.example.com/x", "HTTPS://t/{z}"])
+    def test_a_non_https_tile_url_is_flagged(self, url):
+        raw = f"[[widgets]]\ntype = 'map'\nid = 'm'\ntitle = 'M'\npoints_key = 'rows'\ntile_url = '{url}'\n"
+        _, issues = self._validate(raw)
+        assert len(issues) == 1 and "tile_url" in issues[0].message
+
+    def test_an_https_tile_url_is_fine(self):
+        raw = "[[widgets]]\ntype = 'map'\nid = 'm'\ntitle = 'M'\npoints_key = 'rows'\ntile_url = 'https://t.example.com/{z}/{x}/{y}.png'\n"
+        _, issues = self._validate(raw)
+        assert issues == []
+
+
 class TestValidateTimeline:
     """The point of re-vendoring: before the refresh `harumi dashboard validate`
     called a valid timeline spec an unknown type and dropped it."""

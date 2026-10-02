@@ -85,7 +85,9 @@ def build_surface() -> dict:
             {
                 "path": " ".join(path),
                 "help": command.get_short_help_str(limit=10_000) or None,
-                "params": [_param_info(p) for p in command.params],
+                # Hidden options (e.g. deprecated no-ops kept so old scripts don't
+                # break) aren't part of the documented contract.
+                "params": [_param_info(p) for p in command.params if not getattr(p, "hidden", False)],
             }
         )
     commands.sort(key=lambda c: c["path"])

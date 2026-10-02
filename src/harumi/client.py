@@ -134,6 +134,10 @@ class ApiClient:
         """Open a streaming (e.g. file download) request. Retries once on 401
         like `request()`, but since the retry needs a fresh connection, the
         auth check happens eagerly before the stream is opened.
+
+        Keep the `with` body to reading `response`: an `httpx.HTTPError` raised
+        there is reported as an interrupted transfer, which would mislabel one
+        from an unrelated request made inside the block.
         """
         url = f"{self.config.api_url}{path}"
         headers = self._headers()
@@ -147,6 +151,9 @@ class ApiClient:
                     client.stream(method, url, json=json, params=params, headers=headers)
                 )
             if response.status_code == 401:
+                # The 401 was entered on the same stack as the retry, so without
+                # this its connection stayed open for the whole download.
+                response.close()
                 creds = auth.current_credentials()
                 if not creds or not creds.get("refresh_token"):
                     raise NotAuthenticatedError()

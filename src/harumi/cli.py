@@ -163,6 +163,7 @@ from harumi.config import (
     resolve_environment,
     save_environment,
     save_git_token,
+    status_hint_url,
 )
 from harumi.dashboard import (
     DashboardSchemaError,
@@ -386,7 +387,10 @@ def _format_api_error(exc: ApiError) -> str:
     if isinstance(exc, ApiUnreachableError) or exc.status_code >= 500:
         # harumi-api gave no answer, or a server-side failure: likely an outage, not user error.
         # Not every ApiError(0, ...) qualifies: a failed presigned S3 transfer is not Harumi being down.
-        return f"{escape(str(exc))}\nCheck {active_status_url()} for platform status, or run [bold]harumi status[/bold]."
+        hint_url = status_hint_url()
+        if hint_url is None:
+            return escape(str(exc))
+        return f"{escape(str(exc))}\nCheck {hint_url} for platform status, or run [bold]harumi status[/bold]."
     if exc.status_code != 402:
         # `_fail` prints through Rich markup, and server text can hold `[/x]`-style brackets.
         return escape(str(exc))
@@ -2444,7 +2448,7 @@ def dashboard_validate(
 
         for issue in issues:
             style = "red" if issue.dropped else "yellow"
-            prefix = "dropped" if issue.dropped else "empty"
+            prefix = "dropped" if issue.dropped else issue.label
             console.print(f"[bold {style}]{prefix}[/bold {style}] {issue.message}")
         failed = True
 
@@ -2538,6 +2542,24 @@ def share_get(
     _print_share_link(link)
 
 
+_IO_CONTROL_OPTION = typer.Option(
+    None,
+    "--io-control/--no-io-control",
+    hidden=True,
+    help="Removed. Accepted and ignored so existing scripts keep working.",
+)
+
+
+def _warn_io_control_removed(value: Optional[bool]) -> None:
+    """`--io-control` was dropped when the server removed the permission. A script or
+    CI job that still passes it should get a warning, not a usage error (exit 2)."""
+    if value is not None:
+        err_console.print(
+            "[yellow]Warning:[/yellow] --io-control/--no-io-control no longer does anything "
+            "and is ignored; share links can't grant input/output control."
+        )
+
+
 @share_app.command("add")
 @_handle_errors
 def share_add(
@@ -2549,8 +2571,10 @@ def share_add(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+    io_control: Optional[bool] = _IO_CONTROL_OPTION,
 ) -> None:
     """Create a new public dashboard link. Every permission defaults to off."""
+    _warn_io_control_removed(io_control)
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -2581,8 +2605,10 @@ def share_update(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+    io_control: Optional[bool] = _IO_CONTROL_OPTION,
 ) -> None:
     """Partially update a share link. Only provided fields are changed."""
+    _warn_io_control_removed(io_control)
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 

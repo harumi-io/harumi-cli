@@ -160,8 +160,33 @@ def active_platform_url() -> str:
 
 
 def active_status_url() -> str:
-    """Status page URL for the active environment."""
-    return ENVIRONMENTS[active_environment()].status_url
+    """Status page URL for the active environment (honors the same
+    HARUMI_STATUS_URL / env config.json `status_url` override as
+    `active_platform_url`)."""
+    name = active_environment()
+    env_config = _read_json(env_config_path(name))
+    url = (
+        os.environ.get("HARUMI_STATUS_URL")
+        or env_config.get("status_url")
+        or ENVIRONMENTS[name].status_url
+    )
+    return url.rstrip("/")
+
+
+def status_hint_url() -> Optional[str]:
+    """The status page to point an unreachable-API error at, or `None`.
+
+    The stock status page says nothing about a self-hosted or local stack, so
+    when the API URL is overridden (HARUMI_API_URL / env config.json `api_url`)
+    the hint is only shown if a `status_url` override says where that stack's
+    status lives. A one-off `--api-url` flag is not visible from here.
+    """
+    name = active_environment()
+    env_config = _read_json(env_config_path(name))
+    api_override = os.environ.get("HARUMI_API_URL") or env_config.get("api_url")
+    api_is_stock = not api_override or api_override.rstrip("/") == ENVIRONMENTS[name].api_url.rstrip("/")
+    status_override = os.environ.get("HARUMI_STATUS_URL") or env_config.get("status_url")
+    return active_status_url() if (api_is_stock or status_override) else None
 
 
 def save_environment(name: str) -> None:
