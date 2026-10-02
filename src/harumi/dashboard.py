@@ -368,6 +368,9 @@ def widget_warnings(entry: Dict[str, Any], widget: Dict[str, Any]) -> List[Widge
                 )
             )
         tile_url = entry.get("tile_url")
+        # Case-sensitive on purpose: the platform's `tileUrlFor` (MapCanvas.tsx) checks
+        # `startsWith('https://')` exactly, so `HTTPS://...` is ignored there too and
+        # flagging it is accurate. Keep the two in step.
         if isinstance(tile_url, str) and not tile_url.startswith("https://"):
             issues.append(
                 WidgetIssue(

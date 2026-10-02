@@ -87,6 +87,8 @@ Selection precedence: `--env` > `HARUMI_ENV` > `harumi env use` (saved default) 
 | `HARUMI_GIT_URL` | Override the Harumi Git (Gitea) base URL |
 | `HARUMI_ORG` | Organization ID sent as `X-Organization`, and the workspace new projects are created in (`--personal` on `new`/`push`/`projects create` opts out) |
 | `HARUMI_INTERNAL` | Set to `1` to reveal internal environments in `harumi env list` |
+| `HARUMI_PLATFORM_URL` | Override the web-app URL used in printed project links |
+| `HARUMI_STATUS_URL` | Override the status page used by `harumi status` and the unreachable-API hint (the hint is skipped when the API URL is overridden, unless this is set) |
 
 Credentials (JWT + refresh token + Gitea token) are stored per-environment under `~/.harumi/environments/<env>/credentials.json` (mode `0600`) after `harumi login`. An older flat `~/.harumi/credentials.json` is migrated into `production` automatically on first run.
 

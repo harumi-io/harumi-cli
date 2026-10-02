@@ -193,6 +193,7 @@ Override the home directory with `HARUMI_HOME`. Upgrading from a pre-environment
 | `HARUMI_INTERNAL` | Set to `1` to reveal internal environments in `harumi env list`. |
 | `HARUMI_HOME` | Directory for config/credentials (default `~/.harumi`). |
 | `HARUMI_PLATFORM_URL` | Override the web-app URL used in printed project links. |
+| `HARUMI_STATUS_URL` | Override the status page used by `harumi status` and the "check the status page" hint on an unreachable-API error. The hint is otherwise skipped when the API URL is overridden (`--api-url`, `HARUMI_API_URL`), since the stock status page says nothing about that stack. |
 
 `--api-url` / `--git-url` override endpoints **without** changing which environment you are on — useful for pointing at a locally running harumi-api.
 
