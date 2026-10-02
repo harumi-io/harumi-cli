@@ -261,6 +261,10 @@ def api(monkeypatch) -> FakeApi:
     transport = httpx.MockTransport(fake._handle)
 
     def _get_client(api_url=None, git_url=None, org=None) -> Client:
+        # The stock API host, on purpose: the "check the status page" hint is only shown
+        # for it (see `config.status_hint_url`). A made-up host would read as a
+        # self-hosted stack and silently drop the hint the tests below assert on. The
+        # MockTransport routes on the path only, so nothing leaves the process.
         return Client(
             api_url="https://api.harumi.io/api",
             git_url=git_url,
@@ -389,6 +393,7 @@ def test_a_connection_failure_is_an_error_message_not_a_traceback(monkeypatch, b
     monkeypatch.setattr(
         cli,
         "_get_client",
+        # Stock host so the status hint is shown; see the `api` fixture.
         lambda api_url=None, git_url=None, org=None: Client(
             api_url="https://api.harumi.io/api", transport=httpx.MockTransport(refuse)
         ),

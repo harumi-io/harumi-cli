@@ -16,6 +16,7 @@ def isolated_harumi_home(tmp_path, monkeypatch):
     monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "credentials.json")
     monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "config.json")
     monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
+    monkeypatch.setattr("harumi.config._RESOLVED_API_URL", None)
     monkeypatch.delenv("HARUMI_ENV", raising=False)
     monkeypatch.delenv("HARUMI_API_URL", raising=False)
     monkeypatch.delenv("HARUMI_GIT_URL", raising=False)
@@ -134,3 +135,23 @@ def test_save_git_token_persists_username_for_url_auth():
 def test_load_git_username_is_none_when_absent():
     config.save_git_token("tok123")  # no username — simulates a pre-fix credentials.json
     assert config.load_git_username() is None
+
+
+def test_the_resolved_api_url_does_not_outlive_its_environment():
+    """`status_hint_url` compares the API URL in use against the *active* environment's stock
+    URL. A URL resolved for one environment must not be judged against another's: loading a
+    local override for production and then switching to staging would otherwise read as
+    "overridden" (hint wrongly suppressed) or, the other way round, as stock."""
+    Config.load(environment="production", api_url="http://localhost:8000/api")
+    assert config.status_hint_url() is None  # production, pointed at a local stack
+
+    config.set_active_environment("staging")
+    # Nothing has been loaded for staging: its own stock URL is in use.
+    assert config.status_hint_url() == "https://status.dev.harumi.io"
+
+
+def test_loading_a_stock_url_after_a_local_one_restores_the_hint():
+    Config.load(environment="production", api_url="http://localhost:8000/api")
+    assert config.status_hint_url() is None
+    Config.load(environment="production")
+    assert config.status_hint_url() == "https://status.harumi.io"

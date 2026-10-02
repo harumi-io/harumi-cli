@@ -139,10 +139,12 @@ def resolve_environment(explicit: Optional[str] = None) -> str:
     return name
 
 
-# The API URL the most recent `Config.load` resolved -- including a one-off `--api-url`
-# flag, which never touches the environment or config.json. The unreachable-API hint reads
-# it so it can tell a stock stack from a local one.
-_RESOLVED_API_URL: Optional[str] = None
+# The API URL the most recent `Config.load` resolved, *with the environment it was resolved
+# for* -- including a one-off `--api-url` flag, which never touches the environment or
+# config.json. The unreachable-API hint reads it to tell a stock stack from a local one.
+# Keyed to the environment so switching environments can't judge one env's URL against
+# another's stock URL.
+_RESOLVED_API_URL: Optional[tuple[str, str]] = None
 
 
 def set_active_environment(name: str) -> None:
@@ -198,7 +200,8 @@ def status_hint_url() -> Optional[str]:
     """
     name = active_environment()
     env_config = _read_json(env_config_path(name))
-    api_in_use = _RESOLVED_API_URL or os.environ.get("HARUMI_API_URL") or _str_setting(env_config, "api_url")
+    resolved = _RESOLVED_API_URL[1] if _RESOLVED_API_URL and _RESOLVED_API_URL[0] == name else None
+    api_in_use = resolved or os.environ.get("HARUMI_API_URL") or _str_setting(env_config, "api_url")
     api_is_stock = not api_in_use or api_in_use.rstrip("/") == ENVIRONMENTS[name].api_url.rstrip("/")
     status_override = os.environ.get("HARUMI_STATUS_URL") or _str_setting(env_config, "status_url")
     return active_status_url() if (api_is_stock or status_override) else None
@@ -354,7 +357,7 @@ class Config:
             or env.api_url
         )
         global _RESOLVED_API_URL
-        _RESOLVED_API_URL = resolved_api_url.rstrip("/")
+        _RESOLVED_API_URL = (env_name, resolved_api_url.rstrip("/"))
         resolved_git_url = (
             git_url
             or os.environ.get("HARUMI_GIT_URL")
