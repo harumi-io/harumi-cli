@@ -84,7 +84,7 @@ class DashboardSchemaError(RuntimeError):
 # set would fall through to "no value is ever valid", quietly making a required
 # field impossible to satisfy and an optional one impossible to use — so a typo
 # in the artifact is rejected at load rather than silently weakening validation.
-_KNOWN_FIELD_KINDS = frozenset({"string", "number", "enum", "columns", "series", "kpiItems"})
+_KNOWN_FIELD_KINDS = frozenset({"string", "number", "enum", "columns", "series", "kpiItems", "colorMap"})
 
 
 @lru_cache(maxsize=1)
@@ -187,7 +187,9 @@ def _coerce_series(value: Any) -> Optional[List[Dict[str, str]]]:
         if not isinstance(s, dict) or not isinstance(s.get("key"), str):
             continue
         entry = {"key": s["key"], "label": s.get("label") if isinstance(s.get("label"), str) else s["key"]}
-        if isinstance(s.get("color"), str):
+        # Mirrors `coerceSeries`: an invalid color (hex, typo'd name) is dropped
+        # so the series renders in the default gray, rather than dropping the series.
+        if _is_valid_color(s.get("color")):
             entry["color"] = s["color"]
         series.append(entry)
     return series or None
@@ -195,6 +197,27 @@ def _coerce_series(value: Any) -> Optional[List[Dict[str, str]]]:
 
 _KPI_ITEM_FORMATS = ("number", "currency", "percent")
 _KPI_ITEM_TONES = ("good", "warn", "bad", "neutral")
+
+def _is_valid_color(value: Any) -> bool:
+    """A Tailwind color name from the artifact's `colorNames` (`"green-600"`)
+    or a `{ light, dark }` table of two — mirrors `resolveChartColor` in
+    harumi-platform's colors.ts. Hex is not accepted: the platform no longer
+    renders it."""
+    names = _artifact().get("colorNames") or ()
+    if isinstance(value, str):
+        return value in names
+    return isinstance(value, dict) and value.get("light") in names and value.get("dark") in names
+
+
+def _coerce_color_map(value: Any) -> Optional[Dict[str, Any]]:
+    """Mirrors `coerceColorMap` in schema.ts: a `colors` table (e.g.
+    `colors = { "Late job" = "red-600" }`) keeping only entries whose value is
+    a valid color (see `_is_valid_color`). Drops the whole field (returns
+    `None`) when nothing survives, same as every other list/table field here."""
+    if not isinstance(value, dict):
+        return None
+    color_map = {key: color for key, color in value.items() if _is_valid_color(color)}
+    return color_map or None
 
 
 def _coerce_kpi_items(value: Any) -> Optional[List[Dict[str, Any]]]:
@@ -253,6 +276,8 @@ def _coerce_field(value: Any, field: WidgetField) -> Any:
         return _coerce_kpi_items(value)
     if field.kind == "series":
         return _coerce_series(value)
+    if field.kind == "colorMap":
+        return _coerce_color_map(value)
     return None
 
 
@@ -275,6 +300,88 @@ class WidgetIssue:
     entity_id: Optional[str]
     message: str
     dropped: bool = True
+    # What `harumi dashboard validate` calls a non-dropped issue: "empty" for an
+    # output.json path that resolves to nothing, "ignored" for a value the
+    # platform accepts the widget without (a bad color, an http tile URL).
+    label: str = "empty"
+
+
+def _invalid_color_message(where: str, value: Any) -> str:
+    shown = value if isinstance(value, str) else json.dumps(value)
+    hint = (
+        " — hex isn't supported"
+        if isinstance(value, str) and value.startswith("#")
+        else ""
+    )
+    return (
+        f'{where}: color {shown!r} is not a Tailwind color name like "red-600" '
+        f'or a {{ light = "green-600", dark = "green-400" }} pair{hint}; the default color is used instead'
+    )
+
+
+def widget_warnings(entry: Dict[str, Any], widget: Dict[str, Any]) -> List[WidgetIssue]:
+    """Values the platform silently ignores on a widget that still renders.
+
+    `parse_widget_entry` mirrors the platform's permissive parse, which drops an
+    invalid color or a non-https `tile_url` without a word — correct for
+    rendering, but it leaves the author with a dashboard that quietly differs
+    from their spec. These are CLI-only extras (`dropped=False`), like the
+    unresolved output paths.
+    """
+    issues: List[WidgetIssue] = []
+    id_, type_ = widget["id"], widget["type"]
+    head = f'widget "{id_}" ({type_})'
+
+    for field in widget_schemas()[type_]:
+        raw = entry.get(field.toml_key)
+        if field.kind == "series" and isinstance(raw, list):
+            for index, item in enumerate(raw, start=1):
+                if isinstance(item, dict) and item.get("color") is not None and not _is_valid_color(item["color"]):
+                    issues.append(
+                        WidgetIssue(
+                            id_,
+                            _invalid_color_message(f'{head} "{field.toml_key}[{index}].color"', item["color"]),
+                            dropped=False,
+                            label="ignored",
+                        )
+                    )
+        elif field.kind == "colorMap" and isinstance(raw, dict):
+            for group, color in raw.items():
+                if not _is_valid_color(color):
+                    issues.append(
+                        WidgetIssue(
+                            id_,
+                            _invalid_color_message(f'{head} "{field.toml_key}[{group!r}]"', color),
+                            dropped=False,
+                            label="ignored",
+                        )
+                    )
+
+    if type_ == "map":
+        if "points_key" not in widget and "routes_key" not in widget:
+            issues.append(
+                WidgetIssue(
+                    id_,
+                    f'{head}: set "points_key" or "routes_key" — with neither, the map renders nothing',
+                    dropped=False,
+                    label="ignored",
+                )
+            )
+        tile_url = entry.get("tile_url")
+        # Case-sensitive on purpose: the platform's `tileUrlFor` (MapCanvas.tsx) checks
+        # `startsWith('https://')` exactly, so `HTTPS://...` is ignored there too and
+        # flagging it is accurate. Keep the two in step.
+        if isinstance(tile_url, str) and not tile_url.startswith("https://"):
+            issues.append(
+                WidgetIssue(
+                    id_,
+                    f'{head}: "tile_url" must start with https:// — {tile_url!r} is ignored '
+                    "and the default OpenStreetMap tiles are used",
+                    dropped=False,
+                    label="ignored",
+                )
+            )
+    return issues
 
 
 def parse_widget_entry(entry: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[WidgetIssue]]:
@@ -578,6 +685,7 @@ def validate_dashboard_toml(
         widget, issue = parse_widget_entry(entry)
         if widget is not None:
             widgets.append(widget)
+            issues.extend(widget_warnings(entry, widget))
         else:
             assert issue is not None
             issues.append(issue)

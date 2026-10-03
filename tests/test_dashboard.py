@@ -36,7 +36,7 @@ _EXPECTED_WIDGET_CONTRACT = {
     "table": ["rows_key!*", "columns!"],
     "detail": ["items_key!*", "id_key!", "fields"],
     "filter": ["items_key!*", "id_key!", "label_key"],
-    "treemap": ["items_key!*", "value_key!", "name_key!", "color_key", "capacity_key*"],
+    "treemap": ["items_key!*", "value_key!", "name_key!", "color_key", "colors", "capacity_key*"],
     "heatmap": [
         "items_key!*",
         "resource_key",
@@ -55,6 +55,7 @@ _EXPECTED_WIDGET_CONTRACT = {
         "end_key",
         "duration_key",
         "color_key",
+        "colors",
         "time_unit",
     ],
     "timeline": [
@@ -65,6 +66,7 @@ _EXPECTED_WIDGET_CONTRACT = {
         "end_key",
         "duration_key",
         "color_key",
+        "colors",
         "id_key",
         "regions_key*",
         "region_start_key",
@@ -72,6 +74,19 @@ _EXPECTED_WIDGET_CONTRACT = {
         "region_label_key",
         "region_resource_key",
         "time_unit",
+    ],
+    "map": [
+        "points_key*",
+        "lat_key",
+        "lng_key",
+        "label_key",
+        "id_key",
+        "color_key",
+        "routes_key*",
+        "route_path_key",
+        "route_color_key",
+        "tile_url",
+        "attribution",
     ],
 }
 
@@ -310,6 +325,7 @@ class TestParseWidgetEntry:
             },
             "gantt-chart": {"type": "gantt-chart", "id": "g", "title": "G", "tasks_key": "schedule"},
             "timeline": {"type": "timeline", "id": "tl", "title": "TL", "items_key": "schedule"},
+            "map": {"type": "map", "id": "mp", "title": "MP", "points_key": "stops"},
         }
         for type_, entry in entries.items():
             widget, issue = parse_widget_entry(entry)
@@ -359,6 +375,44 @@ class TestParseWidgetEntry:
         assert issue is None
         assert widget is not None
         assert widget["columns"] == [{"key": "name", "label": "name"}]
+
+    def test_treemap_colors_table_pins_specific_group_colors(self):
+        widget, issue = parse_widget_entry(
+            {
+                "type": "treemap",
+                "id": "t",
+                "title": "T",
+                "items_key": "rows",
+                "value_key": "cost",
+                "name_key": "name",
+                "colors": {"Late job": "red-500", "Unassigned": {"light": "gray-500", "dark": "gray-400"}},
+            }
+        )
+        assert issue is None
+        assert widget is not None
+        assert widget["colors"] == {"Late job": "red-500", "Unassigned": {"light": "gray-500", "dark": "gray-400"}}
+
+    def test_colors_table_drops_an_invalid_entry_but_keeps_the_valid_ones(self):
+        widget, issue = parse_widget_entry(
+            {
+                "type": "gantt-chart",
+                "id": "g",
+                "title": "G",
+                "tasks_key": "schedule",
+                "colors": {"Good": "red-500", "Hex": "#ef4444", "Bad": "not-a-color"},
+            }
+        )
+        assert issue is None
+        assert widget is not None
+        assert widget["colors"] == {"Good": "red-500"}
+
+    def test_colors_field_is_absent_when_every_entry_is_invalid(self):
+        widget, issue = parse_widget_entry(
+            {"type": "timeline", "id": "s", "title": "S", "items_key": "schedule", "colors": {"Bad": "not-a-color"}}
+        )
+        assert issue is None
+        assert widget is not None
+        assert "colors" not in widget
 
     def test_kpi_rail_drops_invalid_items_but_keeps_valid_ones(self):
         entry = {
@@ -894,6 +948,103 @@ value_key = "objective"
 """
         widgets, issues = validate_dashboard_toml(raw)
         assert len(widgets) == 1
+        assert issues == []
+
+
+def test_every_color_bearing_field_kind_is_checked_for_ignored_values():
+    """`widget_warnings` scans the `series` and `colorMap` field kinds. If the vendored schema
+    ever adds another kind that carries colors, it would silently bypass the warnings; this
+    fails on a refresh that introduces one, so it gets a check (or is added here on purpose)."""
+    from harumi.dashboard import _KNOWN_FIELD_KINDS
+
+    checked = {"series", "colorMap"}
+    carries_no_color = {"string", "number", "enum", "columns", "kpiItems"}
+    assert _KNOWN_FIELD_KINDS == checked | carries_no_color, (
+        "a new field kind was added to the schema: decide whether it carries colors and, if so, "
+        "teach widget_warnings to check it"
+    )
+
+
+class TestColorAndMapWarnings:
+    """`parse_widget_entry` mirrors the platform's permissive parse, which drops an
+    invalid color or a non-https `tile_url` without a word. `validate` has to say so,
+    or a spec that used hex before schema v12 passes clean while losing its colors."""
+
+    @staticmethod
+    def _validate(body: str):
+        return validate_dashboard_toml(body)
+
+    @staticmethod
+    def _series(color: str) -> str:
+        return (
+            "[[widgets]]\ntype = 'line-chart'\nid = 'c'\ntitle = 'C'\ndata_key = 'rows'\nx_key = 'x'\n"
+            f"series = [{{ key = 'v', color = {color} }}]\n"
+        )
+
+    @pytest.mark.parametrize(
+        "color",
+        ["'red-600'", "{ light = 'green-600', dark = 'green-400' }", "'black'"],
+    )
+    def test_a_valid_series_color_is_not_flagged(self, color):
+        widgets, issues = self._validate(self._series(color))
+        assert len(widgets) == 1
+        assert widgets[0]["series"][0]["color"]  # kept, not dropped
+        assert issues == []
+
+    def test_a_hex_series_color_is_flagged_and_the_widget_still_renders(self):
+        widgets, issues = self._validate(self._series("'#ef4444'"))
+        assert len(widgets) == 1
+        assert "color" not in widgets[0]["series"][0]  # dropped, as the platform does
+        assert len(issues) == 1
+        assert issues[0].dropped is False and issues[0].label == "ignored"
+        assert "#ef4444" in issues[0].message and "hex isn't supported" in issues[0].message
+        assert "series[1].color" in issues[0].message
+
+    @pytest.mark.parametrize(
+        "color",
+        [
+            "'reed-600'",  # typo
+            "'red'",  # a hue with no shade is not a name in colorNames
+            "{ light = 'green-600', dark = 'nope' }",  # pair with one bad half
+            "{ light = 'green-600' }",  # pair missing its dark half
+        ],
+    )
+    def test_other_invalid_series_colors_are_flagged(self, color):
+        widgets, issues = self._validate(self._series(color))
+        assert len(widgets) == 1
+        assert len(issues) == 1 and issues[0].dropped is False
+        assert "hex isn't supported" not in issues[0].message
+
+    def test_each_invalid_colors_table_entry_is_flagged_and_valid_ones_are_not(self):
+        raw = (
+            "[[widgets]]\ntype = 'treemap'\nid = 't'\ntitle = 'T'\nitems_key = 'rows'\n"
+            "value_key = 'cost'\nname_key = 'name'\n"
+            "colors = { Good = 'red-500', Hex = '#ef4444', Bad = 'not-a-color' }\n"
+        )
+        widgets, issues = self._validate(raw)
+        assert widgets[0]["colors"] == {"Good": "red-500"}
+        assert len(issues) == 2
+        assert any("'Hex'" in i.message for i in issues) and any("'Bad'" in i.message for i in issues)
+
+    def test_a_map_with_neither_points_nor_routes_is_flagged(self):
+        widgets, issues = self._validate("[[widgets]]\ntype = 'map'\nid = 'm'\ntitle = 'M'\n")
+        assert len(widgets) == 1
+        assert len(issues) == 1 and "renders nothing" in issues[0].message
+
+    @pytest.mark.parametrize("key", ["points_key", "routes_key"])
+    def test_a_map_with_either_key_is_fine(self, key):
+        _, issues = self._validate(f"[[widgets]]\ntype = 'map'\nid = 'm'\ntitle = 'M'\n{key} = 'rows'\n")
+        assert issues == []
+
+    @pytest.mark.parametrize("url", ["http://tiles.example.com/{z}/{x}/{y}.png", "//tiles.example.com/x", "HTTPS://t/{z}"])
+    def test_a_non_https_tile_url_is_flagged(self, url):
+        raw = f"[[widgets]]\ntype = 'map'\nid = 'm'\ntitle = 'M'\npoints_key = 'rows'\ntile_url = '{url}'\n"
+        _, issues = self._validate(raw)
+        assert len(issues) == 1 and "tile_url" in issues[0].message
+
+    def test_an_https_tile_url_is_fine(self):
+        raw = "[[widgets]]\ntype = 'map'\nid = 'm'\ntitle = 'M'\npoints_key = 'rows'\ntile_url = 'https://t.example.com/{z}/{x}/{y}.png'\n"
+        _, issues = self._validate(raw)
         assert issues == []
 
 

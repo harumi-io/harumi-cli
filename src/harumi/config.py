@@ -30,6 +30,9 @@ class Environment:
     # user-facing project links. Never print `git_url` directly to the user;
     # Gitea is an implementation detail, not something we surface.
     platform_url: str
+    # Public status page (Gatus) for this environment, linked from network-error
+    # hints and read by `harumi status`.
+    status_url: str
     # Internal envs are VPN-only and hidden from `harumi env list` unless the
     # user opts in (HARUMI_INTERNAL=1 or `--all`). This is UX only — real access
     # is gated by needing an account in that environment's Supabase + the VPN.
@@ -46,6 +49,7 @@ ENVIRONMENTS: dict[str, Environment] = {
         api_url="https://api.harumi.io/api",
         git_url="https://git.harumi.io",
         platform_url="https://platform.harumi.io",
+        status_url="https://status.harumi.io",
         internal=False,
         description="Public production environment.",
     ),
@@ -54,6 +58,7 @@ ENVIRONMENTS: dict[str, Environment] = {
         api_url="https://api.dev.harumi.io/api",
         git_url="https://git.dev.harumi.io",
         platform_url="https://platform.dev.harumi.io",
+        status_url="https://status.dev.harumi.io",
         internal=True,
         description="Internal staging/dev environment (VPN-only).",
     ),
@@ -126,10 +131,20 @@ def resolve_environment(explicit: Optional[str] = None) -> str:
         or _read_json(CONFIG_PATH).get("environment")
         or DEFAULT_ENVIRONMENT
     )
-    if name not in ENVIRONMENTS:
+    # `isinstance` first: a hand-edited non-string in config.json (a list is unhashable)
+    # would otherwise raise a TypeError from the `in` test instead of this message.
+    if not isinstance(name, str) or name not in ENVIRONMENTS:
         known = ", ".join(sorted(ENVIRONMENTS))
         raise ValueError(f"Unknown environment {name!r}. Known environments: {known}.")
     return name
+
+
+# The API URL the most recent `Config.load` resolved, *with the environment it was resolved
+# for* -- including a one-off `--api-url` flag, which never touches the environment or
+# config.json. The unreachable-API hint reads it to tell a stock stack from a local one.
+# Keyed to the environment so switching environments can't judge one env's URL against
+# another's stock URL.
+_RESOLVED_API_URL: Optional[tuple[str, str]] = None
 
 
 def set_active_environment(name: str) -> None:
@@ -148,10 +163,48 @@ def active_platform_url() -> str:
     env_config = _read_json(env_config_path(name))
     url = (
         os.environ.get("HARUMI_PLATFORM_URL")
-        or env_config.get("platform_url")
+        or _str_setting(env_config, "platform_url")
         or ENVIRONMENTS[name].platform_url
     )
     return url.rstrip("/")
+
+
+def _str_setting(env_config: dict[str, Any], key: str) -> Optional[str]:
+    """A string from an env config.json, or `None` for anything else -- a hand-edited
+    `"status_url": 5` should fall back to the default, not crash the error path."""
+    value = env_config.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def active_status_url() -> str:
+    """Status page URL for the active environment (honors the same
+    HARUMI_STATUS_URL / env config.json `status_url` override as
+    `active_platform_url`)."""
+    name = active_environment()
+    env_config = _read_json(env_config_path(name))
+    url = (
+        os.environ.get("HARUMI_STATUS_URL")
+        or _str_setting(env_config, "status_url")
+        or ENVIRONMENTS[name].status_url
+    )
+    return url.rstrip("/")
+
+
+def status_hint_url() -> Optional[str]:
+    """The status page to point an unreachable-API error at, or `None`.
+
+    The stock status page says nothing about a self-hosted or local stack, so when the API
+    URL in use is not the environment's own (`--api-url`, HARUMI_API_URL, or `api_url` in
+    config.json) the hint is only shown if a `status_url` override says where that stack's
+    status lives.
+    """
+    name = active_environment()
+    env_config = _read_json(env_config_path(name))
+    resolved = _RESOLVED_API_URL[1] if _RESOLVED_API_URL and _RESOLVED_API_URL[0] == name else None
+    api_in_use = resolved or os.environ.get("HARUMI_API_URL") or _str_setting(env_config, "api_url")
+    api_is_stock = not api_in_use or api_in_use.rstrip("/") == ENVIRONMENTS[name].api_url.rstrip("/")
+    status_override = os.environ.get("HARUMI_STATUS_URL") or _str_setting(env_config, "status_url")
+    return active_status_url() if (api_is_stock or status_override) else None
 
 
 def save_environment(name: str) -> None:
@@ -300,19 +353,21 @@ class Config:
         resolved_api_url = (
             api_url
             or os.environ.get("HARUMI_API_URL")
-            or env_config.get("api_url")
+            or _str_setting(env_config, "api_url")
             or env.api_url
         )
+        global _RESOLVED_API_URL
+        _RESOLVED_API_URL = (env_name, resolved_api_url.rstrip("/"))
         resolved_git_url = (
             git_url
             or os.environ.get("HARUMI_GIT_URL")
-            or env_config.get("git_url")
+            or _str_setting(env_config, "git_url")
             or env.git_url
         )
         resolved_org_id = (
             org_id
             or os.environ.get("HARUMI_ORG")
-            or env_config.get("org_id")
+            or _str_setting(env_config, "org_id")
         )
         return cls(
             api_url=resolved_api_url.rstrip("/"),

@@ -3,6 +3,7 @@
     harumi login [--signup]
     harumi logout
     harumi whoami
+    harumi status
     harumi profile show|set
     harumi specs
     harumi blueprints
@@ -140,8 +141,10 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+import httpx
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from harumi import __version__, auth
@@ -154,11 +157,13 @@ from harumi.config import (
     ProjectBinding,
     active_environment,
     active_platform_url,
+    active_status_url,
     load_git_token,
     load_git_username,
     resolve_environment,
     save_environment,
     save_git_token,
+    status_hint_url,
 )
 from harumi.dashboard import (
     DashboardSchemaError,
@@ -168,7 +173,7 @@ from harumi.dashboard import (
     validate_dashboard_toml,
     widget_schemas,
 )
-from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
+from harumi.errors import ApiError, ApiUnreachableError, HarumiError, NotAuthenticatedError
 from harumi.git import (
     GitError,
     NotAHarumiRepoError,
@@ -379,10 +384,18 @@ def _format_api_error(exc: ApiError) -> str:
     payment problem, so there's exactly one message to show regardless of
     which command triggered it.
     """
+    if isinstance(exc, ApiUnreachableError) or exc.status_code >= 500:
+        # harumi-api gave no answer, or a server-side failure: likely an outage, not user error.
+        # Not every ApiError(0, ...) qualifies: a failed presigned S3 transfer is not Harumi being down.
+        hint_url = status_hint_url()
+        if hint_url is None:
+            return escape(str(exc))
+        return f"{escape(str(exc))}\nCheck {hint_url} for platform status, or run [bold]harumi status[/bold]."
     if exc.status_code != 402:
-        return str(exc)
+        # `_fail` prints through Rich markup, and server text can hold `[/x]`-style brackets.
+        return escape(str(exc))
     return (
-        f"{exc.detail}\nRun [bold]harumi usage[/bold] to see your current allowance, "
+        f"{escape(exc.detail)}\nRun [bold]harumi usage[/bold] to see your current allowance, "
         f"or visit {active_platform_url()}/settings?tab=billing to upgrade, enable "
         "overage, or buy a top-up."
     )
@@ -544,6 +557,39 @@ def logout() -> None:
     Config.load()
     auth.logout()
     console.print(f"Logged out of [bold]{active_environment()}[/bold].")
+
+
+@app.command()
+def status() -> None:
+    """Show the live status of the Harumi platform (from the public status page)."""
+    url = active_status_url()  # honors --env / HARUMI_ENV / the saved default
+    try:
+        response = httpx.get(f"{url}/api/v1/endpoints/statuses", timeout=10.0)
+        response.raise_for_status()
+        endpoints = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        _fail(f"Could not read the status page at {url}: {escape(str(exc))}")
+    # Anything but a non-empty list of objects (a proxy/captive-portal reply, an error
+    # object) means nothing was actually read; "all up" would be a lie.
+    if not isinstance(endpoints, list) or not endpoints or not all(isinstance(e, dict) for e in endpoints):
+        _fail(f"Unexpected response from the status page at {url}.")
+
+    table = Table("group", "service", "status")
+    down = 0
+    for endpoint in endpoints:
+        results = endpoint.get("results") or []
+        latest = results[-1] if results and isinstance(results[-1], dict) else None
+        if latest is None:
+            state = "[dim]unknown[/dim]"
+        elif latest.get("success"):
+            state = "[green]up[/green]"
+        else:
+            state = "[bold red]down[/bold red]"
+            down += 1
+        table.add_row(str(endpoint.get("group") or "-"), str(endpoint.get("name", "?")), state)
+    console.print(table)
+    if down:
+        _fail(f"{down} service(s) down. Details: {url}")
 
 
 @app.command()
@@ -2402,7 +2448,7 @@ def dashboard_validate(
 
         for issue in issues:
             style = "red" if issue.dropped else "yellow"
-            prefix = "dropped" if issue.dropped else "empty"
+            prefix = "dropped" if issue.dropped else issue.label
             console.print(f"[bold {style}]{prefix}[/bold {style}] {issue.message}")
         failed = True
 
@@ -2434,8 +2480,7 @@ def _print_share_link(link: ProjectShareLink) -> None:
         f"app={'on' if link.app_enabled else 'off'}, "
         f"assistant={'on' if link.chat_enabled else 'off'}, "
         f"run history={'on' if link.run_history_enabled else 'off'}, "
-        f"run control={'on' if link.run_control_enabled else 'off'}, "
-        f"inputs/outputs={'on' if link.io_control_enabled else 'off'}"
+        f"run control={'on' if link.run_control_enabled else 'off'}"
     )
 
 
@@ -2463,7 +2508,6 @@ def share_list(
                 ("chat", link.chat_enabled),
                 ("run_history", link.run_history_enabled),
                 ("run_control", link.run_control_enabled),
-                ("io_control", link.io_control_enabled),
             )
             if on
         )
@@ -2498,6 +2542,24 @@ def share_get(
     _print_share_link(link)
 
 
+_IO_CONTROL_OPTION = typer.Option(
+    None,
+    "--io-control/--no-io-control",
+    hidden=True,
+    help="Removed. Accepted and ignored so existing scripts keep working.",
+)
+
+
+def _warn_io_control_removed(value: Optional[bool]) -> None:
+    """`--io-control` was dropped when the server removed the permission. A script or
+    CI job that still passes it should get a warning, not a usage error (exit 2)."""
+    if value is not None:
+        err_console.print(
+            "[yellow]Warning:[/yellow] --io-control/--no-io-control no longer does anything "
+            "and is ignored; share links can't grant input/output control."
+        )
+
+
 @share_app.command("add")
 @_handle_errors
 def share_add(
@@ -2506,12 +2568,13 @@ def share_add(
     chat: bool = typer.Option(False, "--chat/--no-chat", help="Let signed-in visitors ask the read-only assistant about this project."),
     run_history: bool = typer.Option(False, "--run-history/--no-run-history", help="Let visitors browse past runs, not just the latest one."),
     run_control: bool = typer.Option(False, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
-    io_control: bool = typer.Option(False, "--io-control/--no-io-control", help="Let visitors control/edit this project's inputs and outputs."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+    io_control: Optional[bool] = _IO_CONTROL_OPTION,
 ) -> None:
     """Create a new public dashboard link. Every permission defaults to off."""
+    _warn_io_control_removed(io_control)
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -2520,7 +2583,6 @@ def share_add(
         "chat_enabled": chat,
         "run_history_enabled": run_history,
         "run_control_enabled": run_control,
-        "io_control_enabled": io_control,
     }
     if label:
         body["label"] = label
@@ -2540,12 +2602,13 @@ def share_update(
     chat: Optional[bool] = typer.Option(None, "--chat/--no-chat", help="Let signed-in visitors ask the read-only assistant about this project."),
     run_history: Optional[bool] = typer.Option(None, "--run-history/--no-run-history", help="Let visitors browse past runs, not just the latest one."),
     run_control: Optional[bool] = typer.Option(None, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
-    io_control: Optional[bool] = typer.Option(None, "--io-control/--no-io-control", help="Let visitors control/edit this project's inputs and outputs."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+    io_control: Optional[bool] = _IO_CONTROL_OPTION,
 ) -> None:
     """Partially update a share link. Only provided fields are changed."""
+    _warn_io_control_removed(io_control)
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -2562,8 +2625,6 @@ def share_update(
         body["run_history_enabled"] = run_history
     if run_control is not None:
         body["run_control_enabled"] = run_control
-    if io_control is not None:
-        body["io_control_enabled"] = io_control
 
     if not body:
         _fail("No fields to update. Pass at least one flag (e.g. --label, --chat).")

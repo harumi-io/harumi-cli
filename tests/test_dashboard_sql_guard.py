@@ -283,3 +283,66 @@ def test_refuses_a_non_string_query(not_sql):
 def test_raises_sql_guard_error_so_callers_can_tell_a_guard_refusal_from_a_duckdb_error():
     with pytest.raises(SqlGuardError):
         ensure_read_only_select("DROP TABLE t")
+
+
+# Bypasses confirmed against a real DuckDB (mirrors ai-solver's guard and its tests).
+BYPASSES = [
+    "SELECT 'a' LIKE 'a' ESCAPE'\\' ; CREATE TABLE pwned AS SELECT 42 AS x ; -- '",
+    "SELECT * FROM \"read_csv\"('https://example.com/a.csv')",
+    "SELECT * FROM 'https://example.com/x.csv'",
+    'SELECT * FROM "/etc/hosts"',
+    "SELECT * FROM t, 'https://e.com/x.csv'",
+    'SELECT * FROM t, "/etc/hosts"',
+    'SELECT * FROM main."/etc/hosts"',
+    'SELECT * FROM "secret.csv"',
+    'SELECT * FROM $$/etc/hosts$$',
+    "SELECT * FROM t JOIN u ON t.a = u.a, 'x.csv'",
+    "SELECT * FROM t LEFT JOIN u ON (t.a = u.a), 'x.csv'",
+    'SELECT * FROM t JOIN u USING (id), "/etc/hosts"',
+    "SELECT * FROM t, 'a.orc'",
+    "SELECT getenv('HOME')",
+    "SELECT * FROM duckdb_secrets()",
+    "SELECT * FROM query('SELECT 1')",
+]
+
+STILL_ACCEPTED = [
+    "SELECT * FROM \"orders\" WHERE \"order date\" > '2024-01-01'",
+    "SELECT EXTRACT(year FROM \"order date\") FROM orders",
+    "SELECT * FROM t WHERE a IS DISTINCT FROM 'x'",
+    "SELECT 'a' LIKE 'a%' ESCAPE '!'",
+    "SELECT E'it\\'s' AS s",
+    "SELECT a, 'N/A', '12:30' FROM t",
+    "SELECT substring(c FROM 'a+') FROM t",
+    "SELECT EXTRACT(year FROM '2024-01-01'::date)",
+    "SELECT * FROM t WHERE url IN ('a', 'https://x.com/p')",
+    "SELECT name, 'report.csv' AS label FROM t",
+    'SELECT t."report.json" FROM t',
+    'SELECT "orders.csv" FROM t',
+    'SELECT * FROM t GROUP BY a, "b.csv"',
+    "SELECT * FROM t WHERE k IN ('a/b', 'c:d')",
+    'SELECT "a.b", "c/d" FROM t',
+    # `query` is a forbidden *function* (DuckDB's SQL-in-a-string table function),
+    # not a forbidden word: a column or alias that is merely called `query` is a
+    # plain identifier and must keep working.
+    "SELECT a.query FROM t a",
+    "SELECT query FROM searches",
+    "SELECT count(*) AS query FROM t",
+]
+
+
+@pytest.mark.parametrize("sql", ["SELECT * FROM query('SELECT 1')", "SELECT * FROM query ('SELECT 1')", "SELECT * FROM QUERY('SELECT 1')"])
+def test_the_query_function_is_rejected_but_only_the_call(sql):
+    """The intended behaviour of the denylist entry: `query(` is refused, a column
+    named `query` (see STILL_ACCEPTED) is not. A user-defined macro called `query`
+    is refused too -- a known, acceptable false positive of a name-based denylist."""
+    assert _rejects(sql) is not None
+
+
+@pytest.mark.parametrize("sql", BYPASSES)
+def test_confirmed_bypass_is_rejected(sql):
+    assert _rejects(sql) is not None
+
+
+@pytest.mark.parametrize("sql", STILL_ACCEPTED)
+def test_legitimate_quoting_still_passes(sql):
+    assert _rejects(sql) is None

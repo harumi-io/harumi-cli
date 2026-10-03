@@ -8,7 +8,7 @@ or schema change only needs to be made here.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
 from urllib.parse import quote
@@ -17,7 +17,7 @@ import httpx
 
 from harumi import auth
 from harumi.config import Config
-from harumi.errors import ApiError, NotAuthenticatedError
+from harumi.errors import ApiError, NotAuthenticatedError, transport_errors_as_api_error
 from harumi.models import (
     BranchInfo,
     BlueprintSummary,
@@ -96,7 +96,9 @@ class ApiClient:
         headers = self._headers()
         headers.update(kwargs.pop("headers", {}) or {})
 
-        with httpx.Client(timeout=timeout or self.timeout, transport=self.transport) as client:
+        with transport_errors_as_api_error(), httpx.Client(
+            timeout=timeout or self.timeout, transport=self.transport
+        ) as client:
             response = client.request(
                 method, url, json=json, params=params, headers=headers, **kwargs
             )
@@ -132,26 +134,40 @@ class ApiClient:
         """Open a streaming (e.g. file download) request. Retries once on 401
         like `request()`, but since the retry needs a fresh connection, the
         auth check happens eagerly before the stream is opened.
+
+        Keep the `with` body to reading `response`: an `httpx.HTTPError` raised
+        there is reported as an interrupted transfer, which would mislabel one
+        from an unrelated request made inside the block.
         """
         url = f"{self.config.api_url}{path}"
         headers = self._headers()
 
-        with httpx.Client(timeout=timeout or self.timeout, transport=self.transport) as client:
-            with client.stream(method, url, json=json, params=params, headers=headers) as response:
-                if response.status_code == 401:
-                    creds = auth.current_credentials()
-                    if not creds or not creds.get("refresh_token"):
-                        raise NotAuthenticatedError()
-                    auth.refresh_session(self.config, creds["refresh_token"], transport=self.transport)
-                    headers = self._headers()
-                    with client.stream(
-                        method, url, json=json, params=params, headers=headers
-                    ) as retried_response:
-                        _raise_for_status(retried_response, streamed=True)
-                        yield retried_response
-                        return
-                _raise_for_status(response, streamed=True)
+        with httpx.Client(timeout=timeout or self.timeout, transport=self.transport) as client, ExitStack() as stack:
+            # Only *opening* the stream means "could not reach harumi-api". A failure while the
+            # caller reads the body is a dropped transfer, reported below without the
+            # "is Harumi down?" framing.
+            with transport_errors_as_api_error():
+                response = stack.enter_context(
+                    client.stream(method, url, json=json, params=params, headers=headers)
+                )
+            if response.status_code == 401:
+                # The 401 was entered on the same stack as the retry, so without
+                # this its connection stayed open for the whole download.
+                response.close()
+                creds = auth.current_credentials()
+                if not creds or not creds.get("refresh_token"):
+                    raise NotAuthenticatedError()
+                auth.refresh_session(self.config, creds["refresh_token"], transport=self.transport)
+                headers = self._headers()
+                with transport_errors_as_api_error():
+                    response = stack.enter_context(
+                        client.stream(method, url, json=json, params=params, headers=headers)
+                    )
+            _raise_for_status(response, streamed=True)
+            try:
                 yield response
+            except httpx.HTTPError as exc:
+                raise ApiError(0, f"Transfer interrupted: {exc}") from exc
 
 
 def _raise_for_status(response: httpx.Response, streamed: bool = False) -> None:

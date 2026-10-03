@@ -11,7 +11,7 @@ import pytest
 
 from harumi.client import ApiClient, Client
 from harumi.config import Config
-from harumi.errors import ApiError, HarumiError, NotAuthenticatedError
+from harumi.errors import ApiError, ApiUnreachableError, HarumiError, NotAuthenticatedError
 
 
 @pytest.fixture(autouse=True)
@@ -23,8 +23,10 @@ def isolated_harumi_home(tmp_path, monkeypatch):
     monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "credentials.json")
     monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "config.json")
     monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
+    monkeypatch.setattr("harumi.config._RESOLVED_API_URL", None)
     monkeypatch.delenv("HARUMI_ENV", raising=False)
     monkeypatch.delenv("HARUMI_API_URL", raising=False)
+    monkeypatch.delenv("HARUMI_STATUS_URL", raising=False)
     monkeypatch.delenv("HARUMI_GIT_URL", raising=False)
     monkeypatch.delenv("HARUMI_ORG", raising=False)
     yield
@@ -1203,3 +1205,118 @@ def test_client_delete_project_file():
 
 
 
+
+
+@pytest.mark.parametrize("exc", [httpx.ConnectError("refused"), httpx.ReadTimeout("slow")])
+def test_request_reports_a_transport_failure_as_an_api_error(exc):
+    """A request that never gets an answer must surface as `ApiError(0, ...)`, not a
+    bare httpx exception that escapes `_handle_errors` as a traceback."""
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise exc
+
+    api = ApiClient(_config(), transport=httpx.MockTransport(handler))
+
+    with pytest.raises(ApiError) as caught:
+        api.request("GET", "/users/me")
+
+    assert caught.value.status_code == 0
+
+
+def test_stream_reports_a_transport_failure_as_an_api_error():
+    """`stream()` (file/export downloads) had the same raw-traceback gap as `request()`."""
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    api = ApiClient(_config(), transport=httpx.MockTransport(handler))
+
+    with pytest.raises(ApiUnreachableError):
+        with api.stream("GET", "/projects/p/files/x"):
+            pass
+
+
+def test_stream_reports_a_mid_download_drop_as_an_interrupted_transfer_not_an_outage():
+    """The connection worked, so this must not read as "could not reach harumi-api" (which
+    is what earns the status-page hint)."""
+    _write_credentials()
+
+    class Drops(httpx.SyncByteStream):
+        def __iter__(self):
+            yield b"part"
+            raise httpx.ReadError("connection dropped")
+
+    api = ApiClient(_config(), transport=httpx.MockTransport(lambda r: httpx.Response(200, stream=Drops())))
+
+    with pytest.raises(ApiError) as caught:
+        with api.stream("GET", "/projects/p/files/x") as response:
+            for _ in response.iter_bytes():
+                pass
+
+    assert not isinstance(caught.value, ApiUnreachableError)
+    assert "Transfer interrupted" in str(caught.value)
+
+
+def test_stream_retries_once_after_a_401_with_the_refreshed_token(monkeypatch):
+    """Guards the ExitStack restructure of the refresh path, including that the retry really
+    carries the new token rather than replaying the stale one."""
+    from harumi.config import save_credentials
+
+    _write_credentials(access_token="stale", refresh_token="refresh-1")
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("authorization"))
+        return httpx.Response(401 if len(seen) == 1 else 200, content=b"ok")
+
+    def fake_refresh(config, refresh_token, transport=None):
+        save_credentials(access_token="fresh", refresh_token=refresh_token)
+
+    api = ApiClient(_config(), transport=httpx.MockTransport(handler))
+    monkeypatch.setattr("harumi.auth.refresh_session", fake_refresh)
+
+    with api.stream("GET", "/x") as response:
+        assert response.read() == b"ok"
+
+    assert seen == ["Bearer stale", "Bearer fresh"]
+
+
+def test_stream_closes_the_401_response_before_retrying(monkeypatch):
+    """Both attempts used to be entered on one ExitStack, so the rejected response (and
+    its connection) stayed open for the whole download. It must be closed before the
+    retry is opened."""
+    from harumi.config import save_credentials
+
+    _write_credentials(access_token="stale", refresh_token="refresh-1")
+    events = []
+
+    class Tracked(httpx.SyncByteStream):
+        def __init__(self, label):
+            self.label = label
+
+        def __iter__(self):
+            yield b"ok"
+
+        def close(self):
+            events.append(f"closed {self.label}")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        first = request.headers.get("authorization") == "Bearer stale"
+        events.append("opened 401" if first else "opened 200")
+        return httpx.Response(401 if first else 200, stream=Tracked("401" if first else "200"))
+
+    def fake_refresh(config, refresh_token, transport=None):
+        events.append("refreshed")
+        save_credentials(access_token="fresh", refresh_token=refresh_token)
+
+    api = ApiClient(_config(), transport=httpx.MockTransport(handler))
+    monkeypatch.setattr("harumi.auth.refresh_session", fake_refresh)
+
+    with api.stream("GET", "/x") as response:
+        assert response.read() == b"ok"
+        events.append("body read")
+
+    assert events.index("closed 401") < events.index("refreshed") < events.index("opened 200")
+    assert events.index("opened 200") < events.index("body read")
