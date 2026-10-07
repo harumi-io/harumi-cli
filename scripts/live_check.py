@@ -141,6 +141,12 @@ TIERS: dict[str, tuple[str, str]] = {
     "runs list": (READ, ""),
     "runs get": (READ, ""),
     "runs cancel": (CANARY, "only cancels the run this harness queued"),
+    "compare": (
+        MANUAL,
+        "needs two distinct finished runs; the harness queues at most one (and `compare` refuses "
+        "a run against itself). The request, the table and the checks are covered offline in "
+        "tests/test_cli.py",
+    ),
     # -- schedules ------------------------------------------------------------
     "schedules list": (READ, ""),
     "schedules get": (READ, ""),

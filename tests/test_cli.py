@@ -2402,3 +2402,104 @@ def test_dashboard_validate_explicit_path_checks_only_that_file(api, tmp_path, m
 
 
 
+
+
+COMPARISON = {
+    "columns": [
+        {"run_id": "run-1", "branch": "main", "commit": "aaaaaaa1", "status": "completed", "runtime_s": 90.0},
+        {"run_id": "run-2", "branch": "v2", "commit": "bbbbbbb2", "status": "completed", "runtime_s": 125.0},
+        {"run_id": "run-3", "branch": "v3", "commit": "ccccccc3", "status": "failed", "runtime_s": None},
+    ],
+    "kpis": [
+        {
+            "key": "objective",
+            "label": "Total cost",
+            "unit": "USD",
+            "direction": "min",
+            "primary": True,
+            "values": [100, 80, None],
+            "deltas": [None, -20, None],
+        },
+        {
+            "key": "solver_status",
+            "label": "Solver status",
+            "unit": None,
+            "direction": "none",
+            "primary": False,
+            "values": ["OPTIMAL", "FEASIBLE", None],
+            "deltas": [None, None, None],
+        },
+    ],
+    "winner_run_id": "run-2",
+    "no_winner_reason": None,
+    "warnings": ["v3@ccccccc: no usable output (No output.json for this run)."],
+    "fairness": {"verdict": "differs", "files": ["inputs/demand.csv"]},
+}
+
+
+def test_compare_prints_kpis_winner_and_the_inputs_verdict(api):
+    api.route("GET", "/api/projects/proj-1/compare", COMPARISON)
+
+    result = runner.invoke(
+        cli.app, ["compare", "run-1", "run-2", "run-3", "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 0, result.output
+    out = result.output
+    assert "Total cost" in out and "OPTIMAL" in out
+    assert "main" in out and "v2" in out
+    assert "baseline" in out.lower()
+    assert "winner" in out.lower() and "v2" in out
+    # A difference in inputs is the thing to notice, so the files are named.
+    assert "inputs/demand.csv" in out
+    assert "no usable output" in out
+
+
+def test_compare_sends_the_runs_in_order_as_one_comma_separated_param(api):
+    api.route("GET", "/api/projects/proj-1/compare", COMPARISON)
+
+    runner.invoke(cli.app, ["compare", "run-2", "run-1", "--project", "proj-1"])
+
+    assert api.params_for("GET", "/api/projects/proj-1/compare") == {"runs": "run-2,run-1"}
+
+
+def test_compare_json_prints_exactly_what_the_api_returned(api):
+    api.route("GET", "/api/projects/proj-1/compare", COMPARISON)
+
+    result = runner.invoke(
+        cli.app, ["compare", "run-1", "run-2", "--project", "proj-1", "--json"]
+    )
+
+    assert result.exit_code == 0, result.output
+    import json
+
+    assert json.loads(result.output) == COMPARISON
+
+
+def test_compare_says_why_there_is_no_winner(api):
+    body = {**COMPARISON, "winner_run_id": None, "no_winner_reason": "No primary KPI is declared."}
+    api.route("GET", "/api/projects/proj-1/compare", body)
+
+    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "No primary KPI is declared." in result.output
+
+
+def test_compare_older_api_without_a_verdict_still_prints(api):
+    body = {k: v for k, v in COMPARISON.items() if k != "fairness"}
+    api.route("GET", "/api/projects/proj-1/compare", body)
+
+    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "Total cost" in result.output
+
+
+@pytest.mark.parametrize("ids", [["run-1"], ["a", "b", "c", "d", "e"], ["run-1", "run-1"]])
+def test_compare_needs_two_to_four_distinct_runs_before_calling_the_api(api, ids):
+    result = runner.invoke(cli.app, ["compare", *ids, "--project", "proj-1"])
+
+    assert result.exit_code != 0
+    assert "2" in result.output and "4" in result.output
+    assert api.paths() == []

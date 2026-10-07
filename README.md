@@ -41,6 +41,9 @@ harumi run --watch --output-dir ./out
 harumi runs list
 harumi runs get <RUN_ID>
 
+# Compare 2-4 runs (the first is the baseline): KPIs, winner, same inputs?
+harumi compare <RUN_ID> <RUN_ID>
+
 # 6. Check the project's dashboard.toml renders the widgets you expect
 harumi dashboard validate --latest
 ```

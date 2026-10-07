@@ -15,6 +15,7 @@
     harumi run [--branch <b>] [--commit <sha>] [--command <c>] [--kernel <k>]
                [--watch] [--output-dir <dir>]
     harumi runs list|get|cancel [--project <id>]
+    harumi compare <run-id>... [--json] [--project <id>]
     harumi outputs --project <id> [--latest] [--download <output_id>]
     harumi config set-org <ORG_ID>
     harumi skill install|path
@@ -1789,6 +1790,89 @@ def runs_cancel(
 
     r = client.cancel_run(project_id, run_id)
     console.print(f"[bold]Run {r.id}[/bold] status is now [bold]{r.status}[/bold].")
+
+
+# ---------------------------------------------------------------------------
+# harumi compare
+# ---------------------------------------------------------------------------
+
+_MIN_COMPARE_RUNS, _MAX_COMPARE_RUNS = 2, 4
+
+
+def _kpi_cell(value: object, unit: Optional[str]) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, float):
+        value = f"{value:.4g}"
+    return f"{value} {unit}" if unit else str(value)
+
+
+@app.command()
+@_handle_errors
+def compare(
+    run_ids: list[str] = typer.Argument(..., metavar="RUN_ID...", help="2-4 run ids. The first is the baseline."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = typer.Option(False, "--json", help="Print the API's comparison as JSON, for scripts."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Compare 2-4 runs: KPIs, the winner, and whether they used the same inputs.
+
+    The first run is the baseline; each change is measured against it. KPIs are
+    the project's `[[output.kpi]]` declarations in harumi.toml.
+    """
+    ids = list(dict.fromkeys(run_ids))
+    if not _MIN_COMPARE_RUNS <= len(ids) <= _MAX_COMPARE_RUNS or len(ids) != len(run_ids):
+        _fail(f"Compare {_MIN_COMPARE_RUNS} to {_MAX_COMPARE_RUNS} distinct runs (the first is the baseline).")
+
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+    result = client.compare_runs(project_id, ids)
+
+    if as_json:
+        # typer.echo, not the rich console: no wrapping or colour in piped output.
+        typer.echo(json.dumps(result, indent=2))
+        return
+
+    columns = result.get("columns", [])
+    winner = result.get("winner_run_id")
+    headers = []
+    for i, col in enumerate(columns):
+        tags = (["baseline"] if i == 0 else []) + (["winner"] if col["run_id"] == winner else [])
+        name = f"{col.get('branch') or '?'}@{(col.get('commit') or '')[:7]} ({col.get('status') or '?'})"
+        headers.append(f"{name} \\[{', '.join(tags)}]" if tags else name)
+
+    table = Table("KPI", *headers)
+    for kpi in result.get("kpis", []):
+        cells = []
+        for value, delta in zip(kpi["values"], kpi["deltas"]):
+            cell = _kpi_cell(value, kpi.get("unit"))
+            cells.append(f"{cell} ({delta:+.4g})" if delta is not None else cell)
+        label = kpi["label"] + (" *" if kpi.get("primary") else "")
+        table.add_row(label, *cells)
+    runtimes = [col.get("runtime_s") for col in columns]
+    table.add_row("Runtime", *[f"{r:.0f} s" if r is not None else "—" for r in runtimes])
+    console.print(table)
+
+    if winner:
+        branch = next((c.get("branch") for c in columns if c["run_id"] == winner), winner)
+        console.print(f"Winner: [bold]{branch}[/bold] (best value of the primary KPI, marked *).")
+    elif result.get("no_winner_reason"):
+        console.print(f"No winner: {result['no_winner_reason']}")
+
+    fairness = result.get("fairness") or {}
+    verdict = fairness.get("verdict")
+    if verdict == "same":
+        console.print("Inputs: every run used the same inputs.")
+    elif verdict == "differs":
+        console.print("[yellow]Inputs: the runs did not use the same inputs. Differing files:[/yellow]")
+        for path in fairness.get("files", []):
+            console.print(f"  {path}")
+    elif verdict == "unknown":
+        console.print("Inputs: can't tell, at least one run has no record of its inputs.")
+
+    for warning in result.get("warnings", []):
+        console.print(f"[yellow]Warning:[/yellow] {warning}")
 
 
 # ---------------------------------------------------------------------------
