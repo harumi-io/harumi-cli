@@ -10,6 +10,8 @@ codes, and what actually gets rendered to the terminal.
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 from pathlib import Path
@@ -2471,8 +2473,6 @@ def test_compare_json_prints_exactly_what_the_api_returned(api):
     )
 
     assert result.exit_code == 0, result.output
-    import json
-
     assert json.loads(result.output) == COMPARISON
 
 
@@ -2501,5 +2501,80 @@ def test_compare_needs_two_to_four_distinct_runs_before_calling_the_api(api, ids
     result = runner.invoke(cli.app, ["compare", *ids, "--project", "proj-1"])
 
     assert result.exit_code != 0
-    assert "2" in result.output and "4" in result.output
+    assert "Compare 2 to 4 distinct runs" in result.output
+    assert api.paths() == []
+
+
+def test_compare_prints_branch_names_and_paths_that_look_like_rich_markup(api):
+    """`[x]` is markup to rich, and an unmatched `[/x]` makes it raise after the request
+    succeeded. Branch names, files and warnings are all user-controlled."""
+    body = {
+        **COMPARISON,
+        "columns": [
+            {**COMPARISON["columns"][0], "branch": "fix/[bold]x"},
+            {**COMPARISON["columns"][1], "branch": "odd/[/nope]"},
+        ],
+        "kpis": [{**COMPARISON["kpis"][0], "label": "Cost [red]", "values": [1, 2], "deltas": [None, 1]}],
+        "winner_run_id": "run-2",
+        "fairness": {"verdict": "differs", "files": ["inputs/[2024].csv"]},
+        "warnings": ["see [/oops]"],
+    }
+    api.route("GET", "/api/projects/proj-1/compare", body)
+
+    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    for text in ("fix/[bold]x", "odd/[/nope]", "Cost [red]", "inputs/[2024].csv", "see [/oops]"):
+        assert text in result.output
+
+
+def test_compare_tolerates_a_response_that_leaves_fields_out(api):
+    api.route(
+        "GET",
+        "/api/projects/proj-1/compare",
+        {
+            "columns": [{"run_id": "run-1"}, {"run_id": "run-2", "branch": "v2"}],
+            "kpis": [{"key": "objective", "values": [1]}],
+        },
+    )
+
+    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "objective" in result.output
+
+
+def test_compare_does_not_misalign_columns_when_a_kpi_has_too_few_values(api):
+    body = {**COMPARISON, "kpis": [{**COMPARISON["kpis"][0], "values": [100], "deltas": []}]}
+    api.route("GET", "/api/projects/proj-1/compare", body)
+
+    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "run-3", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.count("—") >= 2
+
+
+def test_compare_names_the_primary_kpi_only_when_there_is_one(api):
+    body = {**COMPARISON, "kpis": [{**COMPARISON["kpis"][0], "primary": False}]}
+    api.route("GET", "/api/projects/proj-1/compare", body)
+
+    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+
+    assert "Winner" in result.output
+    assert "marked *" not in result.output
+
+
+def test_compare_reports_an_unknown_run_as_an_error(api):
+    api.route("GET", "/api/projects/proj-1/compare", {"detail": "Run not found"}, status=404)
+
+    result = runner.invoke(cli.app, ["compare", "run-1", "nope", "--project", "proj-1"])
+
+    assert result.exit_code == 1
+    assert "Run not found" in result.output
+
+
+def test_compare_rejects_a_run_id_containing_a_comma(api):
+    result = runner.invoke(cli.app, ["compare", "run-1", "a,b", "--project", "proj-1"])
+
+    assert result.exit_code == 1
     assert api.paths() == []
