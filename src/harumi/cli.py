@@ -15,6 +15,7 @@
     harumi run [--branch <b>] [--commit <sha>] [--command <c>] [--kernel <k>]
                [--watch] [--output-dir <dir>]
     harumi runs list|get|cancel [--project <id>]
+    harumi compare <run-id>... [--json] [--project <id>]
     harumi outputs --project <id> [--latest] [--download <output_id>]
     harumi config set-org <ORG_ID>
     harumi skill install|path
@@ -1789,6 +1790,128 @@ def runs_cancel(
 
     r = client.cancel_run(project_id, run_id)
     console.print(f"[bold]Run {r.id}[/bold] status is now [bold]{r.status}[/bold].")
+
+
+# ---------------------------------------------------------------------------
+# harumi compare
+# ---------------------------------------------------------------------------
+
+_MIN_COMPARE_RUNS, _MAX_COMPARE_RUNS = 2, 4
+_NO_VALUE = "—"
+
+
+def _num(value: object) -> Optional[float]:
+    """``value`` as a float, or None for anything that is not a plain number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _kpi_cell(value: object, unit: Optional[str], delta: object) -> str:
+    """One KPI value for a column, with its change against the baseline when it has one.
+
+    Plain text: the caller escapes it for rich, since a value can be any JSON the
+    run's `output.json` held.
+    """
+    if value is None:
+        return _NO_VALUE
+    number = _num(value)
+    text = f"{number:.4g}" if number is not None else str(value)
+    if unit:
+        text = f"{text} {unit}"
+    change = _num(delta)
+    return f"{text} ({change:+.4g})" if change is not None else text
+
+
+@app.command()
+@_handle_errors
+def compare(
+    run_ids: list[str] = typer.Argument(..., metavar="RUN_ID...", help="2-4 run ids. The first is the baseline."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = typer.Option(False, "--json", help="Print the API's comparison as JSON, for scripts."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Compare 2-4 runs: KPIs, the winner, and whether they used the same inputs.
+
+    The first run is the baseline; each change is measured against it. KPIs are
+    the project's `[[output.kpi]]` declarations in harumi.toml.
+    """
+    ids = list(dict.fromkeys(run_ids))
+    if not _MIN_COMPARE_RUNS <= len(ids) <= _MAX_COMPARE_RUNS or len(ids) != len(run_ids):
+        _fail(f"Compare {_MIN_COMPARE_RUNS} to {_MAX_COMPARE_RUNS} distinct runs (the first is the baseline).")
+    if any("," in run_id for run_id in ids):
+        # The API takes the ids as one comma-separated parameter, so a comma would
+        # silently become extra ids.
+        _fail("Run ids can't contain a comma.")
+
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+    result = client.compare_runs(project_id, ids)
+
+    if as_json:
+        # typer.echo, not the rich console: no wrapping or colour in piped output.
+        typer.echo(json.dumps(result, indent=2))
+        return
+
+    # Everything below prints values the user or the run controls (branch names, KPI
+    # labels and values, file paths), so each goes through escape(): `[x]` is markup to
+    # rich, and a stray `[/x]` would raise after the request already succeeded.
+    columns = result.get("columns") or []
+    winner = result.get("winner_run_id")
+    headers = []
+    for i, col in enumerate(columns):
+        tags = (["baseline"] if i == 0 else []) + (["winner"] if col.get("run_id") == winner else [])
+        name = f"{col.get('branch') or '?'}@{(col.get('commit') or '')[:7]} ({col.get('status') or '?'})"
+        headers.append(escape(name) + (f" \\[{', '.join(tags)}]" if tags else ""))
+
+    table = Table("KPI", *headers)
+    any_primary = False
+    for kpi in result.get("kpis") or []:
+        values = kpi.get("values") or []
+        deltas = kpi.get("deltas") or []
+        cells = [
+            escape(
+                _kpi_cell(
+                    values[i] if i < len(values) else None,
+                    kpi.get("unit"),
+                    deltas[i] if i < len(deltas) else None,
+                )
+            )
+            for i in range(len(columns))
+        ]
+        any_primary = any_primary or bool(kpi.get("primary"))
+        label = str(kpi.get("label") or kpi.get("key") or "?") + (" *" if kpi.get("primary") else "")
+        table.add_row(escape(label), *cells)
+    table.add_row(
+        "Runtime",
+        *[
+            f"{seconds:.0f} s" if (seconds := _num(col.get("runtime_s"))) is not None else _NO_VALUE
+            for col in columns
+        ],
+    )
+    console.print(table)
+
+    if winner:
+        branch = next((c.get("branch") for c in columns if c.get("run_id") == winner), None) or winner
+        note = " (best value of the primary KPI, marked *)" if any_primary else ""
+        console.print(f"Winner: [bold]{escape(str(branch))}[/bold]{note}")
+    elif result.get("no_winner_reason"):
+        console.print(f"No winner: {escape(str(result['no_winner_reason']))}")
+
+    fairness = result.get("fairness") or {}
+    verdict = fairness.get("verdict")
+    if verdict == "same":
+        console.print("Inputs: every run used the same inputs.")
+    elif verdict == "differs":
+        console.print("[yellow]Inputs: the runs did not use the same inputs. Differing files:[/yellow]")
+        for path in fairness.get("files") or []:
+            console.print(f"  {escape(str(path))}")
+    elif verdict == "unknown":
+        console.print("Inputs: can't tell, at least one run has no record of its inputs.")
+
+    for warning in result.get("warnings") or []:
+        console.print(f"[yellow]Warning:[/yellow] {escape(str(warning))}")
 
 
 # ---------------------------------------------------------------------------

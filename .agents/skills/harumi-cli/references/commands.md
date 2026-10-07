@@ -251,6 +251,16 @@ harumi runs cancel RUN_ID [--project ID] [--api-url URL] [--org ORG]
 
 `--project` on every subcommand overrides the `.harumi` binding.
 
+## `compare`
+
+```
+harumi compare RUN_ID... [--json] [--project ID] [--api-url URL] [--org ORG]
+```
+
+- Compares 2–4 distinct runs (the first is the baseline): `GET /projects/{id}/compare?runs=a,b,c`. Checked before any request is made.
+- Prints the project's `[[output.kpi]]` values with the change against the baseline, runtimes, the winner (best value of the primary KPI; or why there is none), whether the runs used the same inputs (`same` / `differs` with the files / `unknown`), and the server's warnings.
+- **`--json`**: prints the API's response unchanged, for scripts.
+
 ## `outputs`
 
 ```

@@ -499,6 +499,17 @@ class Client:
         response = self.api.request("POST", f"/projects/{project_id}/execute", json=body)
         return ProjectExecuteResponse.model_validate(response.json())
 
+    def compare_runs(self, project_id: str, run_ids: list[str]) -> dict[str, Any]:
+        """KPI table, deltas, winner and inputs verdict for 2-4 runs (first = baseline).
+
+        Returned as the API sent it, not as a model: ``harumi compare --json`` prints
+        it verbatim, and a typed copy would drop whatever the API adds next.
+        """
+        response = self.api.request(
+            "GET", f"/projects/{project_id}/compare", params={"runs": ",".join(run_ids)}
+        )
+        return response.json()
+
     def list_runs(self, project_id: str) -> list[ProjectRun]:
         from harumi.execution import list_runs
 
