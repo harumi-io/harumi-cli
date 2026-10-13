@@ -2578,3 +2578,192 @@ def test_compare_rejects_a_run_id_containing_a_comma(api):
 
     assert result.exit_code == 1
     assert api.paths() == []
+
+
+# ---------------------------------------------------------------------------
+# harumi memories
+# ---------------------------------------------------------------------------
+
+MEMORY = {
+    "id": "mem-1",
+    "scope": "project",
+    "project_id": "proj-1",
+    "content": "Use metric units",
+    "source": "cli",
+    "retrieval_mode": "on_demand",
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-02T00:00:00Z",
+}
+
+INHERITED_MEMORY = {
+    **MEMORY,
+    "id": "mem-org",
+    "scope": "organization",
+    "project_id": None,
+    "content": "Org-wide naming rules",
+    "retrieval_mode": "always",
+}
+
+
+def test_memories_list_shows_scope_mode_and_content(api):
+    api.route(
+        "GET", "/api/projects/proj-1/memories", {"memories": [MEMORY, INHERITED_MEMORY]}
+    )
+
+    result = runner.invoke(cli.app, ["memories", "list", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "mem-1" in result.output
+    assert "Use metric units" in result.output
+    assert "organization" in result.output
+    assert "always" in result.output
+
+
+def test_memories_list_reports_empty(api):
+    api.route("GET", "/api/projects/proj-1/memories", {"memories": []})
+
+    result = runner.invoke(cli.app, ["memories", "list", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert "No memories found." in result.output
+
+
+def test_memories_list_forwards_query_and_mode_filters(api):
+    api.route("GET", "/api/projects/proj-1/memories", {"memories": []})
+
+    result = runner.invoke(
+        cli.app,
+        ["memories", "list", "--query", "units", "--mode", "always", "--project", "proj-1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    params = api.params_for("GET", "/api/projects/proj-1/memories")
+    assert params == {"q": "units", "retrieval_mode": "always"}
+
+
+def test_memories_list_rejects_an_unknown_mode(api):
+    result = runner.invoke(
+        cli.app, ["memories", "list", "--mode", "sometimes", "--project", "proj-1"]
+    )
+
+    assert result.exit_code != 0
+    assert api.requests == []
+
+
+def test_memories_add_posts_content_with_cli_source(api):
+    api.route("POST", "/api/projects/proj-1/memories", MEMORY, status=201)
+
+    result = runner.invoke(
+        cli.app, ["memories", "add", "Use metric units", "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "mem-1" in result.output
+    body = api.body_for("POST", "/api/projects/proj-1/memories")
+    assert body["content"] == "Use metric units"
+    assert body["source"] == "cli"
+    assert body["retrieval_mode"] == "on_demand"
+
+
+def test_memories_add_forwards_mode(api):
+    api.route("POST", "/api/projects/proj-1/memories", MEMORY, status=201)
+
+    result = runner.invoke(
+        cli.app, ["memories", "add", "Always cite", "--mode", "always", "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert api.body_for("POST", "/api/projects/proj-1/memories")["retrieval_mode"] == "always"
+
+
+def test_memories_add_prompts_for_content_when_omitted(api):
+    api.route("POST", "/api/projects/proj-1/memories", MEMORY, status=201)
+
+    result = runner.invoke(
+        cli.app, ["memories", "add", "--project", "proj-1"], input="Typed at the prompt\n"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert api.body_for("POST", "/api/projects/proj-1/memories")["content"] == "Typed at the prompt"
+
+
+def test_memories_edit_with_no_flags_fails_without_calling_the_api(api):
+    result = runner.invoke(cli.app, ["memories", "edit", "mem-1", "--project", "proj-1"])
+
+    assert result.exit_code == 1
+    assert "No fields to update" in result.output
+    assert api.requests == []
+
+
+def test_memories_edit_sends_only_the_given_fields(api):
+    api.route("PATCH", "/api/projects/proj-1/memories/mem-1", MEMORY)
+
+    result = runner.invoke(
+        cli.app, ["memories", "edit", "mem-1", "--mode", "always", "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Updated" in result.output
+    assert api.body_for("PATCH", "/api/projects/proj-1/memories/mem-1") == {
+        "retrieval_mode": "always"
+    }
+
+
+def test_memories_edit_sends_content(api):
+    api.route("PATCH", "/api/projects/proj-1/memories/mem-1", MEMORY)
+
+    result = runner.invoke(
+        cli.app,
+        ["memories", "edit", "mem-1", "--content", "New text", "--project", "proj-1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert api.body_for("PATCH", "/api/projects/proj-1/memories/mem-1") == {"content": "New text"}
+
+
+def test_memories_rm_aborts_without_confirmation(api):
+    result = runner.invoke(
+        cli.app, ["memories", "rm", "mem-1", "--project", "proj-1"], input="n\n"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Aborted." in result.output
+    assert api.requests == []
+
+
+def test_memories_rm_deletes_when_confirmed(api):
+    api.route("DELETE", "/api/projects/proj-1/memories/mem-1", MEMORY)
+
+    result = runner.invoke(
+        cli.app, ["memories", "rm", "mem-1", "--project", "proj-1", "--yes"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Deleted" in result.output
+    assert api.paths() == ["/api/projects/proj-1/memories/mem-1"]
+
+
+def test_memories_rm_surfaces_a_404_as_a_clean_error(api):
+    api.route("DELETE", "/api/projects/proj-1/memories/nope", {"detail": "Not Found"}, status=404)
+
+    result = runner.invoke(
+        cli.app, ["memories", "rm", "nope", "--project", "proj-1", "--yes"]
+    )
+
+    assert result.exit_code == 1
+    assert "Error" in result.output
+
+
+# ---------------------------------------------------------------------------
+# harumi skills
+# ---------------------------------------------------------------------------
+
+
+def test_skills_points_at_the_repo_and_makes_no_api_call(api):
+    result = runner.invoke(cli.app, ["skills"])
+
+    assert result.exit_code == 0, result.output
+    assert "harumi repo" in result.output
+    assert "skills/" in result.output
+    assert "SKILL.md" in result.output
+    assert api.requests == []
