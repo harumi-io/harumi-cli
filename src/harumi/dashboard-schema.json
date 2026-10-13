@@ -1,5 +1,5 @@
 {
-  "version": 12,
+  "version": 13,
   "discovery": {
     "dashboardDir": "dashboard",
     "rootPath": "dashboard.toml"
@@ -294,6 +294,25 @@
     "rose-900",
     "rose-950"
   ],
+  "seriesMarks": [
+    "line",
+    "bar",
+    "area"
+  ],
+  "aliases": {
+    "line-chart": {
+      "type": "chart",
+      "set": {
+        "variant": "line"
+      }
+    },
+    "bar-chart": {
+      "type": "chart",
+      "set": {
+        "variant": "bar"
+      }
+    }
+  },
   "widgetTypes": [
     {
       "type": "metric",
@@ -634,94 +653,8 @@
       "tomlExample": "[[widgets]]\ntype = \"heatmap\"\nid = \"hourly-cycles\"\ntitle = \"Cycles per hour\"\nitems_key = \"hourly_cycles\"\nresource_key = \"resource\"\nbucket_key = \"bucket\"\nvalue_key = \"value\""
     },
     {
-      "type": "line-chart",
-      "description": "A line chart — good for a value trending over time. Deprecated: prefer `chart` with `variant = \"line\"`; this type is kept only so dashboards written before `chart` existed keep rendering.",
-      "fields": [
-        {
-          "tomlKey": "data_key",
-          "as": "dataKey",
-          "type": "string",
-          "required": true,
-          "isOutputPath": true,
-          "doc": "Dot-path to an array of data points in the run output payload."
-        },
-        {
-          "tomlKey": "x_key",
-          "as": "xKey",
-          "type": "string",
-          "required": true,
-          "isOutputPath": false,
-          "doc": "The data point field to use as the category/x-axis value."
-        },
-        {
-          "tomlKey": "series",
-          "as": "series",
-          "type": "series",
-          "required": true,
-          "isOutputPath": false,
-          "doc": "One or more `{ key, label?, color? }` entries — each renders as its own line/bar. Leave color unset unless the user asks for one: unset colors render as neutral grays that adapt to light/dark mode, which is the default look. When the user does ask, use a Tailwind color name (`<family>-<shade>`, e.g. `green-300`, `red-600`, or `black`/`white` — see the schema's `colorNames`), never hex. A single name is used as-is in both themes; prefer a `{ light = \"...\", dark = \"...\" }` pair (e.g. a darker shade for light mode and a lighter one for dark mode) so it reads on both backgrounds. Examples: `color = \"green-600\"`, `color = { light = \"blue-700\", dark = \"blue-300\" }`."
-        }
-      ],
-      "dataExample": {
-        "timeseries": [
-          {
-            "label": "Mon",
-            "value": 412
-          },
-          {
-            "label": "Tue",
-            "value": 398
-          }
-        ]
-      },
-      "tomlExample": "[[widgets]]\ntype = \"line-chart\"\nid = \"trend\"\ntitle = \"Objective value over time\"\ndata_key = \"timeseries\"\nx_key = \"label\"\nseries = [{ key = \"value\", label = \"Objective value\" }]"
-    },
-    {
-      "type": "bar-chart",
-      "description": "A bar chart — good for comparing values across categories. Deprecated: prefer `chart` with `variant = \"bar\"`; this type is kept only so dashboards written before `chart` existed keep rendering.",
-      "fields": [
-        {
-          "tomlKey": "data_key",
-          "as": "dataKey",
-          "type": "string",
-          "required": true,
-          "isOutputPath": true,
-          "doc": "Dot-path to an array of data points in the run output payload."
-        },
-        {
-          "tomlKey": "x_key",
-          "as": "xKey",
-          "type": "string",
-          "required": true,
-          "isOutputPath": false,
-          "doc": "The data point field to use as the category/x-axis value."
-        },
-        {
-          "tomlKey": "series",
-          "as": "series",
-          "type": "series",
-          "required": true,
-          "isOutputPath": false,
-          "doc": "One or more `{ key, label?, color? }` entries — each renders as its own line/bar. Leave color unset unless the user asks for one: unset colors render as neutral grays that adapt to light/dark mode, which is the default look. When the user does ask, use a Tailwind color name (`<family>-<shade>`, e.g. `green-300`, `red-600`, or `black`/`white` — see the schema's `colorNames`), never hex. A single name is used as-is in both themes; prefer a `{ light = \"...\", dark = \"...\" }` pair (e.g. a darker shade for light mode and a lighter one for dark mode) so it reads on both backgrounds. Examples: `color = \"green-600\"`, `color = { light = \"blue-700\", dark = \"blue-300\" }`."
-        }
-      ],
-      "dataExample": {
-        "breakdown": [
-          {
-            "name": "Warehouse A",
-            "value": 52400
-          },
-          {
-            "name": "Warehouse B",
-            "value": 38900
-          }
-        ]
-      },
-      "tomlExample": "[[widgets]]\ntype = \"bar-chart\"\nid = \"breakdown-chart\"\ntitle = \"Cost by warehouse\"\ndata_key = \"breakdown\"\nx_key = \"name\"\nseries = [{ key = \"value\", label = \"Cost\" }]"
-    },
-    {
       "type": "chart",
-      "description": "A line or bar chart, picked by `variant` — folds `line-chart` and `bar-chart` into one type since they only ever differed in that. Use `variant = \"line\"` for a value trending over time, `\"bar\"` for comparing values across categories.",
+      "description": "Line, bar, area, scatter, pie or donut, picked by `variant` — one widget for every chart picture, so changing how data is drawn never means changing the widget. Optionally split rows into colored groups with `group_key`, stack them with `stack`, lay bars on their side with `orientation`, and mix marks per series (bars plus a line) with `series[].mark`. It replaces `line-chart` and `bar-chart`, which are still accepted in existing files.",
       "fields": [
         {
           "tomlKey": "variant",
@@ -730,10 +663,14 @@
           "required": true,
           "values": [
             "line",
-            "bar"
+            "bar",
+            "area",
+            "scatter",
+            "pie",
+            "donut"
           ],
           "isOutputPath": false,
-          "doc": "Which chart to draw: \"line\" for a trend, \"bar\" for comparing categories."
+          "doc": "Which picture to draw. \"line\" or \"area\" for a value trending over time; \"bar\" for comparing categories (add `orientation = \"horizontal\"` when the labels are long); \"pie\" or \"donut\" only for the parts of one whole with at most about six slices (a seventh and beyond are folded into \"Other\" past eight); \"scatter\" for the relationship between two numbers. Changing it never needs a different widget."
         },
         {
           "tomlKey": "data_key",
@@ -749,7 +686,7 @@
           "type": "string",
           "required": true,
           "isOutputPath": false,
-          "doc": "The data point field to use as the category/x-axis value."
+          "doc": "The data point field to use as the category/x-axis value. For \"pie\"/\"donut\" it is each slice's label; for \"scatter\" it must hold numbers."
         },
         {
           "tomlKey": "series",
@@ -757,7 +694,111 @@
           "type": "series",
           "required": true,
           "isOutputPath": false,
-          "doc": "One or more `{ key, label?, color? }` entries — each renders as its own line/bar. Leave color unset unless the user asks for one: unset colors render as neutral grays that adapt to light/dark mode, which is the default look. When the user does ask, use a Tailwind color name (`<family>-<shade>`, e.g. `green-300`, `red-600`, or `black`/`white` — see the schema's `colorNames`), never hex. A single name is used as-is in both themes; prefer a `{ light = \"...\", dark = \"...\" }` pair (e.g. a darker shade for light mode and a lighter one for dark mode) so it reads on both backgrounds. Examples: `color = \"green-600\"`, `color = { light = \"blue-700\", dark = \"blue-300\" }`."
+          "doc": "One or more `{ key, label?, color?, mark? }` entries — each renders as its own line/bar/area/point set (a \"pie\"/\"donut\" draws only the first). `mark` (`line`, `bar` or `area`) overrides the chart's `variant` for that one series, which is how to draw bars plus a line on the same axis. Leave color unset unless the user asks for one: unset colors render as neutral grays that adapt to light/dark mode, which is the default look. When the user does ask, use a Tailwind color name (`<family>-<shade>`, e.g. `green-300`, `red-600`, or `black`/`white` — see the schema's `colorNames`), never hex. A single name is used as-is in both themes; prefer a `{ light = \"...\", dark = \"...\" }` pair (e.g. a darker shade for light mode and a lighter one for dark mode) so it reads on both backgrounds. Examples: `color = \"green-600\"`, `color = { light = \"blue-700\", dark = \"blue-300\" }`."
+        },
+        {
+          "tomlKey": "group_key",
+          "as": "groupKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "For long-format data (one row per category and group): the row field whose distinct values each become their own series, valued by `series[0].key`. Use it instead of listing one series per group; combine with `stack` to stack the groups."
+        },
+        {
+          "tomlKey": "stack",
+          "as": "stack",
+          "type": "enum",
+          "required": false,
+          "values": [
+            "none",
+            "stacked",
+            "percent"
+          ],
+          "isOutputPath": false,
+          "doc": "\"stacked\" piles bar/area series on top of each other; \"percent\" normalizes every category to 100%. Needs bar/area series only (a \"percent\" chart with a line series falls back to \"stacked\"). Defaults to \"none\"."
+        },
+        {
+          "tomlKey": "orientation",
+          "as": "orientation",
+          "type": "enum",
+          "required": false,
+          "values": [
+            "vertical",
+            "horizontal"
+          ],
+          "isOutputPath": false,
+          "doc": "\"horizontal\" lays bars on their side so long category labels stay readable. Only for bar charts (every series a bar); ignored otherwise. Defaults to \"vertical\"."
+        },
+        {
+          "tomlKey": "curve",
+          "as": "curve",
+          "type": "enum",
+          "required": false,
+          "values": [
+            "smooth",
+            "linear",
+            "step"
+          ],
+          "isOutputPath": false,
+          "doc": "How a line or area joins its points: \"smooth\" (the default), \"linear\" for straight segments, \"step\" for values that hold until the next change."
+        },
+        {
+          "tomlKey": "sort",
+          "as": "sort",
+          "type": "enum",
+          "required": false,
+          "values": [
+            "none",
+            "asc",
+            "desc"
+          ],
+          "isOutputPath": false,
+          "doc": "Orders categories (bar) or slices (pie/donut) by value — by `series[0]`, or by the category's total when `group_key` is set. \"none\" (the default) keeps the source order. Leave unset for a time axis."
+        },
+        {
+          "tomlKey": "format",
+          "as": "format",
+          "type": "enum",
+          "required": false,
+          "values": [
+            "number",
+            "currency",
+            "percent"
+          ],
+          "isOutputPath": false,
+          "doc": "Number format for the value axis and tooltips. \"currency\" is USD; \"percent\" expects a 0-1 fraction."
+        },
+        {
+          "tomlKey": "unit",
+          "as": "unit",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Suffix appended to a \"number\"-formatted value, e.g. \"kg\"."
+        },
+        {
+          "tomlKey": "x_label",
+          "as": "xLabel",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Title shown under the category (x) axis."
+        },
+        {
+          "tomlKey": "y_label",
+          "as": "yLabel",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Title shown beside the value (y) axis."
+        },
+        {
+          "tomlKey": "colors",
+          "as": "colorMap",
+          "type": "colorMap",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Pins a pie/donut slice (by its `x_key` value) or a `group_key` group to a color, e.g. `colors = { \"Late\" = \"red-600\" }`. Every other slice or group still cycles the default grays. Leave color unset unless the user asks for one: unset colors render as neutral grays that adapt to light/dark mode, which is the default look. When the user does ask, use a Tailwind color name (`<family>-<shade>`, e.g. `green-300`, `red-600`, or `black`/`white` — see the schema's `colorNames`), never hex. A single name is used as-is in both themes; prefer a `{ light = \"...\", dark = \"...\" }` pair (e.g. a darker shade for light mode and a lighter one for dark mode) so it reads on both backgrounds."
         }
       ],
       "dataExample": {
