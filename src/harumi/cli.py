@@ -19,6 +19,7 @@
     harumi outputs --project <id> [--latest] [--download <output_id>]
     harumi config set-org <ORG_ID>
     harumi skill install|path
+    harumi skills
     harumi projects create|list|get|rename|delete
     harumi repo ls|cat|put|rm|mv|download|branches|branch|promote|dir
     harumi files ls|put|get|rm [--project <id>]
@@ -27,6 +28,7 @@
     harumi datasources list|get|add|update|remove|test|query [--project <id>]
     harumi schedules list|get|add|update|remove [--project <id>]
     harumi secrets list|set|rm [--project <id>]
+    harumi memories list|add|edit|rm [--project <id>]
     harumi org list|create|rename|delete|members|invite|role|remove
 
 Onboarding — three journeys, three commands
@@ -793,7 +795,10 @@ def config_set_org(org_id: str = typer.Argument(..., help="Organization id to pe
 # harumi skill — seed the bundled agent skills onto this machine
 # ---------------------------------------------------------------------------
 
-skill_app = typer.Typer(help="Install the bundled harumi-cli agent skills (Cursor, Claude Code, etc.).")
+skill_app = typer.Typer(
+    help="Install the bundled harumi-cli agent skills (Cursor, Claude Code, etc.). "
+    "For a project's own skills, see `harumi skills`."
+)
 app.add_typer(skill_app, name="skill")
 
 
@@ -833,6 +838,30 @@ def skill_path() -> None:
     """Print the local directory containing the bundled skills."""
     for skill_dir in skills_mod.bundled_skill_dirs():
         console.print(str(skill_dir))
+
+
+@app.command("skills")
+def skills_pointer() -> None:
+    """Explain how to edit a project's skills (they live in its git repo).
+
+    Not the same as `harumi skill install`, which installs the bundled agent
+    skills onto this machine. Makes no API call and needs no project.
+    """
+    console.print(
+        "Project skills are files in the project's git repo, at "
+        "[bold]skills/<slug>/SKILL.md[/bold]. Edit them like any other file:\n"
+        "\n"
+        "  [bold]harumi repo ls skills[/bold]                      list the project's skills\n"
+        "  [bold]harumi repo cat skills/<slug>/SKILL.md[/bold]     read one\n"
+        "  [bold]harumi repo put skills/<slug>/SKILL.md ...[/bold] create or update one\n"
+        "  [bold]harumi repo rm skills/<slug>/SKILL.md[/bold]      delete one\n"
+        "\n"
+        "Or [bold]harumi clone <PROJECT_ID>[/bold], edit the files locally and "
+        "[bold]harumi push[/bold].\n"
+        "\n"
+        "[dim]To install the bundled harumi-cli agent skills (Cursor, Claude Code, ...) "
+        "onto this machine, use `harumi skill install` instead.[/dim]"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3445,6 +3474,146 @@ def secrets_rm(
     client = _get_client(api_url=api_url, org=org)
     client.delete_secret(project_id, name)
     console.print(f"[bold red]Deleted[/bold red] secret [bold]{name}[/bold].")
+
+
+# ---------------------------------------------------------------------------
+# harumi memories
+# ---------------------------------------------------------------------------
+
+memories_app = typer.Typer(help="Manage project memories (notes the project's chat remembers).")
+app.add_typer(memories_app, name="memories")
+
+_MEMORY_MODES = ("always", "on_demand")
+_MEMORY_PREVIEW_CHARS = 80
+# Mirrors MemoryContent in harumi-api/src/api/memories/schemas.py: stripped, 1-4000 chars.
+_MEMORY_MAX_CHARS = 4000
+
+
+def _check_memory_mode(mode: Optional[str]) -> Optional[str]:
+    if mode is not None and mode not in _MEMORY_MODES:
+        _fail(f"Invalid --mode {mode!r}. Use one of: {', '.join(_MEMORY_MODES)}.")
+    return mode
+
+
+def _check_memory_content(content: str) -> str:
+    """Reject text the API would 422 on, before spending a request on it."""
+    if not content.strip():
+        _fail("Memory content can't be empty.")
+    if len(content.strip()) > _MEMORY_MAX_CHARS:
+        _fail(f"Memory content is too long ({len(content.strip())} characters; the limit is {_MEMORY_MAX_CHARS}).")
+    return content
+
+
+def _memory_preview(content: str) -> str:
+    flat = " ".join(content.split())
+    if len(flat) <= _MEMORY_PREVIEW_CHARS:
+        return flat
+    return flat[: _MEMORY_PREVIEW_CHARS - 1] + "…"
+
+
+_MODE_HELP = "'always' loads the memory into every chat; 'on_demand' (default) only when retrieved."
+
+
+@memories_app.command("list")
+@_handle_errors
+def memories_list(
+    query: Optional[str] = typer.Option(None, "--query", "-q", help="Full-text search over memory content."),
+    mode: Optional[str] = typer.Option(None, "--mode", help="Only 'always' or only 'on_demand' memories."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """List a project's memories, plus those inherited from its workspace.
+
+    Inherited rows (scope 'organization' or 'user') are read-only here: edit
+    or remove them from the workspace's own settings.
+    """
+    _check_memory_mode(mode)
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    memories = client.list_memories(project_id, query=query, retrieval_mode=mode)
+    if not memories:
+        console.print("No memories found.")
+        return
+
+    table = Table("id", "scope", "mode", "content", "updated")
+    for m in memories:
+        table.add_row(
+            m.id,
+            m.scope,
+            m.retrieval_mode,
+            escape(_memory_preview(m.content)),
+            str(m.updated_at or ""),
+        )
+    console.print(table)
+
+
+@memories_app.command("add")
+@_handle_errors
+def memories_add(
+    content: Optional[str] = typer.Argument(None, help="The memory text (1-4000 characters). Prompted for if omitted."),
+    mode: str = typer.Option("on_demand", "--mode", help=_MODE_HELP),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Add a memory to the project, visible to every member with access to it."""
+    _check_memory_mode(mode)
+    project_id = _resolve_project(project)
+
+    if content is None:
+        content = typer.prompt("Memory")
+    _check_memory_content(content)
+
+    client = _get_client(api_url=api_url, org=org)
+    memory = client.create_memory(project_id, content, retrieval_mode=mode)
+    console.print(f"[bold green]Added[/bold green] memory [bold]{memory.id}[/bold].")
+
+
+@memories_app.command("edit")
+@_handle_errors
+def memories_edit(
+    memory_id: str = typer.Argument(..., help="Memory id (see `harumi memories list`)."),
+    content: Optional[str] = typer.Option(None, "--content", help="New memory text."),
+    mode: Optional[str] = typer.Option(None, "--mode", help="New retrieval mode: 'always' or 'on_demand'."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Edit a project memory's text and/or retrieval mode. Only provided fields change."""
+    _check_memory_mode(mode)
+    project_id = _resolve_project(project)
+
+    if content is None and mode is None:
+        _fail("No fields to update. Pass --content and/or --mode.")
+    if content is not None:
+        _check_memory_content(content)
+
+    client = _get_client(api_url=api_url, org=org)
+    memory = client.update_memory(project_id, memory_id, content=content, retrieval_mode=mode)
+    console.print(f"[bold green]Updated[/bold green] memory [bold]{memory.id}[/bold].")
+
+
+@memories_app.command("rm")
+@_handle_errors
+def memories_rm(
+    memory_id: str = typer.Argument(..., help="Memory id (see `harumi memories list`)."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Delete a project memory."""
+    project_id = _resolve_project(project)
+
+    if not yes and not typer.confirm(f"Delete memory '{memory_id}'? This cannot be undone."):
+        console.print("Aborted.")
+        return
+
+    client = _get_client(api_url=api_url, org=org)
+    memory = client.delete_memory(project_id, memory_id)
+    console.print(f"[bold red]Deleted[/bold red] memory [bold]{memory.id}[/bold].")
 
 
 # ---------------------------------------------------------------------------

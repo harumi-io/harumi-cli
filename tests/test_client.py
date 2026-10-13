@@ -1320,3 +1320,95 @@ def test_stream_closes_the_401_response_before_retrying(monkeypatch):
 
     assert events.index("closed 401") < events.index("refreshed") < events.index("opened 200")
     assert events.index("opened 200") < events.index("body read")
+
+
+# ---------------------------------------------------------------------------
+# Memories
+# ---------------------------------------------------------------------------
+
+_MEMORY_JSON = {
+    "id": "mem-1",
+    "scope": "project",
+    "project_id": "proj-1",
+    "content": "Use metric units",
+    "source": "cli",
+    "retrieval_mode": "on_demand",
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+}
+
+
+def test_client_list_memories_parses_array_and_forwards_filters():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/projects/proj-1/memories"
+        assert dict(request.url.params) == {"q": "units", "retrieval_mode": "always"}
+        return httpx.Response(200, json={"memories": [_MEMORY_JSON]})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    memories = client.list_memories("proj-1", query="units", retrieval_mode="always")
+
+    assert [m.id for m in memories] == ["mem-1"]
+    assert memories[0].scope == "project"
+
+
+def test_client_list_memories_omits_unset_filters():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert dict(request.url.params) == {}
+        return httpx.Response(200, json={"memories": []})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+
+    assert client.list_memories("proj-1") == []
+
+
+def test_client_create_memory_posts_body_and_returns_memory():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/api/projects/proj-1/memories"
+        assert json.loads(request.content) == {
+            "content": "Use metric units",
+            "source": "cli",
+            "retrieval_mode": "always",
+        }
+        return httpx.Response(201, json={**_MEMORY_JSON, "retrieval_mode": "always"})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    memory = client.create_memory("proj-1", "Use metric units", retrieval_mode="always")
+
+    assert memory.id == "mem-1"
+    assert memory.retrieval_mode == "always"
+
+
+def test_client_update_memory_patches_only_given_fields():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PATCH"
+        assert request.url.path == "/api/projects/proj-1/memories/mem-1"
+        assert json.loads(request.content) == {"content": "New text"}
+        return httpx.Response(200, json={**_MEMORY_JSON, "content": "New text"})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    memory = client.update_memory("proj-1", "mem-1", content="New text")
+
+    assert memory.content == "New text"
+
+
+def test_client_delete_memory_returns_deleted_row():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "DELETE"
+        assert request.url.path == "/api/projects/proj-1/memories/mem-1"
+        return httpx.Response(200, json=_MEMORY_JSON)
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+
+    assert client.delete_memory("proj-1", "mem-1").id == "mem-1"

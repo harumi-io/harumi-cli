@@ -1561,6 +1561,288 @@
       "params": []
     },
     {
+      "path": "memories add",
+      "help": "Add a memory to the project, visible to every member with access to it.",
+      "params": [
+        {
+          "opts": [
+            "content"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "The memory text (1-4000 characters). Prompted for if omitted."
+        },
+        {
+          "opts": [
+            "--mode"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": "on_demand",
+          "help": "'always' loads the memory into every chat; 'on_demand' (default) only when retrieved."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "memories edit",
+      "help": "Edit a project memory's text and/or retrieval mode.",
+      "params": [
+        {
+          "opts": [
+            "memory_id"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Memory id (see `harumi memories list`)."
+        },
+        {
+          "opts": [
+            "--content"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "New memory text."
+        },
+        {
+          "opts": [
+            "--mode"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "New retrieval mode: 'always' or 'on_demand'."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "memories list",
+      "help": "List a project's memories, plus those inherited from its workspace.",
+      "params": [
+        {
+          "opts": [
+            "--query",
+            "-q"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Full-text search over memory content."
+        },
+        {
+          "opts": [
+            "--mode"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Only 'always' or only 'on_demand' memories."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "memories rm",
+      "help": "Delete a project memory.",
+      "params": [
+        {
+          "opts": [
+            "memory_id"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Memory id (see `harumi memories list`)."
+        },
+        {
+          "opts": [
+            "--yes",
+            "-y"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Skip the confirmation prompt."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
       "path": "new",
       "help": "Create a brand-new Harumi project and clone its scaffold locally.",
       "params": [
@@ -5045,6 +5327,11 @@
     {
       "path": "skill path",
       "help": "Print the local directory containing the bundled skills.",
+      "params": []
+    },
+    {
+      "path": "skills",
+      "help": "Explain how to edit a project's skills (they live in its git repo).",
       "params": []
     },
     {

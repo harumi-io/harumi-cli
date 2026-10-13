@@ -58,6 +58,7 @@ harumi dashboard validate --latest
 - `harumi datasources` — CRUD project database connections, test them, and run read-only SQL queries against them.
 - `harumi schedules` — CRUD cron schedules that trigger git-ref runs.
 - `harumi secrets` — CRUD project-scoped environment variables.
+- `harumi memories` — list/add/edit/remove the project's memories. (Project skills are files in the repo under `skills/<slug>/SKILL.md`; run `harumi skills` for how to edit them.)
 - `harumi org` — CRUD organizations and manage their members.
 - `harumi profile` — view/update your account profile.
 

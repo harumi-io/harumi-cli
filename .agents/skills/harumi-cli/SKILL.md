@@ -1,6 +1,6 @@
 ---
 name: harumi-cli
-description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to select the backend environment (production vs internal staging), start a new project, push an existing folder of code as a new project, clone an existing project locally, bind a directory to a project, browse and edit the project's git repo, inspect and cancel runs, manage the project's dashboard widgets and public share link, manage datasources, schedules, secrets, organizations, and your profile. Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi start`, `harumi new`, `harumi push`, `harumi clone`, `harumi link`, `harumi run`, `harumi runs`, `harumi repo`, `harumi dashboard`, `harumi share`, `harumi blueprints`, `harumi env`, `harumi projects`, `harumi datasources`, `harumi schedules`, `harumi secrets`, `harumi org`, `harumi profile`, asks about switching between production and staging, creating a new Harumi project, turning an existing local folder/repo into a Harumi project, getting an existing Harumi project's code onto their machine, Harumi kernel specs, project blueprints, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, managing environment variables/secrets, organization members, dashboard widgets (metric/table/line-chart/bar-chart/gantt-chart), `dashboard.toml`, `dashboard/*.toml`, multiple dashboards per project, the dashboard picker, `output.json`, what components/widgets the platform dashboard can render, sharing/publishing a project's dashboard publicly, or needs to fetch/download results or files from a Harumi run/repo.
+description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to select the backend environment (production vs internal staging), start a new project, push an existing folder of code as a new project, clone an existing project locally, bind a directory to a project, browse and edit the project's git repo, inspect and cancel runs, manage the project's dashboard widgets and public share link, manage datasources, schedules, secrets, organizations, and your profile. Use when the user wants to run, push, or debug a local script against a Harumi project, mentions `harumi start`, `harumi new`, `harumi push`, `harumi clone`, `harumi link`, `harumi run`, `harumi runs`, `harumi repo`, `harumi dashboard`, `harumi share`, `harumi blueprints`, `harumi env`, `harumi projects`, `harumi datasources`, `harumi schedules`, `harumi secrets`, `harumi memories`, `harumi skills`, `harumi org`, `harumi profile`, asks about switching between production and staging, creating a new Harumi project, turning an existing local folder/repo into a Harumi project, getting an existing Harumi project's code onto their machine, Harumi kernel specs, project blueprints, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, managing environment variables/secrets, organization members, dashboard widgets (metric/table/line-chart/bar-chart/gantt-chart), `dashboard.toml`, `dashboard/*.toml`, multiple dashboards per project, the dashboard picker, `output.json`, what components/widgets the platform dashboard can render, sharing/publishing a project's dashboard publicly, or needs to fetch/download results or files from a Harumi run/repo.
 ---
 
 # Harumi CLI
@@ -194,6 +194,22 @@ harumi secrets list                 # names only, never values
 harumi secrets set <NAME>           # prompts for the value (hidden input)
 harumi secrets rm <NAME>
 ```
+
+## Manage project memories and skills
+
+`harumi memories` manages the project's memories: short notes the project's chat remembers. `always` memories are loaded into every chat; `on_demand` ones (the default) are only retrieved when relevant.
+
+```bash
+harumi memories list [--query TEXT] [--mode always|on_demand]   # includes read-only memories inherited from the org / personal workspace
+harumi memories add "Use metric units" [--mode always]          # omit the text to be prompted
+harumi memories edit <MEMORY_ID> [--content TEXT] [--mode always|on_demand]
+harumi memories rm <MEMORY_ID>
+```
+
+- Inherited rows (scope `organization` or `user`) are listed but can't be edited or removed here.
+- `edit` needs at least one of `--content` / `--mode`.
+
+**There is no `harumi skills` CRUD.** A project's skills are files in its git repo at `skills/<slug>/SKILL.md`, so edit them with `harumi repo ls|cat|put|rm|mv skills/...`, or `harumi clone` and `harumi push`. `harumi skills` just prints that reminder. Not to be confused with `harumi skill install`, which installs the bundled agent skills onto the user's machine.
 
 ## Manage organizations and your profile
 
