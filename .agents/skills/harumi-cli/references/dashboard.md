@@ -43,14 +43,12 @@ Get the live, in-code reference with `harumi dashboard widgets` (add `--type met
 | `filter` | `items_key`, `id_key` | `label_key` |
 | `treemap` | `items_key`, `value_key`, `name_key` | `color_key`, `colors`, `capacity_key` |
 | `heatmap` | `items_key` | `resource_key`, `bucket_key`, `value_key`, `unit` |
-| `chart` | `variant` (`line`\|`bar`), `data_key`, `x_key`, `series` | — |
-| `line-chart` | `data_key`, `x_key`, `series` | — |
-| `bar-chart` | `data_key`, `x_key`, `series` | — |
+| `chart` | `variant` (`line`\|`bar`\|`area`\|`scatter`\|`pie`\|`donut`), `data_key`, `x_key`, `series` | `group_key`, `stack` (`none`\|`stacked`\|`percent`), `orientation` (`vertical`\|`horizontal`), `curve` (`smooth`\|`linear`\|`step`), `sort` (`none`\|`asc`\|`desc`), `format`, `unit`, `x_label`, `y_label`, `colors` (each `series` entry optionally: `label`, `color`, `mark`) |
 | `gantt-chart` | `tasks_key` | `resource_key`, `label_key`, `start_key`, `end_key`, `duration_key`, `color_key`, `colors`, `time_unit` |
 | `timeline` | `items_key` | `resource_key`, `label_key`, `start_key`, `end_key`, `duration_key`, `color_key`, `colors`, `id_key`, `regions_key`, `region_start_key`, `region_end_key`, `region_label_key`, `region_resource_key`, `time_unit` |
 | `map` | `points_key` and/or `routes_key` (at least one) | `lat_key`, `lng_key`, `label_key`, `id_key`, `color_key`, `route_path_key`, `route_color_key`, `tile_url`, `attribution` |
 
-`line-chart`/`bar-chart` and `gantt-chart` are deprecated in favor of `chart` (variant-based) and `timeline` respectively — kept only so a spec written before those existed keeps rendering; write new widgets against `chart`/`timeline` instead.
+`gantt-chart` is deprecated in favor of `timeline`, and `line-chart`/`bar-chart` are retired aliases of `chart` (`variant = "line"` / `"bar"`) — all still render so a spec written before they were replaced keeps working; write new widgets against `chart`/`timeline` instead. `harumi dashboard validate` reads a `line-chart`/`bar-chart` as the `chart` it means, so it validates clean.
 
 Every widget entry also needs `type`, `id` (unique), and `title`. `*_key` fields (except chart `x_key`/gantt's per-task field names) are **dot-paths into `output.json`**, e.g. `"totals.revenue"`.
 
@@ -178,7 +176,7 @@ route_color_key = "vehicle"
 
 Matching `output.json`: `{"stops": [{"lat": 40.71, "lng": -74.0, "label": "Depot", "vehicle": "V1"}], "routes": [{"vehicle": "V1", "path": [[40.71, -74.0], [40.73, -73.99]]}]}`. Set `points_key`, `routes_key`, or both. Neither is required on its own, but a map with neither renders nothing. `lat_key`/`lng_key` default to `lat`/`lng`, and `route_path_key` defaults to `path`. A path is an ordered array of `[lat, lng]` pairs or `{ lat, lng }` objects. Rows with a missing, null, or out-of-range coordinate are dropped. `id_key` joins a point to the shared dashboard selection, the same way `timeline`'s does. Tiles default to OpenStreetMap. `tile_url` must be an `https://` XYZ template, and every viewer of the dashboard, including share-link viewers, requests tiles from that host. `attribution` is plain text; HTML in it is escaped, not rendered.
 
-### `chart` — line or bar, by `variant`
+### `chart` — line, bar, area, scatter, pie or donut, by `variant`
 
 ```toml
 [[widgets]]
@@ -191,11 +189,33 @@ x_key = "label"
 series = [{ key = "value", label = "Objective value" }]
 ```
 
-Matching `output.json`: `{"timeseries": [{"label": "Mon", "value": 412}, {"label": "Tue", "value": 398}]}`. `x_key` and `series[].key` are fields within each data point, not dot-paths. Multiple `series` entries render as multiple lines/bars. `variant = "bar"` renders the same shape as a bar chart.
+Matching `output.json`: `{"timeseries": [{"label": "Mon", "value": 412}, {"label": "Tue", "value": 398}]}`. `x_key` and `series[].key` are fields within each data point, not dot-paths. Multiple `series` entries render as multiple lines/bars/areas. Changing `variant` redraws the same data; it never needs a different widget.
 
-### `line-chart` / `bar-chart` — deprecated, use `chart`
+Pick the variant by the question: `line`/`area` for a trend over time, `bar` for comparing categories (`orientation = "horizontal"` when labels are long), `pie`/`donut` only for the parts of one whole with about six slices or fewer, `scatter` for how two numbers relate. A `pie`/`donut` draws only `series[0]`, only positive values, and folds the smallest slices into **Other** past eight; for `scatter`, `x_key` must hold numbers.
 
-Same fields as `chart` minus `variant` — the variant is implied by `type` instead. Kept only for specs written before `chart` existed.
+- **`group_key`** — for long-format rows (one per category and group), each distinct value of this field becomes its own series, valued by `series[0].key`. Don't list one series per group by hand.
+- **`stack`** — `stacked` piles bar/area series up; `percent` normalizes each category to 100%. Bars and areas only (a line series makes `percent` fall back to `stacked`).
+- **`series[].mark`** — `line`, `bar` or `area`, overriding `variant` for that one series: bars plus a line is `variant = "bar"` with `{ key = "target", mark = "line" }`.
+- **`sort`**, **`curve`**, **`format`**/**`unit`**, **`x_label`**/**`y_label`** — ordering, how lines join, number format (shared with `metric`), and axis titles.
+- **`colors`** — pins a pie/donut slice (by its `x_key` value) or a `group_key` group to a color; leave colors unset otherwise.
+
+```toml
+[[widgets]]
+type = "chart"
+id = "cost-mix"
+title = "Cost by machine and shift"
+variant = "bar"
+stack = "stacked"
+data_key = "cost_by_shift"
+x_key = "machine"
+group_key = "shift"
+series = [{ key = "cost", label = "Cost" }]
+format = "currency"
+```
+
+### `line-chart` / `bar-chart` — retired, write `chart`
+
+Aliases the platform and `harumi dashboard validate` read as `chart` with `variant = "line"` / `"bar"` (an explicit `variant` wins). Same other fields as `chart`. Kept only for specs written before `chart` existed.
 
 ### `gantt-chart` — deprecated, use `timeline`
 

@@ -44,9 +44,22 @@ _EXPECTED_WIDGET_CONTRACT = {
         "value_key",
         "unit",
     ],
-    "line-chart": ["data_key!*", "x_key!", "series!"],
-    "bar-chart": ["data_key!*", "x_key!", "series!"],
-    "chart": ["variant![line|bar]", "data_key!*", "x_key!", "series!"],
+    "chart": [
+        "variant![line|bar|area|scatter|pie|donut]",
+        "data_key!*",
+        "x_key!",
+        "series!",
+        "group_key",
+        "stack[none|stacked|percent]",
+        "orientation[vertical|horizontal]",
+        "curve[smooth|linear|step]",
+        "sort[none|asc|desc]",
+        "format[number|currency|percent]",
+        "unit",
+        "x_label",
+        "y_label",
+        "colors",
+    ],
     "gantt-chart": [
         "tasks_key!*",
         "resource_key",
@@ -297,22 +310,6 @@ class TestParseWidgetEntry:
                 "id": "hm",
                 "title": "HM",
                 "items_key": "hourly",
-            },
-            "line-chart": {
-                "type": "line-chart",
-                "id": "l",
-                "title": "L",
-                "data_key": "series",
-                "x_key": "label",
-                "series": [{"key": "value"}],
-            },
-            "bar-chart": {
-                "type": "bar-chart",
-                "id": "b",
-                "title": "B",
-                "data_key": "series",
-                "x_key": "label",
-                "series": [{"key": "value"}],
             },
             "chart": {
                 "type": "chart",
@@ -1184,3 +1181,139 @@ class TestLocalDashboardPaths:
 
     def test_empty_when_nothing_is_committed(self, tmp_path):
         assert local_dashboard_paths(tmp_path) == []
+
+
+# ------------------------------------------------------------------ #
+#  aliases + series marks                                            #
+# ------------------------------------------------------------------ #
+#
+# The platform folds retired widget types (`line-chart`/`bar-chart`) into
+# `chart` at parse time and describes that in the artifact's optional `aliases`
+# map. These patch the loaders so they pin the validator's behavior regardless
+# of what the vendored artifact currently carries.
+
+from harumi import dashboard as dash  # noqa: E402
+
+_CHART_ALIASES = {
+    "line-chart": {"type": "chart", "set": {"variant": "line"}},
+    "bar-chart": {"type": "chart", "set": {"variant": "bar"}},
+}
+
+_LEGACY_ENTRY = {
+    "type": "line-chart",
+    "id": "trend",
+    "title": "Trend",
+    "data_key": "timeseries",
+    "x_key": "label",
+    "series": [{"key": "value"}],
+}
+
+
+def test_resolve_alias_is_a_no_op_without_aliases():
+    with mock.patch.object(dash, "widget_aliases", return_value={}):
+        entry = dict(_LEGACY_ENTRY)
+        assert dash.resolve_alias(entry) is entry
+
+
+def test_resolve_alias_rewrites_type_and_fills_implied_keys():
+    with mock.patch.object(dash, "widget_aliases", return_value=_CHART_ALIASES):
+        assert dash.resolve_alias({"type": "bar-chart", "id": "x"}) == {
+            "type": "chart",
+            "variant": "bar",
+            "id": "x",
+        }
+
+
+def test_resolve_alias_lets_an_explicit_key_win_over_the_implied_one():
+    with mock.patch.object(dash, "widget_aliases", return_value=_CHART_ALIASES):
+        resolved = dash.resolve_alias({"type": "line-chart", "variant": "area", "id": "x"})
+    assert resolved["type"] == "chart"
+    assert resolved["variant"] == "area"
+
+
+def test_parse_widget_entry_treats_an_aliased_type_as_its_target():
+    chart_fields = (
+        dash.WidgetField("variant", required=True, kind="enum", values=("line", "bar")),
+        dash.WidgetField("data_key", required=True),
+        dash.WidgetField("x_key", required=True),
+        dash.WidgetField("series", required=True, kind="series"),
+    )
+    # Nested rather than a parenthesized `with (...)`: that form is only
+    # supported from Python 3.10 and this package declares >= 3.9.
+    with mock.patch.object(dash, "widget_aliases", return_value=_CHART_ALIASES):
+        with mock.patch.object(dash, "widget_schemas", return_value={"chart": chart_fields}):
+            widget, issue = parse_widget_entry(dict(_LEGACY_ENTRY))
+    assert issue is None
+    assert widget is not None
+    assert widget["type"] == "chart"
+    assert widget["variant"] == "line"
+
+
+def test_parse_widget_entry_still_rejects_a_retired_type_without_an_alias():
+    with mock.patch.object(dash, "widget_aliases", return_value={}):
+        with mock.patch.object(dash, "widget_schemas", return_value={"chart": ()}):
+            widget, issue = parse_widget_entry(dict(_LEGACY_ENTRY))
+    assert widget is None
+    assert issue is not None and 'unknown type "line-chart"' in issue.message
+
+
+def test_widget_aliases_rejects_a_malformed_artifact():
+    dash.widget_aliases.cache_clear()
+    try:
+        with mock.patch.object(dash, "_artifact", return_value={"widgetTypes": [], "aliases": {"x": "chart"}}):
+            with pytest.raises(dash.DashboardSchemaError):
+                dash.widget_aliases()
+    finally:
+        dash.widget_aliases.cache_clear()
+
+
+def test_a_series_mark_is_kept_when_valid_and_dropped_when_not():
+    with mock.patch.object(dash, "series_marks", return_value=("line", "bar", "area")):
+        series = dash._coerce_series([{"key": "a", "mark": "bar"}, {"key": "b", "mark": "pie"}])
+    assert series == [
+        {"key": "a", "label": "a", "mark": "bar"},
+        {"key": "b", "label": "b"},
+    ]
+
+
+def test_a_series_mark_is_dropped_when_the_artifact_has_no_marks():
+    with mock.patch.object(dash, "series_marks", return_value=None):
+        assert dash._coerce_series([{"key": "a", "mark": "bar"}]) == [{"key": "a", "label": "a"}]
+
+
+def test_an_invalid_series_mark_is_reported_as_ignored_without_dropping_the_widget():
+    widget = {"id": "w", "type": "chart"}
+    entry = {"series": [{"key": "a", "mark": "pie"}]}
+    schemas = {"chart": (dash.WidgetField("series", kind="series"),)}
+    with mock.patch.object(dash, "series_marks", return_value=("line", "bar", "area")):
+        with mock.patch.object(dash, "widget_schemas", return_value=schemas):
+            issues = dash.widget_warnings(entry, widget)
+    assert len(issues) == 1
+    assert issues[0].dropped is False and issues[0].label == "ignored"
+    assert "mark" in issues[0].message and "line, bar, area" in issues[0].message
+
+
+def test_widget_warnings_receives_the_alias_resolved_entry():
+    """`widget_warnings` reads the alias-resolved entry, so a key an alias implies
+    is seen by the warning pass as well as the parse."""
+    seen = {}
+
+    def spy(entry, widget):
+        seen["type"] = entry.get("type")
+        return []
+
+    chart_fields = (
+        dash.WidgetField("variant", required=True, kind="enum", values=("line", "bar")),
+        dash.WidgetField("data_key", required=True),
+        dash.WidgetField("x_key", required=True),
+        dash.WidgetField("series", required=True, kind="series"),
+    )
+    raw = (
+        "[[widgets]]\ntype = 'line-chart'\nid = 'o'\ntitle = 'O'\n"
+        "data_key = 'd'\nx_key = 'x'\nseries = [{ key = 'v' }]\n"
+    )
+    with mock.patch.object(dash, "widget_aliases", return_value=_CHART_ALIASES):
+        with mock.patch.object(dash, "widget_schemas", return_value={"chart": chart_fields}):
+            with mock.patch.object(dash, "widget_warnings", side_effect=spy):
+                dash.validate_dashboard_toml(raw)
+    assert seen["type"] == "chart"
