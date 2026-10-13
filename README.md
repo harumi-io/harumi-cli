@@ -41,6 +41,9 @@ harumi run --watch --output-dir ./out
 harumi runs list
 harumi runs get <RUN_ID>
 
+# Compare 2-4 runs (the first is the baseline): KPIs, winner, same inputs?
+harumi compare <RUN_ID> <RUN_ID>
+
 # 6. Check the project's dashboard.toml renders the widgets you expect
 harumi dashboard validate --latest
 ```
@@ -55,6 +58,7 @@ harumi dashboard validate --latest
 - `harumi datasources` — CRUD project database connections, test them, and run read-only SQL queries against them.
 - `harumi schedules` — CRUD cron schedules that trigger git-ref runs.
 - `harumi secrets` — CRUD project-scoped environment variables.
+- `harumi memories` — list/add/edit/remove the project's memories. (Project skills are files in the repo under `skills/<slug>/SKILL.md`; run `harumi skills` for how to edit them.)
 - `harumi org` — CRUD organizations and manage their members.
 - `harumi profile` — view/update your account profile.
 

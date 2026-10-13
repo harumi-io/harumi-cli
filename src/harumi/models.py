@@ -414,6 +414,36 @@ class Schedule(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Memories <-> harumi-api/src/api/memories/schemas.py:Memory — live.
+# A project's list also carries the memories inherited from its organization
+# or personal workspace (`scope` != "project"); those can't be edited from the
+# project routes.
+# ---------------------------------------------------------------------------
+
+class Memory(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    scope: str = "project"
+    project_id: Optional[str] = None
+    customer_id: Optional[str] = None
+    user_id: Optional[str] = None
+    organization_name: Optional[str] = None
+    content: str
+    source: str = "chat"
+    retrieval_mode: str = "on_demand"
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class MemoryList(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    memories: list[Memory] = []
+
+
+# ---------------------------------------------------------------------------
 # Secrets <-> harumi-api/src/api/projects/schemas.py:Secret — live.
 # Stored in AWS SSM under /harumi/projects/{id}/secrets/{name}; `secret_id`
 # used by the delete endpoint is just the secret's name.

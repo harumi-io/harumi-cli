@@ -30,6 +30,8 @@ from harumi.models import (
     FileUploadUrl,
     GitCredentials,
     KernelSpec,
+    Memory,
+    MemoryList,
     Organization,
     OrganizationMember,
     Project,
@@ -499,6 +501,17 @@ class Client:
         response = self.api.request("POST", f"/projects/{project_id}/execute", json=body)
         return ProjectExecuteResponse.model_validate(response.json())
 
+    def compare_runs(self, project_id: str, run_ids: list[str]) -> dict[str, Any]:
+        """KPI table, deltas, winner and inputs verdict for 2-4 runs (first = baseline).
+
+        Returned as the API sent it, not as a model: ``harumi compare --json`` prints
+        it verbatim, and a typed copy would drop whatever the API adds next.
+        """
+        response = self.api.request(
+            "GET", f"/projects/{project_id}/compare", params={"runs": ",".join(run_ids)}
+        )
+        return response.json()
+
     def list_runs(self, project_id: str) -> list[ProjectRun]:
         from harumi.execution import list_runs
 
@@ -631,6 +644,59 @@ class Client:
 
     def delete_secret(self, project_id: str, name: str) -> None:
         self.api.request("DELETE", f"/projects/{project_id}/secrets/{_q(name)}")
+
+    # -- Memories -------------------------------------------------------
+    # /projects/{id}/memories — the project's own memories. The list also
+    # includes ones inherited from the org/personal workspace (read-only here).
+
+    def list_memories(
+        self,
+        project_id: str,
+        query: str | None = None,
+        retrieval_mode: str | None = None,
+    ) -> list[Memory]:
+        params = {
+            k: v for k, v in {"q": query, "retrieval_mode": retrieval_mode}.items() if v
+        }
+        response = self.api.request(
+            "GET", f"/projects/{project_id}/memories", params=params or None
+        )
+        return MemoryList.model_validate(response.json()).memories
+
+    def create_memory(
+        self,
+        project_id: str,
+        content: str,
+        retrieval_mode: str = "on_demand",
+        source: str = "cli",
+    ) -> Memory:
+        response = self.api.request(
+            "POST",
+            f"/projects/{project_id}/memories",
+            json={"content": content, "source": source, "retrieval_mode": retrieval_mode},
+        )
+        return Memory.model_validate(response.json())
+
+    def update_memory(
+        self,
+        project_id: str,
+        memory_id: str,
+        content: str | None = None,
+        retrieval_mode: str | None = None,
+    ) -> Memory:
+        body = {
+            k: v for k, v in {"content": content, "retrieval_mode": retrieval_mode}.items() if v is not None
+        }
+        response = self.api.request(
+            "PATCH", f"/projects/{project_id}/memories/{_q(memory_id)}", json=body
+        )
+        return Memory.model_validate(response.json())
+
+    def delete_memory(self, project_id: str, memory_id: str) -> Memory:
+        response = self.api.request(
+            "DELETE", f"/projects/{project_id}/memories/{_q(memory_id)}"
+        )
+        return Memory.model_validate(response.json())
 
     # -- Organizations / members ------------------------------------------
 

@@ -25,6 +25,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [datasources](#datasources)
 - [schedules](#schedules)
 - [secrets](#secrets)
+- [memories and skills](#memories-and-skills)
 - [org](#org)
 - [Config & credential files](#config--credential-files)
 - [Troubleshooting](#troubleshooting)
@@ -251,6 +252,16 @@ harumi runs cancel RUN_ID [--project ID] [--api-url URL] [--org ORG]
 
 `--project` on every subcommand overrides the `.harumi` binding.
 
+## `compare`
+
+```
+harumi compare RUN_ID... [--json] [--project ID] [--api-url URL] [--org ORG]
+```
+
+- Compares 2–4 distinct runs (the first is the baseline): `GET /projects/{id}/compare?runs=a,b,c`. Checked before any request is made.
+- Prints the project's `[[output.kpi]]` values with the change against the baseline, runtimes, the winner (best value of the primary KPI; or why there is none), whether the runs used the same inputs (`same` / `differs` with the files / `unknown`), and the server's warnings.
+- **`--json`**: prints the API's response unchanged, for scripts.
+
 ## `outputs`
 
 ```
@@ -444,6 +455,24 @@ harumi secrets rm NAME [--yes] [--project ID]
 - **`list`**: `GET /projects/{id}/secrets` → names only. Values are never printed.
 - **`set`**: prompts for the value with hidden input, then `POST /projects/{id}/secrets` with `{name, value}`. There is no update endpoint — `set` on an existing name overwrites it.
 - **`rm`**: `DELETE /projects/{id}/secrets/{name}`, prompting for confirmation unless `--yes`.
+
+## `memories` and `skills`
+
+Project memories: notes the project's chat remembers. Backed by `/projects/{id}/memories`.
+
+```
+harumi memories list [--query TEXT] [--mode always|on_demand] [--project ID] [--api-url URL] [--org ORG]
+harumi memories add [CONTENT] [--mode always|on_demand] [--project ID]
+harumi memories edit MEMORY_ID [--content TEXT] [--mode always|on_demand] [--project ID]
+harumi memories rm MEMORY_ID [--yes] [--project ID]
+harumi skills
+```
+
+- **`list`**: `GET /projects/{id}/memories?q=&retrieval_mode=` → a table of `id`, `scope`, `mode`, `content` (truncated) and `updated`. The list also carries memories inherited from the project's organization or the owner's personal workspace (`scope` is `organization` or `user`); those are read-only through the project routes.
+- **`add`**: `POST /projects/{id}/memories` with `{content, source: "cli", retrieval_mode}`. `content` is 1-4000 characters; `--mode` defaults to `on_demand`. If `CONTENT` is omitted it is prompted for.
+- **`edit`**: `PATCH /projects/{id}/memories/{memory_id}` with only the fields given. At least one of `--content` / `--mode` is required, otherwise the CLI fails before calling the API.
+- **`rm`**: `DELETE /projects/{id}/memories/{memory_id}`, prompting for confirmation unless `--yes`.
+- **`skills`**: no API call, no project needed. A project's skills are files in its git repo at `skills/<slug>/SKILL.md`; `harumi skills` prints how to edit them with `harumi repo ls|cat|put|rm|mv`. Not the same as `harumi skill install|path`, which seeds the bundled agent skills onto this machine.
 
 ## `org`
 

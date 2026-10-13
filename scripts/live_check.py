@@ -141,6 +141,12 @@ TIERS: dict[str, tuple[str, str]] = {
     "runs list": (READ, ""),
     "runs get": (READ, ""),
     "runs cancel": (CANARY, "only cancels the run this harness queued"),
+    "compare": (
+        MANUAL,
+        "needs two distinct finished runs; the harness queues at most one (and `compare` refuses "
+        "a run against itself). The request, the table and the checks are covered offline in "
+        "tests/test_cli.py",
+    ),
     # -- schedules ------------------------------------------------------------
     "schedules list": (READ, ""),
     "schedules get": (READ, ""),
@@ -151,6 +157,13 @@ TIERS: dict[str, tuple[str, str]] = {
     "secrets list": (READ, ""),
     "secrets set": (CANARY, ""),
     "secrets rm": (CANARY, ""),
+    # -- memories -------------------------------------------------------------
+    "memories list": (READ, ""),
+    "memories add": (CANARY, ""),
+    "memories edit": (CANARY, ""),
+    "memories rm": (CANARY, ""),
+    # -- skills ---------------------------------------------------------------
+    "skills": (LOCAL, "prints a pointer to `harumi repo`; makes no API call"),
     # -- share links ----------------------------------------------------------
     "share list": (READ, ""),
     "share get": (READ, ""),
@@ -285,6 +298,13 @@ PLAN: tuple[Step, ...] = (
     Step("schedules get", ("{schedule}", "--project", "{project}")),
     Step("schedules update", ("{schedule}", "--cron", "0 4 * * *", "--project", "{project}")),
     Step("schedules remove", ("{schedule}", "--yes", "--project", "{project}")),
+    # -- memories -------------------------------------------------------------
+    Step("memories add", ("livecheck memory", "--project", "{project}"), capture="memory"),
+    Step("memories list", ("--project", "{project}")),
+    Step("memories edit", ("{memory}", "--mode", "always", "--project", "{project}")),
+    Step("memories rm", ("{memory}", "--yes", "--project", "{project}")),
+    # -- skills (local pointer; no API call) ----------------------------------
+    Step("skills"),
     # -- share links ----------------------------------------------------------
     Step("share add", ("--label", "livecheck", "--project", "{project}"), capture="share"),
     Step("share list", ("--project", "{project}")),
