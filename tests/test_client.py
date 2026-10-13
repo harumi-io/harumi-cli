@@ -1412,3 +1412,47 @@ def test_client_delete_memory_returns_deleted_row():
     client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
 
     assert client.delete_memory("proj-1", "mem-1").id == "mem-1"
+
+
+# ---------------------------------------------------------------------------
+# Skill library
+# ---------------------------------------------------------------------------
+
+_SKILL_JSON = {
+    "slug": "vrp-modeling",
+    "name": "VRP modeling",
+    "description": "Routes.",
+    "category": "modeling",
+    "tags": ["vrp"],
+    "version": 2,
+}
+
+
+def test_client_list_skill_library_parses_the_presets():
+    _write_credentials()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/skill-library"
+        return httpx.Response(200, json={"skills": [_SKILL_JSON]})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    skills = client.list_skill_library()
+
+    assert [(s.slug, s.version, s.tags) for s in skills] == [("vrp-modeling", 2, ["vrp"])]
+
+
+def test_client_get_skill_library_returns_the_raw_skill_md_and_quotes_the_slug():
+    _write_credentials()
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.raw_path.decode())
+        return httpx.Response(200, json={**_SKILL_JSON, "content": "---\nname: x\n---\nbody\n"})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    detail = client.get_skill_library("vrp-modeling")
+    client.get_skill_library("a/b")
+
+    assert detail.content.startswith("---")
+    assert seen == ["/api/skill-library/vrp-modeling", "/api/skill-library/a%2Fb"]

@@ -4,32 +4,35 @@
     harumi logout
     harumi whoami
     harumi status
-    harumi profile show|set
+    harumi whats-new [--all]
+    harumi profile set
     harumi specs
     harumi blueprints
     harumi start
-    harumi new <NAME> [--blueprint <slug>] [--personal] [--customer-id <id>] [--dir <path>]
-    harumi push [path] [--from-git <url>] [--project-name <name>]
+    harumi new <NAME> [--blueprint <slug>] [--personal] [--customer-id <id>] [--dir <path>] [--no-clone]
+    harumi import [path] [--from-git <url>] [--project-name <name>]
     harumi clone <PROJECT_ID> [--dir <path>]
     harumi link --project <id> [--api-url <url>] [--git-url <url>]
-    harumi run [--branch <b>] [--commit <sha>] [--command <c>] [--kernel <k>]
-               [--watch] [--output-dir <dir>]
-    harumi runs list|get|cancel [--project <id>]
+    harumi run [--branch <b>] [--commit <sha>] [--command <c>] [--kernel <k>] [--watch]
+    harumi runs list|get|cancel|download [--project <id>]
     harumi compare <run-id>... [--json] [--project <id>]
-    harumi outputs --project <id> [--latest] [--download <output_id>]
-    harumi config set-org <ORG_ID>
-    harumi skill install|path
-    harumi skills
-    harumi projects create|list|get|rename|delete
-    harumi repo ls|cat|put|rm|mv|download|branches|branch|promote|dir
+    harumi check [--ref <ref>] [--project <id>]
+    harumi agent-skills install
+    harumi skills library|add
+    harumi projects list|get|rename|rm
     harumi files ls|put|get|rm [--project <id>]
     harumi dashboard widgets|validate [--project <id>]
-    harumi share list|get|add|update|remove|rotate|set-password|rm-password [--project <id>]
-    harumi datasources list|get|add|update|remove|test|query [--project <id>]
-    harumi schedules list|get|add|update|remove [--project <id>]
+    harumi share list|get|add|update|rm|rotate [--project <id>]
+    harumi datasources list|get|add|update|rm|test|query [--project <id>]
+    harumi schedules list|get|add|update|rm [--project <id>]
     harumi secrets list|set|rm [--project <id>]
     harumi memories list|add|edit|rm [--project <id>]
-    harumi org list|create|rename|delete|members|invite|role|remove
+    harumi org list|create|rename|use|rm|members|invite|role|rm-member
+
+Deprecated names (`push`, `repo`, `outputs`, `projects create`, `config
+set-org`, `skill`, `env current`, `profile show`, `... remove`/`delete`,
+`share set-password`/`rm-password`, `run --output-dir`) still work in 0.11.x
+as hidden commands that print what to use instead, and are removed in 0.12.0.
 
 Onboarding — three journeys, three commands
 ---------------------------------------------
@@ -37,7 +40,7 @@ Every project starts one of three ways, and each has its own verb:
 
 * Nothing yet: `harumi new <NAME>` creates the project, then clones its
   freshly-provisioned (and scaffold-seeded) repo into a local directory.
-* An existing local folder of code: `harumi push [PATH]` creates a project
+* An existing local folder of code: `harumi import [PATH]` creates a project
   and force-pushes the folder's contents as its first commit.
 * A project that already exists in Harumi (created via the web app, or by a
   teammate): `harumi clone <PROJECT_ID>` fetches its repo into a local
@@ -56,20 +59,22 @@ working tree is dirty or has unpushed commits, the CLI auto-pushes a
 throwaway scratch branch so the run still executes without forcing the
 user to commit manually.
 
-Requires a working directory produced by `harumi new`/`harumi push`/
+Requires a working directory produced by `harumi new`/`harumi import`/
 `harumi clone` (or `harumi link`, if the checkout already exists).
 
 Repo files
 ----------
-`harumi repo` reads and writes the project's Gitea repo directly through
-harumi-api (no local git credential needed for file operations — only
-`git push`/`harumi run`'s scratch-branch path uses the Gitea token). Writes
-always land in a single commit via the batch `repo/changes` endpoint.
+There is no `harumi repo` any more: a project's repo is an ordinary git repo,
+and `harumi clone` sets up a remote named `harumi` with the token already in
+its URL. Read it with `ls`/`cat`/`git show`, change it by editing files and
+`git commit && git push harumi <branch>`. `harumi check` (server-side
+readiness) and `harumi skills add` (library presets) are the repo-adjacent
+commands that do something git can't.
 
 Project files
 -------------
 `harumi files` manages a project's non-git file storage — distinct from
-`harumi repo` (git-tracked, lands in a commit): uploads land in a shared
+the git repo (git-tracked, lands in a commit): uploads land in a shared
 bucket under the project's own prefix and appear at `inputs/` inside every
 run's sandbox. `files put` refuses an upload that would push the project
 past the same per-project file-count/total-size cap the run-time sync
@@ -100,7 +105,7 @@ entry in the platform's dashboard picker.
 `harumi dashboard validate` checks every spec against that contract
 and, given a run's output, flags dot-paths that won't resolve — the
 platform silently drops a bad widget instead of erroring, so validating
-before `repo put` is the only way to catch a typo up front.
+before committing is the only way to catch a typo up front.
 
 Sharing
 -------
@@ -110,7 +115,7 @@ password-protected. Every permission (assistant, run history, run control,
 inputs/outputs) defaults to off on `add`, so creating a link never silently
 grants more than a bare read-only, latest-run-only dashboard view.
 `run-control` capabilities additionally require the viewer to be signed in.
-`rotate`/`set-password` invalidate previously issued viewer sessions for
+`rotate`/`update --password` invalidate previously issued viewer sessions for
 that link only.
 
 Schedules
@@ -127,10 +132,10 @@ endpoint — `secrets set` on an existing name overwrites it.
 
 Creating projects
 -----------------
-`harumi projects create` calls `POST /projects`, which provisions the
-project's Gitea repo server-side. It's a bare, scriptable primitive with no
-local filesystem side effects — it does not bind or clone anything. See
-`harumi new` for the create-then-clone-and-bind verb.
+`harumi new <NAME> --no-clone` calls `POST /projects`, which provisions the
+project's Gitea repo server-side, with no local filesystem side effects — it
+does not bind or clone anything. Plain `harumi new` is the same call followed
+by a clone-and-bind.
 """
 
 from __future__ import annotations
@@ -140,6 +145,7 @@ import functools
 import json
 import mimetypes
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -241,7 +247,7 @@ def _print_banner_if_bare_entrypoint() -> None:
 
 
 def _print_skill_install_hint() -> None:
-    """Nudge toward `harumi skill install` when a coding agent detected on
+    """Nudge toward `harumi agent-skills install` when a coding agent detected on
     this machine (Cursor/Claude Code/Codex) doesn't have the skill yet.
 
     `pip`/`pipx`/`uv` have no post-install hook to seed the skill
@@ -249,7 +255,7 @@ def _print_skill_install_hint() -> None:
     invocation is the closest automatic moment to catch a human who
     installed the CLI without an agent driving `harumi-cli-setup` for them.
     Only ever prints a recommendation — never writes skill files unprompted,
-    matching `harumi skill install`'s existing consent-based behavior.
+    matching `harumi agent-skills install`'s existing consent-based behavior.
 
     ponytail: catches bare `Exception`, not a specific type. This probes
     `~/.cursor`, `~/.claude`, `~/.codex` (via `agents_missing_skill()`) on
@@ -269,7 +275,7 @@ def _print_skill_install_hint() -> None:
         return
     names = ", ".join(a.label for a in missing)
     console.print(
-        f"\n[dim]Using {names}? Run [/dim][bold]harumi skill install[/bold]"
+        f"\n[dim]Using {names}? Run [/dim][bold]harumi agent-skills install[/bold]"
         "[dim] to teach it this CLI.[/dim]"
     )
 
@@ -330,6 +336,39 @@ def _fail(message: str) -> None:
     raise typer.Exit(code=1)
 
 
+def _warn_deprecated(old: str, use: str) -> None:
+    """Tell the user a name still works but is going away. Goes to stderr so a
+    script piping the command's stdout is unaffected."""
+    # soft_wrap: the replacement is a command line someone will copy, so it must
+    # not be broken across lines at the terminal width.
+    err_console.print(
+        f"[yellow]deprecated:[/yellow] `{escape(old)}` is removed in 0.12.0. Use: {escape(use)}",
+        soft_wrap=True,
+    )
+
+
+def _deprecated(old: str, use: str):
+    """Decorator: warn that command `old` is deprecated in favour of `use`,
+    then run it unchanged. Keeps the wrapped signature so Typer still builds
+    the same options."""
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            _warn_deprecated(old, use)
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def _hidden_alias(group: typer.Typer, old_name: str, fn, old: str, use: str) -> None:
+    """Register `fn` under the retired `old_name` as a hidden command that
+    warns first. The command is left out of --help and cli-surface.json."""
+    group.command(old_name, hidden=True)(_deprecated(old, use)(fn))
+
+
 def _format_bytes(num_bytes: int) -> str:
     if num_bytes < 1024:
         return f"{num_bytes} B"
@@ -372,7 +411,7 @@ def _resolve_project(project: Optional[str]) -> str:
         return binding.project_id
     _fail(
         "Provide --project or run from a directory bound to a project "
-        "(see `harumi start`, `harumi new`, `harumi push`, `harumi clone`, or `harumi link`)."
+        "(see `harumi start`, `harumi new`, `harumi import`, `harumi clone`, or `harumi link`)."
     )
     raise AssertionError("unreachable")  # _fail always raises
 
@@ -521,7 +560,7 @@ def _resolve_and_store_org(config: Config) -> None:
     else:
         console.print(
             "You belong to multiple organizations. Set one with:\n"
-            "  [bold]harumi config set-org <ORG_ID>[/bold]\n"
+            "  [bold]harumi org use <ORG_ID>[/bold]\n"
             "or pass [bold]--org[/bold] on each command."
         )
         table = Table("id", "business_name")
@@ -601,13 +640,46 @@ def whoami(
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Show the currently logged-in user."""
+    """Show the logged-in user: profile, active environment and organization."""
     client = _get_client(api_url=api_url, org=org)
     profile = client.get_profile()
     console.print(
         f"[bold]{profile.email or '?'}[/bold]  (id: {profile.id or '?'})  "
         f"[dim]env: {client.config.environment}[/dim]"
     )
+    name = " ".join(part for part in (profile.first_name, profile.last_name) if part)
+    for label, value in (
+        ("Name", name),
+        ("Bio", profile.bio),
+        ("Organization", client.config.org_id),
+    ):
+        if value:
+            console.print(f"{label}: {escape(str(value))}")
+
+
+@app.command("whats-new")
+def whats_new(
+    all_: bool = typer.Option(False, "--all", "-a", help="Show every release's notes, newest first."),
+) -> None:
+    """Show what changed in the installed version (or every version with --all).
+
+    Works offline: the notes ship inside the package.
+    """
+    from rich.markdown import Markdown
+
+    from harumi import changelog
+
+    releases = changelog.load()
+    if not releases:
+        _fail("No release notes are bundled with this install.")
+    if not all_:
+        releases = [next((r for r in releases if r.version == __version__), releases[0])]
+    for release in releases:
+        title = f"harumi {release.version}" + (f" ({release.date})" if release.date else "")
+        console.print(f"[bold magenta]{title}[/bold magenta]")
+        console.print(Markdown(release.notes))
+    if not all_:
+        console.print("[dim]Older releases: harumi whats-new --all[/dim]")
 
 
 @app.command()
@@ -685,7 +757,8 @@ def env_list(
     console.print(table)
 
 
-@env_app.command("current")
+@env_app.command("current", hidden=True)
+@_deprecated("harumi env current", "harumi env list (the active environment is marked *)")
 def env_current() -> None:
     """Show the active environment and its endpoints."""
     name = active_environment()
@@ -734,7 +807,8 @@ profile_app = typer.Typer(help="View and update your account profile.")
 app.add_typer(profile_app, name="profile")
 
 
-@profile_app.command("show")
+@profile_app.command("show", hidden=True)
+@_deprecated("harumi profile show", "harumi whoami")
 @_handle_errors
 def profile_show(
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
@@ -779,31 +853,34 @@ def profile_set(
 # Config sub-commands
 # ---------------------------------------------------------------------------
 
-config_app = typer.Typer(help="Manage local CLI configuration.")
-app.add_typer(config_app, name="config")
+config_app = typer.Typer(help="Deprecated: use `harumi org use`.")
+app.add_typer(config_app, name="config", hidden=True)
 
 
-@config_app.command("set-org")
-def config_set_org(org_id: str = typer.Argument(..., help="Organization id to persist as X-Organization.")) -> None:
+def org_use(org_id: str = typer.Argument(..., help="Organization id to persist as X-Organization.")) -> None:
     """Persist the organization id sent as X-Organization on every request."""
     config = Config.load()
     config.save_org_id(org_id)
     console.print(f"Organization set to [bold]{org_id}[/bold].")
 
 
+config_app.command("set-org")(_deprecated("harumi config set-org", "harumi org use <ORG_ID>")(org_use))
+
+
 # ---------------------------------------------------------------------------
-# harumi skill — seed the bundled agent skills onto this machine
+# harumi agent-skills — seed the bundled agent skills onto this machine
 # ---------------------------------------------------------------------------
 
-skill_app = typer.Typer(
+agent_skills_app = typer.Typer(
     help="Install the bundled harumi-cli agent skills (Cursor, Claude Code, etc.). "
-    "For a project's own skills, see `harumi skills`."
+    "For a project's own skills, see `harumi skills`.",
+    no_args_is_help=True,
 )
-app.add_typer(skill_app, name="skill")
+app.add_typer(agent_skills_app, name="agent-skills")
 
 
-@skill_app.command("install")
-def skill_install(
+@agent_skills_app.command("install")
+def agent_skills_install(
     agent: Optional[list[str]] = typer.Option(
         None,
         "--agent",
@@ -813,7 +890,9 @@ def skill_install(
     project: bool = typer.Option(
         False, "--project", help=f"Write to ./{skills_mod.PROJECT_SKILLS_DIR} instead of a global agent directory."
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print what would be written without writing it."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print each source -> destination without writing anything."
+    ),
     force: bool = typer.Option(False, "--force", help="Overwrite a destination even if it doesn't look like a skill."),
 ) -> None:
     """Copy the harumi-cli and harumi-cli-setup skills onto this machine.
@@ -823,44 +902,124 @@ def skill_install(
     """
     try:
         written = skills_mod.install(agent_keys=agent, project=project, dry_run=dry_run, force=force)
+        sources = {d.name: d for d in skills_mod.bundled_skill_dirs()}
     except (FileNotFoundError, FileExistsError, ValueError) as exc:
         _fail(str(exc))
         return
     verb = "Would write" if dry_run else "Wrote"
     for path in written:
-        console.print(f"[dim]{verb}:[/dim] {path}")
+        source = sources.get(path.name)
+        console.print(f"[dim]{verb}:[/dim] {source} -> {path}" if source else f"[dim]{verb}:[/dim] {path}")
     if not dry_run:
         console.print(f"[bold green]Installed[/bold green] {len(written)} skill director{'y' if len(written) == 1 else 'ies'}.")
 
 
+# Retired in 0.11: `harumi skill` (singular) collided with `harumi skills`.
+skill_app = typer.Typer(help="Deprecated: use `harumi agent-skills`.")
+app.add_typer(skill_app, name="skill", hidden=True)
+
+
 @skill_app.command("path")
+@_deprecated("harumi skill path", "harumi agent-skills install --dry-run")
 def skill_path() -> None:
     """Print the local directory containing the bundled skills."""
     for skill_dir in skills_mod.bundled_skill_dirs():
         console.print(str(skill_dir))
 
 
-@app.command("skills")
-def skills_pointer() -> None:
-    """Explain how to edit a project's skills (they live in its git repo).
+# ---------------------------------------------------------------------------
+# harumi skills — the platform's skill library, and the project's own skills
+# ---------------------------------------------------------------------------
 
-    Not the same as `harumi skill install`, which installs the bundled agent
-    skills onto this machine. Makes no API call and needs no project.
+skills_app = typer.Typer(
+    help="Preset skills from the Harumi skill library. (A project's own skills are plain files at "
+    "skills/<slug>/SKILL.md in its repo: edit them in your clone and push with git.)",
+    no_args_is_help=True,
+)
+app.add_typer(skills_app, name="skills")
+
+
+@skills_app.command("library")
+@_handle_errors
+def skills_library(
+    category: Optional[str] = typer.Option(None, "--category", help="Only presets in this category."),
+    query: Optional[str] = typer.Option(
+        None, "--query", "-q", help="Only presets whose name, description or tags contain this text."
+    ),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """List the preset skills you can install into a project with `harumi skills add`."""
+    client = _get_client(api_url=api_url, org=org)
+    presets = client.list_skill_library()
+    if category:
+        presets = [p for p in presets if p.category.lower() == category.lower()]
+    if query:
+        needle = query.lower()
+        presets = [
+            p for p in presets if any(needle in text.lower() for text in (p.name, p.description, *p.tags))
+        ]
+    if not presets:
+        console.print("No skills found.")
+        return
+
+    table = Table("slug", "name", "category", "version", "description")
+    table.columns[0].no_wrap = True  # the slug is what you copy into `skills add`
+    for p in sorted(presets, key=lambda p: p.slug):
+        table.add_row(p.slug, p.name, p.category, str(p.version), p.description)
+    console.print(table)
+
+
+@skills_app.command("add")
+@_handle_errors
+def skills_add(
+    slug: str = typer.Argument(..., help="Preset slug (see `harumi skills library`)."),
+    force: bool = typer.Option(
+        False, "--force", help="Overwrite skills/<slug>/SKILL.md even if it already exists."
+    ),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Install a library preset into this project's clone as skills/<slug>/SKILL.md.
+
+    Writes the file only; commit and push it so the project's assistant can load it.
+    The file records `source: harumi/<slug>` and the preset `version` in its frontmatter.
     """
+    binding = ProjectBinding.load()
+    if binding is None:
+        _fail(
+            "No Harumi project found in this directory (or any parent). Run this inside a clone: "
+            "`harumi clone <PROJECT_ID>`, or `harumi link --project <PROJECT_ID>`."
+        )
+        return
+    project_dir = binding.config_path.parent.parent
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", slug) or ".." in slug:
+        _fail(f"{slug!r} is not a valid skill slug (lowercase letters, digits, '.', '_' and '-').")
+
+    dest = project_dir / skills_mod.SKILLS_DIR / slug / "SKILL.md"
+    if dest.exists() and not force:
+        existing = skills_mod.frontmatter_source(dest.read_text(encoding="utf-8", errors="replace"))
+        if existing == skills_mod.library_source(slug):
+            _fail(f"{slug!r} is already installed at {dest}. Pass --force to reinstall it.")
+        _fail(
+            f"{dest} already exists and is not the library's {slug!r} preset. "
+            "Pass --force to overwrite it."
+        )
+
+    client = _get_client(api_url=api_url, org=org)
+    preset = client.get_skill_library(slug)
+    try:
+        content = skills_mod.with_install_provenance(preset.content, preset.slug, preset.version)
+    except ValueError as exc:
+        _fail(str(exc))
+        return
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(content, encoding="utf-8")
+    rel = f"{skills_mod.SKILLS_DIR}/{slug}"
+    console.print(f"[bold green]Installed[/bold green] [bold]{preset.name}[/bold] (v{preset.version}) at {dest}.")
     console.print(
-        "Project skills are files in the project's git repo, at "
-        "[bold]skills/<slug>/SKILL.md[/bold]. Edit them like any other file:\n"
-        "\n"
-        "  [bold]harumi repo ls skills[/bold]                      list the project's skills\n"
-        "  [bold]harumi repo cat skills/<slug>/SKILL.md[/bold]     read one\n"
-        "  [bold]harumi repo put skills/<slug>/SKILL.md ...[/bold] create or update one\n"
-        "  [bold]harumi repo rm skills/<slug>/SKILL.md[/bold]      delete one\n"
-        "\n"
-        "Or [bold]harumi clone <PROJECT_ID>[/bold], edit the files locally and "
-        "[bold]harumi push[/bold].\n"
-        "\n"
-        "[dim]To install the bundled harumi-cli agent skills (Cursor, Claude Code, ...) "
-        "onto this machine, use `harumi skill install` instead.[/dim]"
+        "Commit and push it so the project's assistant can use it:\n"
+        f"  [bold]git add {rel} && git commit -m \"Install {slug} skill\" && git push harumi[/bold]"
     )
 
 
@@ -894,7 +1053,7 @@ def blueprints(
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """List project blueprints. Pass a blueprint's slug as `projects create --blueprint`."""
+    """List project blueprints. Pass a blueprint's slug as `new --blueprint`."""
     client = _get_client(api_url=api_url, org=org)
     items = client.list_blueprints()
     if not items:
@@ -998,7 +1157,7 @@ def link(
     the `harumi` git remote for HTTPS+token pushes — it does NOT fetch or
     clone the code itself.
 
-    Starting fresh? Use `harumi new`, `harumi push`, or `harumi clone`
+    Starting fresh? Use `harumi new`, `harumi import`, or `harumi clone`
     instead — each of those binds automatically as part of getting you a
     working local checkout.
     """
@@ -1022,7 +1181,7 @@ def link(
 
 
 # ---------------------------------------------------------------------------
-# harumi push — turn an existing local folder into a new Harumi project
+# harumi import — turn an existing local folder into a new Harumi project
 # ---------------------------------------------------------------------------
 
 _DEFAULT_HARUMI_TOML = """\
@@ -1037,7 +1196,7 @@ kernel = "or_python_small"
 def _ensure_scaffold(folder: Path) -> None:
     """Write a minimal `harumi.toml` into `folder` if one isn't already there.
 
-    `harumi push` force-pushes the folder as-is, overwriting whatever
+    `harumi import` force-pushes the folder as-is, overwriting whatever
     scaffold `POST /projects` seeded server-side — so, unlike `harumi new`,
     a pushed project has no run manifest unless the folder already had one.
     Without this, the very first `harumi run` afterward fails with a missing
@@ -1095,9 +1254,9 @@ def _merge_git_repo_flat(from_git: str, dest: Path) -> None:
         )
 
 
-@app.command()
+@app.command("import")
 @_handle_errors
-def push(
+def import_project(
     path: Path = typer.Argument(
         Path("."),
         help="Folder of existing code to turn into a new project. Defaults to the current directory.",
@@ -1157,7 +1316,7 @@ def _push_impl(
     git_url: Optional[str],
     org: Optional[str],
 ) -> None:
-    """Body of `harumi push`, factored out so `harumi start` can call it
+    """Body of `harumi import`, factored out so `harumi start` can call it
     directly without going through Typer's CLI-parsing machinery (whose
     `Option`/`Argument` defaults are sentinel objects, not the real
     defaults, when a decorated command function is called as plain Python).
@@ -1247,6 +1406,11 @@ def new(
     blueprint: Optional[str] = typer.Option(
         None, "--blueprint", help="Blueprint slug to seed the project from (see `harumi blueprints`, optional)."
     ),
+    no_clone: bool = typer.Option(
+        False,
+        "--no-clone",
+        help="Only create the project: don't clone or bind anything locally (for scripts).",
+    ),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -1259,7 +1423,7 @@ def new(
     given), then clones that repo into a local directory and binds it — so
     `harumi run` works immediately, no manual push required.
 
-    Already have code you want to bring in instead? Use `harumi push`.
+    Already have code you want to bring in instead? Use `harumi import`.
     Project already exists in Harumi (web app or a teammate made it)? Use
     `harumi clone <PROJECT_ID>`.
     """
@@ -1269,6 +1433,7 @@ def new(
         customer_id=customer_id,
         personal=personal,
         blueprint=blueprint,
+        clone=not no_clone,
         api_url=api_url,
         git_url=git_url,
         org=org,
@@ -1285,10 +1450,13 @@ def _new_impl(
     api_url: Optional[str],
     git_url: Optional[str],
     org: Optional[str],
+    clone: bool = True,
 ) -> None:
     """Body of `harumi new` — see `_push_impl` for why this is factored out."""
     if personal and customer_id:
         _fail("--personal and --customer-id are mutually exclusive. Pass only one.")
+    if not clone and dir is not None:
+        _fail("--dir only applies when cloning. Drop --no-clone, or drop --dir.")
 
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
 
@@ -1298,6 +1466,10 @@ def _new_impl(
     )
     console.print(f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id}).")
     _print_project_workspace(project.customer_id)
+
+    if not clone:
+        console.print(f"Clone it locally: [bold]harumi clone {project.id}[/bold]")
+        return
 
     if project.repo is None:
         console.print(
@@ -1411,7 +1583,7 @@ def start() -> None:
     """Interactively figure out which of the three onboarding journeys you
     want, and run it.
 
-    Equivalent to picking one of `harumi new`, `harumi push`, or
+    Equivalent to picking one of `harumi new`, `harumi import`, or
     `harumi clone` yourself — this just asks the question first.
     """
     console.print("[bold]What do you have?[/bold]\n")
@@ -1455,11 +1627,12 @@ def start() -> None:
 # harumi projects
 # ---------------------------------------------------------------------------
 
-projects_app = typer.Typer(help="Create and manage Harumi projects.")
+projects_app = typer.Typer(help="List and manage Harumi projects (create one with `harumi new`).")
 app.add_typer(projects_app, name="projects")
 
 
-@projects_app.command("create")
+@projects_app.command("create", hidden=True)
+@_deprecated("harumi projects create", "harumi new <NAME> --no-clone")
 @_handle_errors
 def projects_create(
     name: str = typer.Argument(..., help="Project name."),
@@ -1480,25 +1653,17 @@ def projects_create(
     git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Create a new Harumi project. Doesn't touch the local directory or git.
-
-    A scriptable primitive for automation — it doesn't clone or bind
-    anything locally. To get a working local checkout, use `harumi new`
-    instead (it does this same creation step, then clones the result).
-    """
-    if personal and customer_id:
-        _fail("--personal and --customer-id are mutually exclusive. Pass only one.")
-
-    client = _get_client(api_url=api_url, git_url=git_url, org=org)
-
-    console.print(f"Creating project [bold]{name}[/bold]...")
-    project = client.create_project(
-        name, customer_id=customer_id, blueprint=blueprint, personal=personal
-    )
-    console.print(f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id}).")
-    _print_project_workspace(project.customer_id)
-    console.print(
-        f"Clone it locally: [bold]harumi clone {project.id}[/bold]"
+    """Create a new Harumi project. Doesn't touch the local directory or git."""
+    _new_impl(
+        name=name,
+        dir=None,
+        customer_id=customer_id,
+        personal=personal,
+        blueprint=blueprint,
+        clone=False,
+        api_url=api_url,
+        git_url=git_url,
+        org=org,
     )
 
 
@@ -1551,9 +1716,9 @@ def projects_rename(
     console.print(f"[bold green]Renamed[/bold green] project to [bold]{p.name}[/bold].")
 
 
-@projects_app.command("delete")
+@projects_app.command("rm")
 @_handle_errors
-def projects_delete(
+def projects_rm(
     project_id: str = typer.Argument(..., help="Project id."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
@@ -1588,7 +1753,11 @@ def run(
     kernel: Optional[str] = typer.Option(None, "--kernel", "-k", help="Override the kernel spec."),
     watch: bool = typer.Option(False, "--watch", "-w", help="Block until the run finishes."),
     output_dir: Optional[Path] = typer.Option(
-        None, "--output-dir", "-o", help="Download output artifacts here (requires --watch)."
+        None,
+        "--output-dir",
+        "-o",
+        hidden=True,
+        help="Deprecated: use `harumi runs download`.",
     ),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
@@ -1600,9 +1769,11 @@ def run(
     you can iterate without committing manually.  Pass --branch or --commit
     to run a specific ref instead.
 
-    Requires a working directory produced by `harumi new`/`harumi push`/
+    Requires a working directory produced by `harumi new`/`harumi import`/
     `harumi clone` (or `harumi link`, if the checkout already exists).
     """
+    if output_dir:
+        _warn_deprecated("harumi run --output-dir", "harumi runs download [RUN_ID] -o DIR")
     binding = ProjectBinding.load()
     if binding is None:
         _fail(
@@ -1707,6 +1878,10 @@ def run(
 
         if result.succeeded:
             console.print(f"[bold green]Run finished[/bold green]: {result.status}")
+            if not output_dir:
+                console.print(
+                    f"Download its output with [bold]harumi runs download {result.id}[/bold]."
+                )
             if output_dir:
                 try:
                     zip_path = download_run_output(client.api, project_id, result, output_dir)
@@ -1731,7 +1906,7 @@ def run(
 # harumi runs
 # ---------------------------------------------------------------------------
 
-runs_app = typer.Typer(help="List, inspect, and cancel project runs.")
+runs_app = typer.Typer(help="List, inspect, cancel, and download project runs.")
 app.add_typer(runs_app, name="runs")
 
 
@@ -1803,6 +1978,31 @@ def runs_get(
         console.print(r.stderr)
     if r.error:
         console.print(f"\n[bold red]error:[/bold red] {r.error}")
+
+
+@runs_app.command("download")
+@_handle_errors
+def runs_download(
+    run_id: Optional[str] = typer.Argument(None, help="Run id. Defaults to the project's latest run."),
+    output_dir: Path = typer.Option(
+        Path("."), "--output-dir", "-o", help="Directory to download into. Default: current directory."
+    ),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Download a run's committed output as a zip (the latest run when no id is given)."""
+    from harumi.execution import download_run_output
+
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    run = client.get_run(project_id, run_id) if run_id else client.get_latest_run(project_id)
+    if run is None:
+        _fail("Project has no runs yet.")
+        return
+    zip_path = download_run_output(client.api, project_id, run, output_dir)
+    console.print(f"Downloaded to {zip_path}")
 
 
 @runs_app.command("cancel")
@@ -1944,10 +2144,11 @@ def compare(
 
 
 # ---------------------------------------------------------------------------
-# harumi outputs (thin wrapper over `runs`, kept for backwards compatibility)
+# harumi outputs (deprecated alias of `runs list` / `runs download`)
 # ---------------------------------------------------------------------------
 
-@app.command()
+@app.command(hidden=True)
+@_deprecated("harumi outputs", "harumi runs list / harumi runs download [RUN_ID] -o DIR")
 @_handle_errors
 def outputs(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id (uses .harumi binding if omitted)."),
@@ -1959,7 +2160,7 @@ def outputs(
 ) -> None:
     """List or download run outputs for a project.
 
-    Deprecated alias for `harumi runs`/`harumi run --output-dir`; kept for
+    Deprecated alias for `harumi runs list`/`harumi runs download`; kept for
     backwards compatibility.
     """
     resolved_project = _resolve_project(project)
@@ -1999,11 +2200,14 @@ def outputs(
 # harumi repo
 # ---------------------------------------------------------------------------
 
-repo_app = typer.Typer(help="Read and write the project's Harumi Git (Gitea) repo.")
-app.add_typer(repo_app, name="repo")
+repo_app = typer.Typer(
+    help="Deprecated: the project's repo is a plain git repo. Use git in your clone (`harumi clone`)."
+)
+app.add_typer(repo_app, name="repo", hidden=True)
 
 
 @repo_app.command("ls")
+@_deprecated("harumi repo ls", 'git ls-files (another branch: git fetch harumi && git ls-tree -r --name-only harumi/<ref>)')
 @_handle_errors
 def repo_ls(
     ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to list (defaults to the default branch)."),
@@ -2027,6 +2231,7 @@ def repo_ls(
 
 
 @repo_app.command("cat")
+@_deprecated("harumi repo cat", 'cat <path> (another branch: git fetch harumi && git show harumi/<ref>:<path>)')
 @_handle_errors
 def repo_cat(
     path: str = typer.Argument(..., help="File path within the repo."),
@@ -2056,6 +2261,7 @@ def repo_cat(
 
 
 @repo_app.command("put")
+@_deprecated("harumi repo put", 'copy the file into your clone, then git add <path> && git commit -m <msg> && git push harumi <branch>')
 @_handle_errors
 def repo_put(
     local_path: Path = typer.Argument(..., help="Local file to upload."),
@@ -2098,6 +2304,7 @@ def repo_put(
 
 
 @repo_app.command("rm")
+@_deprecated("harumi repo rm", 'git rm -r <path> && git commit -m <msg> && git push harumi <branch>')
 @_handle_errors
 def repo_rm(
     path: str = typer.Argument(..., help="File or folder path within the repo."),
@@ -2126,6 +2333,7 @@ def repo_rm(
 
 
 @repo_app.command("mv")
+@_deprecated("harumi repo mv", 'git mv <from> <to> && git commit -m <msg> && git push harumi <branch>')
 @_handle_errors
 def repo_mv(
     from_path: str = typer.Argument(..., help="Source path (file or folder) within the repo."),
@@ -2153,6 +2361,7 @@ def repo_mv(
 
 
 @repo_app.command("download")
+@_deprecated("harumi repo download", 'git archive --format=zip -o repo.zip harumi/<ref> [<path>]')
 @_handle_errors
 def repo_download(
     output: Path = typer.Option(..., "--output", "-o", help="Local zip path to write."),
@@ -2171,6 +2380,7 @@ def repo_download(
 
 
 @repo_app.command("branches")
+@_deprecated("harumi repo branches", 'git fetch harumi && git branch -r')
 @_handle_errors
 def repo_branches(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
@@ -2193,6 +2403,7 @@ def repo_branches(
 
 
 @repo_app.command("branch-create")
+@_deprecated("harumi repo branch-create", 'git fetch harumi && git switch -c <name> harumi/main && git push -u harumi <name>')
 @_handle_errors
 def repo_branch_create(
     name: str = typer.Argument(..., help="New branch (version) name."),
@@ -2210,6 +2421,7 @@ def repo_branch_create(
 
 
 @repo_app.command("branch-rm")
+@_deprecated("harumi repo branch-rm", 'git push harumi --delete <name> (check `harumi schedules list` first: schedules can pin a branch)')
 @_handle_errors
 def repo_branch_rm(
     name: str = typer.Argument(..., help="Branch (version) name."),
@@ -2231,6 +2443,7 @@ def repo_branch_rm(
 
 
 @repo_app.command("promote")
+@_deprecated("harumi repo promote", 'git fetch harumi && git switch main && git merge --ff-only harumi/main && git merge --no-ff harumi/<name> && git push harumi main')
 @_handle_errors
 def repo_promote(
     name: str = typer.Argument(..., help="Version (branch) to promote into live."),
@@ -2251,6 +2464,7 @@ def repo_promote(
 
 
 @repo_app.command("dir")
+@_deprecated("harumi repo dir", 'ls <path>')
 @_handle_errors
 def repo_dir(
     path: str = typer.Argument("", help="Folder within the repo (default: repo root)."),
@@ -2276,6 +2490,7 @@ def repo_dir(
 
 
 @repo_app.command("commits")
+@_deprecated("harumi repo commits", 'git log --oneline [-- <path>]')
 @_handle_errors
 def repo_commits(
     path: Optional[str] = typer.Argument(None, help="File or folder to filter history to (default: the whole branch)."),
@@ -2306,15 +2521,19 @@ def repo_commits(
     console.print(table)
 
 
-@repo_app.command("readiness")
+@app.command("check")
 @_handle_errors
-def repo_readiness(
+def check(
     ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to check (defaults to the default branch)."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Report everything blocking this project from running, before you run it."""
+    """Report everything blocking this project from running, before you run it.
+
+    Server-side checks on the repo: it exists, `harumi.toml` is present and valid,
+    and the kernel is one the project may use.
+    """
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -2327,6 +2546,9 @@ def repo_readiness(
         mark = "[green]yes[/green]" if c.ok else "[red]no[/red]"
         table.add_row(c.id, mark, c.detail or "")
     console.print(table)
+
+
+repo_app.command("readiness")(_deprecated("harumi repo readiness", "harumi check")(check))
 
 
 # ---------------------------------------------------------------------------
@@ -2754,6 +2976,7 @@ def share_update(
     chat: Optional[bool] = typer.Option(None, "--chat/--no-chat", help="Let signed-in visitors ask the read-only assistant about this project."),
     run_history: Optional[bool] = typer.Option(None, "--run-history/--no-run-history", help="Let visitors browse past runs, not just the latest one."),
     run_control: Optional[bool] = typer.Option(None, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
+    password: Optional[bool] = typer.Option(None, "--password/--no-password", help="--password sets or changes the link's password (prompted, hidden, min 8 characters); --no-password removes it. Previously unlocked viewers must re-enter it."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -2778,17 +3001,43 @@ def share_update(
     if run_control is not None:
         body["run_control_enabled"] = run_control
 
-    if not body:
-        _fail("No fields to update. Pass at least one flag (e.g. --label, --chat).")
+    if not body and password is None:
+        _fail("No fields to update. Pass at least one flag (e.g. --label, --chat, --password).")
 
-    link = client.update_share_link(project_id, link_id, body)
-    console.print("[bold green]Updated[/bold green] share link.")
-    _print_share_link(link)
+    # Ask for the password before changing anything, and apply it last: setting or
+    # removing it signs out every viewer who had unlocked the link, so it must not
+    # happen if the other fields were rejected.
+    new_password = None
+    if password is True:
+        new_password = typer.prompt(
+            "Enter share link password (hidden, min 8 characters)",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
+
+    if body:
+        link = client.update_share_link(project_id, link_id, body)
+        console.print("[bold green]Updated[/bold green] share link.")
+        _print_share_link(link)
+
+    try:
+        if password is True:
+            client.set_share_link_password(project_id, link_id, new_password)
+            console.print("[bold green]Set[/bold green] the share link password. Previously unlocked viewers must re-enter it.")
+        elif password is False:
+            client.remove_share_link_password(project_id, link_id)
+            console.print("[bold red]Removed[/bold red] the share link password.")
+    except HarumiError:
+        if body:
+            err_console.print(
+                "[yellow]The other fields were already updated; only the password change failed.[/yellow]"
+            )
+        raise
 
 
-@share_app.command("remove")
+@share_app.command("rm")
 @_handle_errors
-def share_remove(
+def share_rm(
     link_id: str = typer.Argument(..., help="Share link id."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
@@ -2829,7 +3078,8 @@ def share_rotate(
     _print_share_link(link)
 
 
-@share_app.command("set-password")
+@share_app.command("set-password", hidden=True)
+@_deprecated("harumi share set-password", "harumi share update <LINK_ID> --password")
 @_handle_errors
 def share_set_password(
     link_id: str = typer.Argument(..., help="Share link id."),
@@ -2845,7 +3095,8 @@ def share_set_password(
     console.print("[bold green]Set[/bold green] the share link password. Previously unlocked viewers must re-enter it.")
 
 
-@share_app.command("rm-password")
+@share_app.command("rm-password", hidden=True)
+@_deprecated("harumi share rm-password", "harumi share update <LINK_ID> --no-password")
 @_handle_errors
 def share_rm_password(
     link_id: str = typer.Argument(..., help="Share link id."),
@@ -3114,9 +3365,9 @@ def datasources_update(
     console.print(f"[bold green]Updated[/bold green] datasource [bold]{ds.name}[/bold].")
 
 
-@datasources_app.command("remove")
+@datasources_app.command("rm")
 @_handle_errors
-def datasources_remove(
+def datasources_rm(
     name: str = typer.Argument(..., help="Datasource name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
@@ -3387,9 +3638,9 @@ def schedules_update(
     console.print(f"[bold green]Updated[/bold green] schedule [bold]{schedule.id}[/bold].")
 
 
-@schedules_app.command("remove")
+@schedules_app.command("rm")
 @_handle_errors
-def schedules_remove(
+def schedules_rm(
     schedule_id: str = typer.Argument(..., help="Schedule id."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
@@ -3624,6 +3875,9 @@ org_app = typer.Typer(help="Manage organizations and their members.")
 app.add_typer(org_app, name="org")
 
 
+org_app.command("use")(org_use)
+
+
 @org_app.command("list")
 @_handle_errors
 def org_list(
@@ -3667,9 +3921,9 @@ def org_rename(
     console.print(f"[bold green]Renamed[/bold green] organization to [bold]{org.business_name}[/bold].")
 
 
-@org_app.command("delete")
+@org_app.command("rm")
 @_handle_errors
-def org_delete(
+def org_rm(
     organization_id: str = typer.Argument(..., help="Organization id."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
@@ -3731,9 +3985,9 @@ def org_role(
     console.print(f"[bold green]Updated[/bold green] role to [bold]{member.role}[/bold].")
 
 
-@org_app.command("remove")
+@org_app.command("rm-member")
 @_handle_errors
-def org_remove(
+def org_rm_member(
     organization_id: str = typer.Argument(..., help="Organization id."),
     user_id: str = typer.Argument(..., help="User id."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
@@ -3749,9 +4003,34 @@ def org_remove(
     console.print(f"[bold red]Removed[/bold red] user [bold]{user_id}[/bold].")
 
 
+# ---------------------------------------------------------------------------
+# Deprecated names — hidden, warn on stderr, removed in 0.12.0
+# ---------------------------------------------------------------------------
+# Renamed in 0.11. Each runs the new command's code unchanged. (Aliases whose
+# behaviour differs are declared next to the command they replace.)
+
+app.command("push", hidden=True)(_deprecated("harumi push", "harumi import")(import_project))
+skill_app.command("install")(_deprecated("harumi skill install", "harumi agent-skills install")(agent_skills_install))
+_hidden_alias(projects_app, "delete", projects_rm, "harumi projects delete", "harumi projects rm")
+_hidden_alias(share_app, "remove", share_rm, "harumi share remove", "harumi share rm")
+_hidden_alias(datasources_app, "remove", datasources_rm, "harumi datasources remove", "harumi datasources rm")
+_hidden_alias(schedules_app, "remove", schedules_rm, "harumi schedules remove", "harumi schedules rm")
+_hidden_alias(org_app, "delete", org_rm, "harumi org delete", "harumi org rm")
+_hidden_alias(org_app, "remove", org_rm_member, "harumi org remove", "harumi org rm-member")
+
+
 def main() -> None:
+    from harumi.update import UpdateCheck
+
     _print_banner_if_bare_entrypoint()
-    app()
+    check = UpdateCheck(sys.argv[1:])
+    check.start()
+    try:
+        app()
+    finally:
+        # Runs after the command (including after `typer.Exit`/SystemExit), so a
+        # notice never lands in the middle of a command's own output.
+        check.finish()
 
 
 if __name__ == "__main__":

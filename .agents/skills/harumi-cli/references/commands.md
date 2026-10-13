@@ -7,25 +7,25 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [Auth commands](#auth-commands)
 - [env](#env)
 - [profile](#profile)
-- [config set-org](#config-set-org)
 - [specs](#specs)
 - [blueprints](#blueprints)
 - [projects](#projects)
 - [new](#new)
-- [push](#push)
+- [import](#import)
 - [clone](#clone)
 - [link](#link)
 - [start](#start)
 - [run](#run)
 - [runs](#runs)
-- [outputs](#outputs)
-- [repo](#repo)
+- [Editing the repo (git)](#editing-the-repo-git)
+- [check](#check)
 - [dashboard](#dashboard)
 - [share](#share)
 - [datasources](#datasources)
 - [schedules](#schedules)
 - [secrets](#secrets)
 - [memories and skills](#memories-and-skills)
+- [agent-skills](#agent-skills)
 - [org](#org)
 - [Config & credential files](#config--credential-files)
 - [Troubleshooting](#troubleshooting)
@@ -43,8 +43,8 @@ Logs into the **active environment** (see [env](#env)) — pass `harumi --env st
 
 - Prompts for email if `--email` omitted, then prompts for the OTP code emailed by Supabase.
 - `--signup`: creates the Supabase account first. Required the *first* time a new email logs in.
-- On success, stores `access_token`/`refresh_token` at `~/.harumi/credentials.json` (mode `0600`), then calls `POST /git/credentials` to provision a per-user Gitea personal access token (`git_token` + `git_url`), used by `harumi new`/`push`/`clone`/`link` and `harumi run` for git-over-HTTPS.
-- Best-effort org resolution: if exactly one org, stored automatically; if multiple, prints a table and instructs `harumi config set-org`.
+- On success, stores `access_token`/`refresh_token` at `~/.harumi/credentials.json` (mode `0600`), then calls `POST /git/credentials` to provision a per-user Gitea personal access token (`git_token` + `git_url`), used by `harumi new`/`import`/`clone`/`link` and `harumi run` for git-over-HTTPS.
+- Best-effort org resolution: if exactly one org, stored automatically; if multiple, prints a table and instructs `harumi org use`.
 
 ### `harumi logout`
 
@@ -56,13 +56,22 @@ Clears `~/.harumi/credentials.json`. No flags.
 harumi whoami [--api-url URL] [--org ORG]
 ```
 
-Prints the email and id of the currently logged-in user (`GET /users/profile`), plus the active environment.
+Prints the email and id of the logged-in user (`GET /users/profile`), the active environment, and — when set — the profile's name and bio and the active organization (`--org` or the one from `org use`). Replaces `profile show`.
+
+## `whats-new` and update notices
+
+```
+harumi whats-new [--all]
+```
+
+Prints the bundled release notes for the installed version (`--all`: every release, newest first). It works offline; the notes ship inside the package.
+
+Separately, real invocations may print a one-line notice on **stderr** after the command: a newer version exists on PyPI (with the upgrade command for pipx / uv / pip), or "harumi updated X -> Y, see `harumi whats-new`" once after an upgrade. PyPI is asked at most once a day, in the background with a 2 s timeout, and the same notice repeats at most once a day (a newer release is announced immediately). Nothing is printed unless stderr is a terminal, under `CI`, with `HARUMI_NO_UPDATE_CHECK=1`, or for `--version`. State: `~/.harumi/update-check.json`.
 
 ## `env`
 
 ```
 harumi env list [--all]
-harumi env current
 harumi env use NAME
 ```
 
@@ -73,8 +82,7 @@ Selects the backend environment. Two are built in:
 | `production` (default) | `https://api.harumi.io/api` | `https://git.harumi.io` | public |
 | `staging` | `https://api.dev.harumi.io/api` | `https://git.dev.harumi.io` | internal, VPN-only |
 
-- **`list`**: shows selectable environments with the active one flagged. Internal (VPN-only) environments are hidden unless `--all` is passed or `HARUMI_INTERNAL=1` is set.
-- **`current`**: shows the active environment and its endpoints.
+- **`list`**: shows selectable environments with the active one flagged `*`, and each one's API and git endpoints. Internal (VPN-only) environments are hidden unless `--all` is passed or `HARUMI_INTERNAL=1` is set. (`env current` is deprecated; `list` shows the same information.)
 - **`use NAME`**: persists the default environment in `~/.harumi/config.json`. Warns if the target is internal (VPN required) and if you're not yet logged in on it.
 
 Selection precedence: `--env` (top-level flag) > `HARUMI_ENV` > saved default from `env use` > `production`.
@@ -86,21 +94,10 @@ Staging is hidden from regular users as a UX convenience only — the real acces
 ## `profile`
 
 ```
-harumi profile show [--api-url URL] [--org ORG]
 harumi profile set [--first-name N] [--last-name N] [--bio TEXT] [--api-url URL] [--org ORG]
 ```
 
-`show` prints `id`/`email`/`first_name`/`last_name`/`bio` (`GET /users/profile`). `set` sends only the flags you pass as a partial update (`PUT /users/profile`); errors locally with "No fields to update" if none are given.
-
-## `config set-org`
-
-```
-harumi config set-org <ORG_ID>
-```
-
-Persists `org_id` in `~/.harumi/config.json`; every subsequent request sends it as `X-Organization`.
-
-The header scopes the *read* endpoints (`projects list`, `projects trash`). Creation reads the workspace from the request body instead, so `projects create`, `new`, and `push` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway.
+`set` sends only the flags you pass as a partial update (`PUT /users/profile`); errors locally with "No fields to update" if none are given.
 
 ## `specs`
 
@@ -116,33 +113,32 @@ Lists kernel specs (`name`, `display_name`, `cpu`, `memory`, `subscription_requi
 harumi blueprints [--api-url URL] [--org ORG]
 ```
 
-Lists project blueprints (`slug`, `name`, `description`) from `GET /blueprints`. Pass a blueprint's `slug` as `projects create --blueprint`.
+Lists project blueprints (`slug`, `name`, `description`) from `GET /blueprints`. Pass a blueprint's `slug` as `new --blueprint`.
 
 ## `projects`
 
 ```
-harumi projects create NAME [--customer-id ID] [--personal] [--blueprint SLUG]
-                       [--api-url URL] [--git-url URL] [--org ORG]
 harumi projects list [--api-url URL] [--org ORG]
 harumi projects get PROJECT_ID [--api-url URL] [--org ORG]
 harumi projects rename PROJECT_ID NAME [--api-url URL] [--org ORG]
-harumi projects delete PROJECT_ID [--yes] [--api-url URL] [--org ORG]
+harumi projects rm PROJECT_ID [--yes] [--api-url URL] [--org ORG]
 ```
 
-- **`create`**: `POST /projects`. A pure creation primitive — it does **not** touch the local directory or git, unlike `new`/`push`/`clone`. Prints the new project's id and a `harumi clone <id>` hint. The project is created in the configured org (`config set-org` / `--org` / `HARUMI_ORG`) unless you pass `--customer-id` to pick a different one or `--personal` to create it in your personal workspace; the command prints which workspace it landed in. For a normal interactive flow, use `harumi new` instead — it does this same step, then clones the result.
+Creating a project is `harumi new` (`--no-clone` to only create it; see [new](#new)).
+
 - **`list`**: `GET /projects` → table of `id`, `name`, `kernel_spec`, `role`.
 - **`get`**: `GET /projects/{id}` → detail view.
 - **`rename`**: `PUT /projects/{id}` with `{name}`.
-- **`delete`**: `DELETE /projects/{id}`. Prompts you to type the exact project name to confirm unless `--yes`.
+- **`rm`**: `DELETE /projects/{id}`. Prompts you to type the exact project name to confirm unless `--yes`.
 
-## Onboarding: `new` / `push` / `clone` / `link` / `start`
+## Onboarding: `new` / `import` / `clone` / `link` / `start`
 
-Three journeys, three commands — plus the narrower `link` primitive and the interactive `start` entry point. All of `new`/`push`/`clone` leave the target directory bound (`.harumi/config.json` written, `harumi` git remote configured) and ready for `harumi run`.
+Three journeys, three commands — plus the narrower `link` primitive and the interactive `start` entry point. All of `new`/`import`/`clone` leave the target directory bound (`.harumi/config.json` written, `harumi` git remote configured) and ready for `harumi run`.
 
 ### `new`
 
 ```
-harumi new NAME [--dir PATH] [--customer-id ID] [--personal] [--blueprint SLUG]
+harumi new NAME [--dir PATH] [--customer-id ID] [--personal] [--blueprint SLUG] [--no-clone]
           [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
@@ -153,10 +149,12 @@ Use when there's nothing yet.
 3. Clones that repo into `--dir` (default: `./<slugified-name>`, refuses to clone into an existing non-empty directory).
 4. Binds the clone the same way `link` does (writes `.harumi/config.json`, configures the `harumi` git remote).
 
-### `push`
+`--no-clone` stops after step 1: it only creates the project (no clone, no binding, so `--dir` is refused with it) and prints a `harumi clone <id>` hint. Use it for scripting. The project is created in the configured org (`org use` / `--org` / `HARUMI_ORG`) unless you pass `--customer-id` to pick a different one or `--personal` for your personal workspace; the command prints which workspace it landed in. Replaces `projects create`.
+
+### `import`
 
 ```
-harumi push [PATH] [--project-name NAME] [--from-git URL] [--bind/--no-bind] [--personal]
+harumi import [PATH] [--project-name NAME] [--from-git URL] [--bind/--no-bind] [--personal]
            [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
@@ -174,7 +172,7 @@ Sequence:
 
 1. `POST /projects` to create the project (`name` = `--project-name` or the folder name), in the configured org unless `--personal` is passed.
 2. If `--from-git` is set, shallow-clones that URL into a temp dir and copies its tree (minus `.git`) flat into the folder first.
-3. If the folder has no `harumi.toml`, writes a minimal one (`command = "python main.py"`, `kernel = "or_python_small"`) — `push` force-pushes over the server-seeded scaffold, so without this the first `harumi run` afterward would fail with a missing manifest.
+3. If the folder has no `harumi.toml`, writes a minimal one (`command = "python main.py"`, `kernel = "or_python_small"`) — `import` force-pushes over the server-seeded scaffold, so without this the first `harumi run` afterward would fail with a missing manifest.
 4. If the backend didn't provision a Gitea repo for the project (`project.repo is None`), prints a warning and stops — nothing is pushed, no binding happens.
 5. Otherwise, requires a Gitea token from `harumi login` (prints a warning and stops if missing — never fails hard), then force-pushes the **entire folder** as one commit ("Push local project") to the new repo's default branch, overwriting the seeded scaffold.
 6. Unless `--no-bind`, binds the folder the same way `link` does.
@@ -203,7 +201,7 @@ The narrower primitive underneath `clone` — binds an **already-checked-out** d
 2. Writes `.harumi/config.json` in the current directory with `project_id` + repo metadata.
 3. Configures the `harumi` git remote with an authenticated HTTPS URL (requires a `git_token` in credentials from `harumi login` and the current directory to already be a git working tree — `link` warns and skips remote setup otherwise).
 
-After binding (via `new`/`push`/`clone`/`link`), `harumi run`, `harumi runs`, `harumi repo`, `harumi outputs`, `harumi datasources`, `harumi schedules`, and `harumi secrets` all work without any `--project` flag. `.harumi/config.json` is searched upward from cwd, so these commands work from subdirectories too.
+After binding (via `new`/`import`/`clone`/`link`), `harumi run`, `harumi runs`, `harumi check`, `harumi skills add`, `harumi datasources`, `harumi schedules`, and `harumi secrets` all work without any `--project` flag. `.harumi/config.json` is searched upward from cwd, so these commands work from subdirectories too.
 
 ### `start`
 
@@ -211,17 +209,17 @@ After binding (via `new`/`push`/`clone`/`link`), `harumi run`, `harumi runs`, `h
 harumi start
 ```
 
-Interactive entry point for a confused or new user: asks "What do you have?" (nothing yet / a local folder / an existing Harumi project) and dispatches to `new`/`push`/`clone` accordingly. Equivalent to picking the right one yourself.
+Interactive entry point for a confused or new user: asks "What do you have?" (nothing yet / a local folder / an existing Harumi project) and dispatches to `new`/`import`/`clone` accordingly. Equivalent to picking the right one yourself.
 
 ## `run`
 
 ```
 harumi run [--branch B] [--commit SHA] [--command C] [--kernel K]
-           [--watch] [--output-dir DIR]
+           [--watch]
            [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
-Requires the directory (or a parent) to be bound — via `harumi new`, `harumi push`, `harumi clone`, or `harumi link`.
+Requires the directory (or a parent) to be bound — via `harumi new`, `harumi import`, `harumi clone`, or `harumi link`.
 
 | Flag | Meaning |
 |---|---|
@@ -230,7 +228,8 @@ Requires the directory (or a parent) to be bound — via `harumi new`, `harumi p
 | `--command, -c` | Override the command in `harumi.toml`. |
 | `--kernel, -k` | Override the kernel spec (e.g. `or_python_small`, `gurobi_python_medium`). |
 | `--watch, -w` | Block until the run reaches a terminal status. |
-| `--output-dir, -o` | With `--watch`: download output zip here on success. |
+
+With `--watch`, a successful run ends by printing `harumi runs download <run-id>`. (`--output-dir` is deprecated: it still downloads, with a warning.)
 
 **Scratch-branch flow (default when tree is dirty or has unpushed commits):**
 
@@ -244,11 +243,13 @@ The CLI detects local changes, creates a temporary branch `harumi-scratch/<user>
 harumi runs list [--project ID] [--api-url URL] [--org ORG]
 harumi runs get RUN_ID [--project ID] [--api-url URL] [--org ORG]
 harumi runs cancel RUN_ID [--project ID] [--api-url URL] [--org ORG]
+harumi runs download [RUN_ID] [--output-dir DIR] [--project ID] [--api-url URL] [--org ORG]
 ```
 
 - **`list`**: `GET /projects/{id}/runs` → table of `id`, `status`, `source`, `git_branch`, `started`, `ended`, newest first.
 - **`get`**: `GET /projects/{id}/runs/{run_id}` → detail view plus `stdout`/`stderr`/`error` if present.
 - **`cancel`**: `POST /projects/{id}/runs/{run_id}/cancel` on an in-flight run.
+- **`download`**: downloads the run's output artifacts as a zip via `GET /projects/{id}/runs/{run_id}/output/archive` (proxied by the API from S3 for current runs, or Gitea for pre-migration runs). With no `RUN_ID` it takes the latest run (`GET /projects/{id}/runs`, newest first); errors if the project has no runs. `--output-dir` defaults to the current directory. Replaces `outputs --download` and `run --output-dir`.
 
 `--project` on every subcommand overrides the `.harumi` binding.
 
@@ -262,55 +263,35 @@ harumi compare RUN_ID... [--json] [--project ID] [--api-url URL] [--org ORG]
 - Prints the project's `[[output.kpi]]` values with the change against the baseline, runtimes, the winner (best value of the primary KPI; or why there is none), whether the runs used the same inputs (`same` / `differs` with the files / `unknown`), and the server's warnings.
 - **`--json`**: prints the API's response unchanged, for scripts.
 
-## `outputs`
+## Editing the repo (git)
+
+There is no `harumi repo`. A project's repo is a plain git repo; `harumi clone` leaves a remote named `harumi` with the token embedded in its URL, so `git fetch harumi` / `git push harumi <branch>` work with no further setup. Before 0.11 each of these was a `harumi repo` subcommand; those still run (hidden, with a warning) until 0.12.0.
+
+| Task | Command in the clone |
+|---|---|
+| List files | `git ls-files` (another branch: `git fetch harumi && git ls-tree -r --name-only harumi/<ref>`) |
+| One folder level | `ls <path>` |
+| Print a file | `cat <path>` (another branch: `git show harumi/<ref>:<path>`) |
+| Create or update a file | edit it, then `git add <path> && git commit -m MSG && git push harumi <branch>` |
+| Delete / move | `git rm -r <path>` / `git mv <from> <to>`, then commit and push |
+| Zip the repo or a folder | `git archive --format=zip -o repo.zip harumi/<ref> [<path>]` |
+| History | `git log --oneline [-- <path>]` |
+| List branches ("versions") | `git fetch harumi && git branch -r` |
+| Create a branch | `git switch -c NAME harumi/main && git push -u harumi NAME` |
+| Delete a branch | `git push harumi --delete NAME` (the old command refused when a schedule pinned the branch: check `harumi schedules list` first) |
+| Promote into live | `git fetch harumi && git switch main && git merge --ff-only harumi/main && git merge --no-ff harumi/NAME && git push harumi main` |
+
+The remote's URL embeds your Gitea token (kept in `.git/config`, printed by `git remote -v`): never paste either into chat, logs or issues.
+
+Commit once per change and push once; the old file-by-file commands made one server commit per file and never updated the local clone.
+
+## `check`
 
 ```
-harumi outputs [--project ID] [--latest] [--download RUN_ID] [--output-dir DIR]
-               [--api-url URL] [--org ORG]
+harumi check [--ref REF] [--project ID] [--api-url URL] [--org ORG]
 ```
 
-Deprecated alias kept for backwards compatibility — prefer `harumi runs` for new usage.
-
-- `--project` optional if run from a bound directory.
-- No extra flags: table of all runs (`id`, `status`, `started`, `ended`, `git_branch`).
-- `--latest`: only the most recently started run.
-- `--download <run_id> [--output-dir DIR]`: downloads the run's output artifacts as a zip via `GET /projects/{id}/runs/{run_id}/output/archive` (proxied by the API from S3 for current runs, or Gitea for pre-migration runs — transparently to the caller).
-
-## `repo`
-
-```
-harumi repo ls [--ref REF] [--project ID] [--api-url URL] [--org ORG]
-harumi repo dir [PATH] [--ref REF] [--project ID] [--api-url URL] [--org ORG]
-harumi repo cat PATH [--ref REF] [--output FILE] [--project ID]
-harumi repo put LOCAL_PATH REPO_PATH [-m MSG] [--branch B] [--project ID]
-harumi repo rm PATH [-m MSG] [--branch B] [--yes] [--project ID]
-harumi repo mv FROM TO [-m MSG] [--branch B] [--project ID]
-harumi repo download -o OUT.zip [--path DIR] [--ref REF] [--project ID]
-harumi repo branches [--project ID]
-harumi repo branch-create NAME [--from BRANCH] [--project ID]
-harumi repo branch-rm NAME [--yes] [--project ID]
-harumi repo promote NAME [--title T] [--delete-after] [--project ID]
-harumi repo commits [PATH] [--ref REF] [--page N] [--per-page N] [--project ID]
-harumi repo readiness [--ref REF] [--project ID]
-```
-
-Real endpoints on harumi-api's git router. All writes go through the batch `POST /projects/{id}/repo/changes` endpoint, so every `put`/`rm`/`mv` is exactly one commit.
-
-- **`ls`**: `GET /projects/{id}/repo/files[?ref=]` → flat, recursive file list.
-- **`dir`**: `GET /projects/{id}/repo/dir?path=&ref=` → one folder level (GitHub-style repo browser: immediate children only, each with its last commit, plus the branch's latest commit/total commit count). Use `ls` instead for a flat, whole-repo listing.
-- **`cat`**: `GET /projects/{id}/repo/file-content?path=...[&ref=]`, base64-decodes `content`. Prints to stdout, or writes bytes to `--output` (required for binary files — the CLI refuses to print non-UTF-8 content without `--output`).
-- **`put`**: probes `get_repo_file` first to decide `create` vs `update`, then sends one `repo/changes` operation with base64-encoded file content.
-- **`rm`**: sends a `delete` operation for the path (file or folder — deletes everything under a folder prefix). Prompts for confirmation unless `--yes`.
-- **`mv`**: sends a `move` operation (`from_path` → `path`).
-- **`download`**: `GET /projects/{id}/repo/archive?path=&ref=`, streamed to the `--output` zip path.
-- **`branches`**: `GET /projects/{id}/repo/branches` → table with the live branch flagged.
-- **`branch-create`**: `POST /projects/{id}/repo/branches` with `{name, from_branch?}`.
-- **`branch-rm`**: `DELETE /projects/{id}/repo/branches/{name}`. Refuses (server-side) to delete the live branch.
-- **`promote`**: `POST /projects/{id}/repo/branches/{name}/promote` with `{title?, delete_after}`; merges the version into the live branch. On a merge conflict the response's `conflict=true` and the CLI surfaces `message` as an error instead of a fake success.
-- **`commits`**: `GET /projects/{id}/repo/commits?ref=&path=&page=&per_page=` → paginated commit history on `ref`; pass a file/folder `PATH` to see just its history instead of the whole branch.
-- **`readiness`**: `GET /projects/{id}/readiness?ref=` → everything blocking this project from running, answered up front instead of surfacing as a 4xx from `run`/`schedules add`.
-
-`--project` on every subcommand overrides the `.harumi` binding.
+`GET /projects/{id}/readiness?ref=` → everything blocking this project from running (repo exists, `harumi.toml` present and valid, kernel allowed), answered up front instead of surfacing as a 4xx from `run`/`schedules add`. Replaces `repo readiness`.
 
 ## `dashboard`
 
@@ -319,7 +300,7 @@ harumi dashboard widgets [--type TYPE]
 harumi dashboard validate [PATH] [--ref REF] [--against FILE | --run RUN_ID | --latest] [--project ID]
 ```
 
-No backend endpoint — a dashboard spec is a plain file in the project's Gitea repo (read/write it with `repo cat`/`repo put` like any other file). A project can have several: every `dashboard/<name>.toml` (alphabetical) plus the legacy root `dashboard.toml` (last), each an entry in the platform's dashboard picker. This command group only helps you get their contents right. Full per-type reference and folder layout: [dashboard.md](dashboard.md).
+No backend endpoint — a dashboard spec is a plain file in the project's Gitea repo (edit it in the clone and `git push harumi` like any other file). A project can have several: every `dashboard/<name>.toml` (alphabetical) plus the legacy root `dashboard.toml` (last), each an entry in the platform's dashboard picker. This command group only helps you get their contents right. Full per-type reference and folder layout: [dashboard.md](dashboard.md).
 
 - **`widgets`**: prints the current widget-type contract (required/optional keys, enum values) for all 5 types, or one with `--type`. Sourced from `harumi.dashboard.WIDGET_SCHEMAS`, a hand-maintained mirror of harumi-platform's `schema.ts` (see the `ponytail:` comment in that module) — always current with this CLI version, but can drift from the platform between CLI releases if a new widget type ships there first.
 - **`validate`**: parses each dashboard spec the same way the platform's `parseDashboardConfig` does, and reports every widget that would be **dropped** (unknown `type`, missing/invalid required key — e.g. a `valueKey` typo for `value_key`). Exits 1 if any spec drops a widget or isn't valid TOML.
@@ -339,11 +320,9 @@ harumi share add [--label TEXT] [--app/--no-app] [--chat/--no-chat] [--run-histo
                   [--run-control/--no-run-control] [--project ID]
 harumi share update LINK_ID [--label TEXT] [--enable/--disable] [--app/--no-app] [--chat/--no-chat]
                      [--run-history/--no-run-history] [--run-control/--no-run-control]
-                     [--project ID]
-harumi share remove LINK_ID [--yes] [--project ID]
+                     [--password/--no-password] [--project ID]
+harumi share rm LINK_ID [--yes] [--project ID]
 harumi share rotate LINK_ID [--yes] [--project ID]
-harumi share set-password LINK_ID [--project ID]
-harumi share rm-password LINK_ID [--project ID]
 ```
 
 Manages `/projects/{id}/share-links*` — a project's public, unauthenticated dashboard links (read-only view of the project's dashboard specs, with the same picker when there are several, + a chosen run's `output.json`; no login required to view). A project can have several links, each independently revocable, each with its own permissions and optional password.
@@ -356,10 +335,10 @@ Manages `/projects/{id}/share-links*` — a project's public, unauthenticated da
   - `--run-history`: browse past runs instead of only ever the latest.
   - `--run-control`: signed-in visitors can run now, override the kernel, and manage schedules.
 - **`update`**: `PATCH /projects/{id}/share-links/{link_id}`. Only the flags you pass are changed; `--enable`/`--disable` toggles the link without touching its permissions.
-- **`remove`**: `DELETE /projects/{id}/share-links/{link_id}`. The old URL stops working immediately. Prompts for confirmation unless `--yes`.
+- **`rm`**: `DELETE /projects/{id}/share-links/{link_id}`. The old URL stops working immediately. Prompts for confirmation unless `--yes`.
 - **`rotate`**: `POST /projects/{id}/share-links/{link_id}/rotate` — invalidates the current token and mints a new one; permission flags are unchanged. Prompts for confirmation unless `--yes`.
-- **`set-password`**: prompts for a password (hidden input, server-enforced 8–200 chars), then `PUT /projects/{id}/share-links/{link_id}/password`. Changing the password invalidates every previously issued unlock session for that link — viewers must re-enter it.
-- **`rm-password`**: `DELETE /projects/{id}/share-links/{link_id}/password`. That link becomes freely viewable (no password prompt).
+- **`update --password`**: prompts for a password (hidden input, server-enforced 8–200 chars), then `PUT /projects/{id}/share-links/{link_id}/password`. Changing the password invalidates every previously issued unlock session for that link — viewers must re-enter it. May be combined with the other `update` flags, or used alone.
+- **`update --no-password`**: `DELETE /projects/{id}/share-links/{link_id}/password`. That link becomes freely viewable (no password prompt).
 
 `--project` on every subcommand overrides the `.harumi` binding.
 
@@ -381,7 +360,7 @@ harumi datasources update NAME [--name NEW_NAME] [--type T] [--host H] [--port P
                                [--proxy-host H] [--proxy-port P] [--proxy-server-name N]
                                [--proxy-tls-ca-cert PATH] [--proxy-tls-client-cert PATH]
                                [--proxy-tls-client-key PATH] [--project ID]
-harumi datasources remove NAME [--yes] [--project ID]
+harumi datasources rm NAME [--yes] [--project ID]
 harumi datasources test --type TYPE --host H --port P --database D --username U
                         [--use-proxy] [--proxy-host H] [--proxy-port P] [--proxy-server-name N]
                         [--proxy-tls-ca-cert PATH] [--proxy-tls-client-cert PATH]
@@ -401,7 +380,7 @@ harumi datasources query NAME --sql "SELECT ..." [--limit N] [--csv PATH] [--pro
 
 **`update`** calls `PUT /datasources/{project_id}/{name}` with only the fields you pass (partial update). Passing `--name` renames the datasource (and its SSM parameter, server-side). Omit `--set-credentials` to leave the stored credentials untouched.
 
-**`remove`** calls `DELETE /datasources/{project_id}/{name}`, prompting for confirmation unless `--yes`. Deletes the DB row and the SSM parameter.
+**`rm`** calls `DELETE /datasources/{project_id}/{name}`, prompting for confirmation unless `--yes`. Deletes the DB row and the SSM parameter.
 
 **`test`** calls `POST /datasources/test-connection` — validates without persisting. Useful to sanity-check credentials before `add`.
 
@@ -423,7 +402,7 @@ harumi schedules add --cron CRON --git-branch BRANCH [--start-at ISO] [--git-com
                      [--command C] [--kernel K] [--output-format F] [--email-to E] [--project ID]
 harumi schedules update SCHEDULE_ID [--cron CRON] [--start-at ISO] [--git-branch B] [--git-commit SHA]
                         [--command C] [--kernel K] [--output-format F] [--email-to E] [--project ID]
-harumi schedules remove SCHEDULE_ID [--yes] [--project ID]
+harumi schedules rm SCHEDULE_ID [--yes] [--project ID]
 ```
 
 `--project` on every subcommand overrides the `.harumi` binding.
@@ -438,7 +417,7 @@ harumi schedules remove SCHEDULE_ID [--yes] [--project ID]
 
 **`update`** calls `PUT /projects/{project_id}/schedules/{schedule_id}` with only the fields you pass (partial update); errors locally with "No fields to update" if no flags are given.
 
-**`remove`** calls `DELETE /projects/{project_id}/schedules/{schedule_id}`, prompting for confirmation unless `--yes`. **This is the only way to stop a schedule** — there is no pause/enable flag.
+**`rm`** calls `DELETE /projects/{project_id}/schedules/{schedule_id}`, prompting for confirmation unless `--yes`. **This is the only way to stop a schedule** — there is no pause/enable flag.
 
 **No separate "run now."** Immediate execution is `harumi run` (git-ref based); schedules only manage recurring cron runs.
 
@@ -465,14 +444,25 @@ harumi memories list [--query TEXT] [--mode always|on_demand] [--project ID] [--
 harumi memories add [CONTENT] [--mode always|on_demand] [--project ID]
 harumi memories edit MEMORY_ID [--content TEXT] [--mode always|on_demand] [--project ID]
 harumi memories rm MEMORY_ID [--yes] [--project ID]
-harumi skills
+harumi skills library [--category C] [--query TEXT] [--api-url URL] [--org ORG]
+harumi skills add SLUG [--force] [--api-url URL] [--org ORG]
 ```
 
 - **`list`**: `GET /projects/{id}/memories?q=&retrieval_mode=` → a table of `id`, `scope`, `mode`, `content` (truncated) and `updated`. The list also carries memories inherited from the project's organization or the owner's personal workspace (`scope` is `organization` or `user`); those are read-only through the project routes.
 - **`add`**: `POST /projects/{id}/memories` with `{content, source: "cli", retrieval_mode}`. `content` is 1-4000 characters; `--mode` defaults to `on_demand`. If `CONTENT` is omitted it is prompted for.
 - **`edit`**: `PATCH /projects/{id}/memories/{memory_id}` with only the fields given. At least one of `--content` / `--mode` is required, otherwise the CLI fails before calling the API.
 - **`rm`**: `DELETE /projects/{id}/memories/{memory_id}`, prompting for confirmation unless `--yes`.
-- **`skills`**: no API call, no project needed. A project's skills are files in its git repo at `skills/<slug>/SKILL.md`; `harumi skills` prints how to edit them with `harumi repo ls|cat|put|rm|mv`. Not the same as `harumi skill install|path`, which seeds the bundled agent skills onto this machine.
+- **`skills library`**: `GET /skill-library` → the platform's preset skills (`slug`, `name`, `category`, `version`, `description`). `--category` matches exactly; `--query` is a case-insensitive substring of name, description or tags.
+- **`skills add SLUG`**: needs a bound clone. `GET /skill-library/{slug}`, then writes `<clone>/skills/<slug>/SKILL.md` with `source: harumi/<slug>` and `version: N` set in the frontmatter (replacing any the preset had), exactly as the platform's Install button does. Refuses when that file exists unless `--force`: if the existing file's `source:` is `harumi/<slug>` it says the preset is already installed, otherwise that the folder belongs to a different skill. It writes the file only and prints the `git add / commit / push harumi` line; the project's assistant loads skills from the live branch.
+- A project's *own* skills are plain files at `skills/<slug>/SKILL.md`: create, edit and delete them in the clone with your editor and git. There is no command for that on purpose.
+
+## `agent-skills`
+
+```
+harumi agent-skills install [--agent KEY]... [--project] [--dry-run] [--force]
+```
+
+Copies the bundled `harumi-cli` and `harumi-cli-setup` skills onto this machine for Cursor, Claude Code, Codex or the universal `~/.agents/skills` folder (auto-detected, or `--agent`). `--project` writes to `./.agents/skills` instead. `--dry-run` prints each `source -> destination` and writes nothing (it replaces `skill path`). Not the same as `harumi skills`, which is about a project's skills. Replaces `skill install`.
 
 ## `org`
 
@@ -480,11 +470,12 @@ harumi skills
 harumi org list [--api-url URL]
 harumi org create BUSINESS_NAME [--api-url URL]
 harumi org rename ORG_ID BUSINESS_NAME [--api-url URL]
-harumi org delete ORG_ID [--yes] [--api-url URL]
+harumi org rm ORG_ID [--yes] [--api-url URL]
 harumi org members ORG_ID [--api-url URL]
 harumi org invite ORG_ID --email EMAIL [--role ROLE] [--api-url URL]
 harumi org role ORG_ID USER_ID --role ROLE [--api-url URL]
-harumi org remove ORG_ID USER_ID [--yes] [--api-url URL]
+harumi org rm-member ORG_ID USER_ID [--yes] [--api-url URL]
+harumi org use ORG_ID
 ```
 
 `--role` is one of `owner | admin | member | viewer`.
@@ -492,11 +483,12 @@ harumi org remove ORG_ID USER_ID [--yes] [--api-url URL]
 - **`list`**: `GET /users/organizations`.
 - **`create`**: `POST /users/organizations` with `{business_name}`.
 - **`rename`**: `PUT /users/organizations/{id}` with `{business_name}`.
-- **`delete`**: `DELETE /users/organizations/{id}`, prompting for confirmation unless `--yes`.
+- **`rm`**: `DELETE /users/organizations/{id}`, prompting for confirmation unless `--yes`.
 - **`members`**: `GET /users/organizations/{id}/users`.
 - **`invite`**: `POST /users/organizations/{id}/users` with `{email, role}`.
 - **`role`**: `PUT /users/organizations/{id}/users/{user_id}` with `{role}`.
-- **`remove`**: `DELETE /users/organizations/{id}/users/{user_id}`, prompting for confirmation unless `--yes`.
+- **`rm-member`**: `DELETE /users/organizations/{id}/users/{user_id}`, prompting for confirmation unless `--yes`.
+- **`use`**: persists `org_id` in `~/.harumi/config.json` (per environment); every later request sends it as `X-Organization`. The header scopes the *read* endpoints (`projects list`); creation reads the workspace from the request body, so `new` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway. No network call. Replaces `config set-org`.
 
 ## Config & credential files
 
@@ -515,7 +507,7 @@ Within the active environment, URL/org overrides (highest first): **CLI flags > 
 - `~/.harumi/config.json` — global; stores only the selected `environment`.
 - `~/.harumi/environments/<env>/credentials.json` — per-environment `access_token`, `refresh_token`, `git_token`, `git_url`, `user_id`, `email`, `expires_at`; mode `0600`.
 - `~/.harumi/environments/<env>/config.json` — per-environment `org_id` (and any local `api_url`/`git_url` overrides).
-- `.harumi/config.json` (per-project) — `project_id`, `repo.owner/name/clone_url/default_branch`; written by `harumi new` / `harumi push` / `harumi clone` / `harumi link`, searched upward from cwd.
+- `.harumi/config.json` (per-project) — `project_id`, `repo.owner/name/clone_url/default_branch`; written by `harumi new` / `harumi import` / `harumi clone` / `harumi link`, searched upward from cwd.
 - Override the home dir with `HARUMI_HOME`.
 - **Upgrading from a pre-environments install:** the old flat `~/.harumi/credentials.json` + `config.json` are migrated automatically into the `production` environment on first run.
 
@@ -525,18 +517,17 @@ Within the active environment, URL/org overrides (highest first): **CLI flags > 
 |---|---|---|
 | `Error: Not logged in. Run harumi login first.` | No/expired session | Ask user to run `harumi login` |
 | `harumi-api returned HTTP 422: ... Signups not allowed for otp` | New email, no account | Re-run `harumi login --signup` |
-| `Provide --project or run from a directory with a .harumi binding` | No `--project` and `.harumi/config.json` missing in cwd + parents | `harumi new`/`harumi clone <ID>` (nothing/existing project) or `harumi push` (existing folder) or `harumi link --project <ID>` (already checked out), or pass `--project` |
+| `Provide --project or run from a directory with a .harumi binding` | No `--project` and `.harumi/config.json` missing in cwd + parents | `harumi new`/`harumi clone <ID>` (nothing/existing project) or `harumi import` (existing folder) or `harumi link --project <ID>` (already checked out), or pass `--project` |
 | `No Gitea token found. Run harumi login` | `git_token` absent in credentials | `harumi login` again |
 | `git push failed: ...` | Network (VPN not connected) or bad credentials | Check VPN; re-run `harumi login` to refresh token |
 | `git not found` | git missing from PATH | Install git |
 | `Run ended with status: failed` | Solver code raised or exited non-zero | `harumi runs get <RUN_ID>` for stdout/stderr/error |
 | `No run id returned; cannot watch this run` | Backend didn't return a `project_run_id` | Check `harumi runs list` manually |
 | `harumi-api returned HTTP 403: Only SELECT queries are allowed ...` | `datasources query` SQL contains a destructive keyword or doesn't start with SELECT/WITH | Rewrite the query as a read-only SELECT/WITH |
-| `harumi-api returned HTTP 404: ...` (on `datasources`/`repo`/`schedules`/`secrets` get/update/remove) | Resource name/id doesn't exist for this project | List the resource first to check the exact name/id |
+| `harumi-api returned HTTP 404: ...` (on `datasources`/`schedules`/`secrets` get/update/rm) | Resource name/id doesn't exist for this project | List the resource first to check the exact name/id |
 | `[yellow]Result was truncated at the server-side row cap` | Query returned more rows than `--limit` (or the 100000 hard max) | Narrow the query (add a `WHERE`/`LIMIT`) or raise `--limit` |
 | `No fields to update.` | An `update`/`set` command called with no flags | Pass at least one field flag |
 | `harumi-api returned HTTP 400: Invalid cron expression: ...` | `schedules add/update --cron` failed server-side `croniter` validation | Fix the cron string (5 fields: minute hour day month weekday) |
-| `{path!r} is not valid UTF-8 text.` | `repo cat` on a binary file without `--output` | Re-run with `--output <local_path>` |
 | A widget is missing from the dashboard, no error shown | The platform silently drops a widget with an unknown `type` or a missing/renamed required key (e.g. `valueKey` instead of `value_key`) | `harumi dashboard validate` on the file before pushing it |
 | A widget renders but stays empty | Its `*_key` dot-path doesn't match anything in the run's `output.json` | `harumi dashboard validate --latest` (or `--against <output.json>`) to see exactly which key and what's available instead |
 

@@ -28,14 +28,15 @@ harumi login
 #    existing Harumi project — and run its command (or let `harumi start`
 #    ask and dispatch for you)
 harumi new "My Project"          # nothing yet: creates + clones a fresh project
-# harumi push                    # or: turn the current folder into a new project
+# harumi import                  # or: turn the current folder into a new project
 # harumi clone <PROJECT_ID>      # or: fetch a project that already exists
 
 # 3. See available kernel sizes (CPU/RAM, Gurobi vs plain Python)
 harumi specs
 
 # 4. Run the bound directory's code on the infra
-harumi run --watch --output-dir ./out
+harumi run --watch
+harumi runs download -o ./out
 
 # 5. Inspect runs later
 harumi runs list
@@ -50,10 +51,11 @@ harumi dashboard validate --latest
 
 ## Everything else the CLI can do
 
-- `harumi new` / `harumi push` / `harumi clone` / `harumi link` / `harumi start` — the onboarding verbs; see Quick start above.
-- `harumi repo` — browse, read, write, delete, move, and download files in the project's Gitea repo; create/delete/promote branches (versions); `repo dir` for a GitHub-style folder-at-a-time browse.
+- `harumi new` / `harumi import` / `harumi clone` / `harumi link` / `harumi start` — the onboarding verbs; see Quick start above.
+- Editing the project's repo is plain git in your clone (`harumi clone` sets up a `harumi` remote with your token embedded in its URL, so don't share `git remote -v` output or `.git/config`): `git push harumi <branch>`. `harumi check` reports what blocks the project from running; `harumi skills library|add` installs preset skills; `harumi agent-skills install` teaches Cursor/Claude Code/Codex this CLI.
 - `harumi dashboard` — look up the `dashboard.toml` widget reference (`widgets`) and validate a project's dashboard, including its `output.json` dot-paths, before pushing (`validate`).
-- `harumi share` — turn the project's public, unauthenticated dashboard link on/off, rotate it, and password-protect it.
+- `harumi share` — manage the project's public, unauthenticated dashboard links (several per project): add, enable/disable, rotate, and password-protect them.
+- `harumi whats-new` — release notes for the installed version (`--all` for the history). harumi also tells you, at most once a day and only in an interactive terminal, when a newer version is on PyPI.
 - `harumi blueprints` — list project blueprints to pass as `harumi new --blueprint`.
 - `harumi datasources` — CRUD project database connections, test them, and run read-only SQL queries against them.
 - `harumi schedules` — CRUD cron schedules that trigger git-ref runs.
@@ -89,9 +91,10 @@ Selection precedence: `--env` > `HARUMI_ENV` > `harumi env use` (saved default) 
 |---|---|
 | `HARUMI_API_URL` | Override `harumi-api` base URL (e.g. `http://localhost:8000/api`) |
 | `HARUMI_GIT_URL` | Override the Harumi Git (Gitea) base URL |
-| `HARUMI_ORG` | Organization ID sent as `X-Organization`, and the workspace new projects are created in (`--personal` on `new`/`push`/`projects create` opts out) |
+| `HARUMI_ORG` | Organization ID sent as `X-Organization`, and the workspace new projects are created in (`--personal` on `new`/`import` opts out) |
 | `HARUMI_INTERNAL` | Set to `1` to reveal internal environments in `harumi env list` |
 | `HARUMI_PLATFORM_URL` | Override the web-app URL used in printed project links |
+| `HARUMI_NO_UPDATE_CHECK` | Set to `1` to turn off the "a newer version is available" notice (it is also off under `CI` and whenever stderr isn't a terminal) |
 | `HARUMI_STATUS_URL` | Override the status page used by `harumi status` and the unreachable-API hint (the hint is skipped when the API URL is overridden, unless this is set) |
 
 Credentials (JWT + refresh token + Gitea token) are stored per-environment under `~/.harumi/environments/<env>/credentials.json` (mode `0600`) after `harumi login`. An older flat `~/.harumi/credentials.json` is migrated into `production` automatically on first run.

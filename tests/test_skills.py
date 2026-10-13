@@ -110,3 +110,63 @@ def test_refuses_to_overwrite_non_skill_directory_without_force(tmp_path, monkey
     # --force overwrites it.
     skills.install(agent_keys=["cursor"], force=True)
     assert (collision / "SKILL.md").exists()
+
+
+# -- library presets installed into a project (`harumi skills add`) -----------
+
+
+def test_provenance_replaces_existing_source_and_version_and_keeps_the_body():
+    preset = "---\nname: X\nversion: 1\nsource: other/x\ndescription: d\n---\n\n# Body\n"
+
+    out = skills.with_install_provenance(preset, "x", 4)
+
+    assert out == "---\nname: X\ndescription: d\nsource: harumi/x\nversion: 4\n---\n\n# Body\n"
+
+
+def test_provenance_adds_a_frontmatter_to_a_preset_without_one():
+    out = skills.with_install_provenance("# Just a body\n", "x", 2)
+
+    assert out == "---\nsource: harumi/x\nversion: 2\n---\n\n# Just a body\n"
+
+
+def test_provenance_rejects_unclosed_frontmatter():
+    with pytest.raises(ValueError):
+        skills.with_install_provenance("---\nname: X\n# never closed\n", "x", 1)
+
+
+def test_frontmatter_source_reads_what_an_install_wrote():
+    installed = skills.with_install_provenance("---\nname: X\n---\nbody\n", "vrp-modeling", 1)
+
+    assert skills.frontmatter_source(installed) == "harumi/vrp-modeling"
+    assert skills.frontmatter_source("---\nname: mine\n---\n") is None
+    assert skills.frontmatter_source("no frontmatter") is None
+
+
+def test_provenance_leaves_nested_version_and_source_keys_alone():
+    preset = "---\nname: X\nmetadata:\n  version: 2\n  source: internal\nversion: 1\n---\nbody\n"
+
+    out = skills.with_install_provenance(preset, "x", 5)
+
+    assert "metadata:\n  version: 2\n  source: internal\n" in out
+    assert out.count("\nversion: 5\n") == 1
+    assert "version: 1" not in out
+
+
+def test_provenance_keeps_crlf_line_endings_consistent():
+    out = skills.with_install_provenance("---\r\nname: X\r\n---\r\nbody\r\n", "x", 1)
+
+    assert "\r\n" in out
+    assert out.replace("\r\n", "") .count("\n") == 0
+
+
+def test_provenance_keeps_crlf_consistent_when_the_preset_has_no_frontmatter():
+    out = skills.with_install_provenance("# Title\r\nbody\r\n", "x", 1)
+
+    assert out == "---\r\nsource: harumi/x\r\nversion: 1\r\n---\r\n\r\n# Title\r\nbody\r\n"
+    assert "\n" not in out.replace("\r\n", "")
+
+
+def test_provenance_leaves_lf_files_as_lf():
+    out = skills.with_install_provenance("# Title\nbody\n", "x", 1)
+
+    assert "\r" not in out

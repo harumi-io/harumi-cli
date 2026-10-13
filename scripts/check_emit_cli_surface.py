@@ -36,7 +36,7 @@ def main() -> None:
     if len(paths) != len(set(paths)):
         failures.append("duplicate command paths found")
 
-    known = {"repo put", "run", "projects list"}
+    known = {"skills add", "run", "projects list"}
     missing_known = known - set(paths)
     if missing_known:
         failures.append(f"expected commands missing from surface: {missing_known}")

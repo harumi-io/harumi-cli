@@ -1,6 +1,6 @@
 # Dashboards & widgets
 
-A Harumi project renders **one dashboard per repo-committed spec**, each bound by dot-path keys to `output/output.json` — the file a run writes (see `[output]` in `harumi.toml`). There is no dedicated backend endpoint for this: a dashboard spec is just a file in the project's Gitea repo, read with `harumi repo cat` / written with `harumi repo put`, same as any other file.
+A Harumi project renders **one dashboard per repo-committed spec**, each bound by dot-path keys to `output/output.json` — the file a run writes (see `[output]` in `harumi.toml`). There is no dedicated backend endpoint for this: a dashboard spec is just a file in the project's Gitea repo, edited in your clone and pushed with `git push harumi`, same as any other file.
 
 ## Where dashboards live
 
@@ -20,15 +20,15 @@ title = "Machine schedule"
 # ...
 ```
 
-A project with **no** spec at all still renders — the platform falls back to a generic default dashboard. `harumi new`/`harumi projects create` get a starter root `dashboard.toml` seeded server-side; `harumi push` does **not** (it overwrites the scaffold), so a pushed project has no dashboard until one is committed.
+A project with **no** spec at all still renders — the platform falls back to a generic default dashboard. `harumi new` gets a starter root `dashboard.toml` seeded server-side; `harumi import` does **not** (it overwrites the scaffold), so a pushed project has no dashboard until one is committed.
 
-To add a second dashboard to a project that has the root file, leave it alone and commit `dashboard/<name>.toml` — or move it (`harumi repo mv dashboard.toml dashboard/<name>.toml`) if you'd rather have every dashboard in one folder.
+To add a second dashboard to a project that has the root file, leave it alone and commit `dashboard/<name>.toml` — or move it (`git mv dashboard.toml dashboard/<name>.toml`) if you'd rather have every dashboard in one folder.
 
 ## The failure mode this exists to catch
 
 The platform's parser (`parseDashboardConfig` in harumi-platform) is deliberately forgiving: a widget with an unknown `type`, a missing required key, or a renamed key (e.g. `valueKey` instead of `value_key`) is **silently dropped** — the dashboard renders everything else and the bad widget just doesn't appear, with no error surfaced to whoever edited the file. A widget whose dot-path doesn't resolve against a real run's `output.json` renders, but empty.
 
-Always run `harumi dashboard validate` before `harumi repo put` (or before telling the user a dashboard edit is done) — it's the only place in the toolchain that fails loudly. Besides dropped entries it reports values the platform accepts but silently ignores (`ignored`): a color that isn't a Tailwind name like `red-600` or a `{ light, dark }` pair (hex is not accepted, so `color = "#ef4444"` falls back to the default color), a `map` with neither `points_key` nor `routes_key`, and a `tile_url` that isn't `https://`.
+Always run `harumi dashboard validate` before committing (or before telling the user a dashboard edit is done) — it's the only place in the toolchain that fails loudly. Besides dropped entries it reports values the platform accepts but silently ignores (`ignored`): a color that isn't a Tailwind name like `red-600` or a `{ light, dark }` pair (hex is not accepted, so `color = "#ef4444"` falls back to the default color), a `map` with neither `points_key` nor `routes_key`, and a `tile_url` that isn't `https://`.
 
 ## The widget types
 

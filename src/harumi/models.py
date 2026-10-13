@@ -444,6 +444,35 @@ class MemoryList(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Skill library <-> harumi-api/src/api/skill_library/schemas.py — live.
+# Presets the platform ships; installing one copies its SKILL.md into the
+# project's repo as skills/<slug>/SKILL.md.
+# ---------------------------------------------------------------------------
+
+class SkillLibrarySummary(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    slug: str
+    name: str
+    description: str = ""
+    category: str = ""
+    tags: list[str] = []
+    version: int = 1
+
+
+class SkillLibraryDetail(SkillLibrarySummary):
+    """A preset plus its raw SKILL.md, exactly as shipped."""
+
+    content: str
+
+
+class SkillLibraryList(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    skills: list[SkillLibrarySummary] = []
+
+
+# ---------------------------------------------------------------------------
 # Secrets <-> harumi-api/src/api/projects/schemas.py:Secret — live.
 # Stored in AWS SSM under /harumi/projects/{id}/secrets/{name}; `secret_id`
 # used by the delete endpoint is just the secret's name.
@@ -491,7 +520,7 @@ class OrganizationMember(BaseModel):
 
 class BlueprintSummary(BaseModel):
     """One entry from GET /blueprints. Pass its `slug` as `--blueprint` to
-    `harumi projects create`. No `id` — a blueprint is a manifest directory in
+    `harumi new --blueprint`. No `id` — a blueprint is a manifest directory in
     harumi-api's repo, not a database row."""
 
     model_config = ConfigDict(extra="allow")
