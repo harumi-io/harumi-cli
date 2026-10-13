@@ -1238,11 +1238,11 @@ def test_parse_widget_entry_treats_an_aliased_type_as_its_target():
         dash.WidgetField("x_key", required=True),
         dash.WidgetField("series", required=True, kind="series"),
     )
-    with (
-        mock.patch.object(dash, "widget_aliases", return_value=_CHART_ALIASES),
-        mock.patch.object(dash, "widget_schemas", return_value={"chart": chart_fields}),
-    ):
-        widget, issue = parse_widget_entry(dict(_LEGACY_ENTRY))
+    # Nested rather than a parenthesized `with (...)`: that form is only
+    # supported from Python 3.10 and this package declares >= 3.9.
+    with mock.patch.object(dash, "widget_aliases", return_value=_CHART_ALIASES):
+        with mock.patch.object(dash, "widget_schemas", return_value={"chart": chart_fields}):
+            widget, issue = parse_widget_entry(dict(_LEGACY_ENTRY))
     assert issue is None
     assert widget is not None
     assert widget["type"] == "chart"
@@ -1250,11 +1250,9 @@ def test_parse_widget_entry_treats_an_aliased_type_as_its_target():
 
 
 def test_parse_widget_entry_still_rejects_a_retired_type_without_an_alias():
-    with (
-        mock.patch.object(dash, "widget_aliases", return_value={}),
-        mock.patch.object(dash, "widget_schemas", return_value={"chart": ()}),
-    ):
-        widget, issue = parse_widget_entry(dict(_LEGACY_ENTRY))
+    with mock.patch.object(dash, "widget_aliases", return_value={}):
+        with mock.patch.object(dash, "widget_schemas", return_value={"chart": ()}):
+            widget, issue = parse_widget_entry(dict(_LEGACY_ENTRY))
     assert widget is None
     assert issue is not None and 'unknown type "line-chart"' in issue.message
 
@@ -1286,11 +1284,36 @@ def test_a_series_mark_is_dropped_when_the_artifact_has_no_marks():
 def test_an_invalid_series_mark_is_reported_as_ignored_without_dropping_the_widget():
     widget = {"id": "w", "type": "chart"}
     entry = {"series": [{"key": "a", "mark": "pie"}]}
-    with (
-        mock.patch.object(dash, "series_marks", return_value=("line", "bar", "area")),
-        mock.patch.object(dash, "widget_schemas", return_value={"chart": (dash.WidgetField("series", kind="series"),)}),
-    ):
-        issues = dash.widget_warnings(entry, widget)
+    schemas = {"chart": (dash.WidgetField("series", kind="series"),)}
+    with mock.patch.object(dash, "series_marks", return_value=("line", "bar", "area")):
+        with mock.patch.object(dash, "widget_schemas", return_value=schemas):
+            issues = dash.widget_warnings(entry, widget)
     assert len(issues) == 1
     assert issues[0].dropped is False and issues[0].label == "ignored"
     assert "mark" in issues[0].message and "line, bar, area" in issues[0].message
+
+
+def test_validate_warns_about_a_legacy_widgets_series_mark_via_the_resolved_entry():
+    """`widget_warnings` reads the alias-resolved entry, so a key an alias implies
+    is seen by the warning pass as well as the parse."""
+    seen = {}
+
+    def spy(entry, widget):
+        seen["type"] = entry.get("type")
+        return []
+
+    chart_fields = (
+        dash.WidgetField("variant", required=True, kind="enum", values=("line", "bar")),
+        dash.WidgetField("data_key", required=True),
+        dash.WidgetField("x_key", required=True),
+        dash.WidgetField("series", required=True, kind="series"),
+    )
+    raw = (
+        "[[widgets]]\ntype = 'line-chart'\nid = 'o'\ntitle = 'O'\n"
+        "data_key = 'd'\nx_key = 'x'\nseries = [{ key = 'v' }]\n"
+    )
+    with mock.patch.object(dash, "widget_aliases", return_value=_CHART_ALIASES):
+        with mock.patch.object(dash, "widget_schemas", return_value={"chart": chart_fields}):
+            with mock.patch.object(dash, "widget_warnings", side_effect=spy):
+                dash.validate_dashboard_toml(raw)
+    assert seen["type"] == "chart"

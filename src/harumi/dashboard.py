@@ -752,7 +752,8 @@ def validate_dashboard_toml(
         widget, issue = parse_widget_entry(entry)
         if widget is not None:
             widgets.append(widget)
-            issues.extend(widget_warnings(entry, widget))
+            # The resolved entry, so a key an alias implies is seen here too.
+            issues.extend(widget_warnings(resolve_alias(entry), widget))
         else:
             assert issue is not None
             issues.append(issue)
