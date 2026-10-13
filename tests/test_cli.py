@@ -126,7 +126,7 @@ def test_skill_install_hint_shown_when_agent_missing_skill(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["harumi"])
     cli._print_banner_if_bare_entrypoint()
     out = capsys.readouterr().out
-    assert "harumi skill install" in out
+    assert "harumi agent-skills install" in out
     assert "Cursor" in out
 
 
@@ -136,7 +136,7 @@ def test_skill_install_hint_hidden_when_nothing_missing(monkeypatch, capsys):
     monkeypatch.setattr(skills_mod, "agents_missing_skill", lambda: [])
     monkeypatch.setattr("sys.argv", ["harumi"])
     cli._print_banner_if_bare_entrypoint()
-    assert "harumi skill install" not in capsys.readouterr().out
+    assert "harumi agent-skills install" not in capsys.readouterr().out
 
 
 def test_skill_install_hint_swallows_filesystem_errors(monkeypatch, capsys):
@@ -152,7 +152,7 @@ def test_skill_install_hint_swallows_filesystem_errors(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["harumi"])
     cli._print_banner_if_bare_entrypoint()  # must not raise
     out = capsys.readouterr().out
-    assert "harumi skill install" not in out
+    assert "harumi agent-skills install" not in out
     assert out.strip() != ""  # banner itself still printed
 
 
@@ -325,14 +325,14 @@ def test_projects_list_reports_empty_instead_of_an_empty_table(api):
     assert "No projects found." in result.output
 
 
-def test_projects_create_rejects_personal_with_customer_id(api):
+def test_new_rejects_personal_with_customer_id(api):
     """The two flags name different workspaces, so passing both must be refused.
 
     Without this the guard could be dropped in a refactor and one flag would
     silently win, putting the project somewhere the user didn't ask for.
     """
     result = runner.invoke(
-        cli.app, ["projects", "create", "Scoped", "--personal", "--customer-id", "org-other"]
+        cli.app, ["new", "Scoped", "--no-clone", "--personal", "--customer-id", "org-other"]
     )
 
     assert result.exit_code == 1
@@ -722,9 +722,9 @@ def test_unknown_command_is_rejected():
     assert result.exit_code != 0
 
 
-def test_projects_create_does_not_touch_local_directory_or_git(api, tmp_path, monkeypatch):
-    """`projects create` is the pure API primitive now — binding/cloning moved
-    to `new`/`push`/`clone`/`link`. This pins that it stays that way."""
+def test_new_no_clone_does_not_touch_local_directory_or_git(api, tmp_path, monkeypatch):
+    """`new --no-clone` is the pure API primitive — binding/cloning is plain
+    `new`/`import`/`clone`/`link`. This pins that it stays that way."""
     monkeypatch.chdir(tmp_path)
     clone_calls = []
     remote_calls = []
@@ -742,7 +742,7 @@ def test_projects_create_does_not_touch_local_directory_or_git(api, tmp_path, mo
         },
     )
 
-    result = runner.invoke(cli.app, ["projects", "create", "Widget"])
+    result = runner.invoke(cli.app, ["new", "Widget", "--no-clone"])
 
     assert result.exit_code == 0, result.output
     assert "harumi clone proj-1" in result.output
@@ -752,7 +752,7 @@ def test_projects_create_does_not_touch_local_directory_or_git(api, tmp_path, mo
 
 
 # ---------------------------------------------------------------------------
-# harumi new / push / clone / link / start
+# harumi new / import / clone / link / start
 #
 # Each of these ends by binding a directory (writing .harumi/config.json)
 # and, unless the directory isn't a real git repo yet, configuring the
@@ -838,7 +838,7 @@ def test_new_reports_a_clear_error_when_dir_is_an_existing_file(api, git_ops, tm
     assert git_ops["clone"] == []
 
 
-def test_push_writes_a_minimal_manifest_when_the_folder_has_none(api, git_ops, tmp_path):
+def test_import_writes_a_minimal_manifest_when_the_folder_has_none(api, git_ops, tmp_path):
     from harumi.config import save_git_token
 
     save_git_token("gitea-token", username="dev@harumi.test")
@@ -848,7 +848,7 @@ def test_push_writes_a_minimal_manifest_when_the_folder_has_none(api, git_ops, t
     api.route("POST", "/api/projects", {"id": "proj-push", "name": "myfolder", "notebook_ids": []})
     _route_project_repo(api, "proj-push", "myfolder")
 
-    result = runner.invoke(cli.app, ["push", str(folder)])
+    result = runner.invoke(cli.app, ["import", str(folder)])
 
     assert result.exit_code == 0, result.output
     assert "or_python_small" in (folder / "harumi.toml").read_text()
@@ -856,7 +856,7 @@ def test_push_writes_a_minimal_manifest_when_the_folder_has_none(api, git_ops, t
     assert (folder / ".harumi" / "config.json").exists()
 
 
-def test_push_never_overwrites_an_existing_manifest(api, git_ops, tmp_path):
+def test_import_never_overwrites_an_existing_manifest(api, git_ops, tmp_path):
     from harumi.config import save_git_token
 
     save_git_token("gitea-token", username="dev@harumi.test")
@@ -866,7 +866,7 @@ def test_push_never_overwrites_an_existing_manifest(api, git_ops, tmp_path):
     api.route("POST", "/api/projects", {"id": "proj-push", "name": "myfolder", "notebook_ids": []})
     _route_project_repo(api, "proj-push", "myfolder")
 
-    result = runner.invoke(cli.app, ["push", str(folder)])
+    result = runner.invoke(cli.app, ["import", str(folder)])
 
     assert result.exit_code == 0, result.output
     assert "python custom.py" in (folder / "harumi.toml").read_text()
@@ -1199,7 +1199,7 @@ def test_repo_commits_reports_empty_history(api):
     assert "No commits on 'main'." in result.output
 
 
-def test_repo_readiness_reports_ready(api):
+def test_check_reports_ready(api):
     api.route(
         "GET",
         "/api/projects/proj-1/readiness",
@@ -1211,14 +1211,14 @@ def test_repo_readiness_reports_ready(api):
         },
     )
 
-    result = runner.invoke(cli.app, ["repo", "readiness", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["check", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "is ready" in result.output
     assert "repo" in result.output
 
 
-def test_repo_readiness_reports_not_ready_and_forwards_ref(api):
+def test_check_reports_not_ready_and_forwards_ref(api):
     api.route(
         "GET",
         "/api/projects/proj-1/readiness",
@@ -1233,7 +1233,7 @@ def test_repo_readiness_reports_not_ready_and_forwards_ref(api):
     )
 
     result = runner.invoke(
-        cli.app, ["repo", "readiness", "--ref", "dev", "--project", "proj-1"]
+        cli.app, ["check", "--ref", "dev", "--project", "proj-1"]
     )
 
     assert result.exit_code == 0, result.output
@@ -1529,7 +1529,7 @@ def test_schedules_add_forwards_optional_overrides(api):
 
 def test_schedules_remove_aborts_without_confirmation(api):
     result = runner.invoke(
-        cli.app, ["schedules", "remove", "sched-1", "--project", "proj-1"], input="n\n"
+        cli.app, ["schedules", "rm", "sched-1", "--project", "proj-1"], input="n\n"
     )
 
     assert result.exit_code == 0, result.output
@@ -1541,7 +1541,7 @@ def test_schedules_remove_deletes_when_confirmed(api):
     api.route("DELETE", "/api/projects/proj-1/schedules/sched-1", SCHEDULE)
 
     result = runner.invoke(
-        cli.app, ["schedules", "remove", "sched-1", "--project", "proj-1", "--yes"]
+        cli.app, ["schedules", "rm", "sched-1", "--project", "proj-1", "--yes"]
     )
 
     assert result.exit_code == 0, result.output
@@ -1728,7 +1728,7 @@ def test_share_update_with_no_flags_fails_without_a_request(api):
 
 def test_share_remove_aborts_without_confirmation(api):
     result = runner.invoke(
-        cli.app, ["share", "remove", "link-1", "--project", "proj-1"], input="n\n"
+        cli.app, ["share", "rm", "link-1", "--project", "proj-1"], input="n\n"
     )
 
     assert result.exit_code == 0, result.output
@@ -1740,7 +1740,7 @@ def test_share_remove_deletes_when_confirmed(api):
     api.route("DELETE", "/api/projects/proj-1/share-links/link-1", None, status=204)
 
     result = runner.invoke(
-        cli.app, ["share", "remove", "link-1", "--project", "proj-1", "--yes"]
+        cli.app, ["share", "rm", "link-1", "--project", "proj-1", "--yes"]
     )
 
     assert result.exit_code == 0, result.output
@@ -1760,14 +1760,14 @@ def test_share_rotate_mints_a_new_token(api):
     assert "tok-new456" in result.output
 
 
-def test_share_set_password_prompts_and_never_echoes_it(api):
+def test_share_update_password_prompts_and_never_echoes_it(api):
     api.route(
         "PUT", "/api/projects/proj-1/share-links/link-1/password", {**SHARE_LINK, "password_set": True}
     )
 
     result = runner.invoke(
         cli.app,
-        ["share", "set-password", "link-1", "--project", "proj-1"],
+        ["share", "update", "link-1", "--password", "--project", "proj-1"],
         input="correcthorse\n",
     )
 
@@ -1777,11 +1777,11 @@ def test_share_set_password_prompts_and_never_echoes_it(api):
     assert body == {"password": "correcthorse"}
 
 
-def test_share_rm_password_removes_it(api):
+def test_share_update_no_password_removes_it(api):
     api.route("DELETE", "/api/projects/proj-1/share-links/link-1/password", SHARE_LINK)
 
     result = runner.invoke(
-        cli.app, ["share", "rm-password", "link-1", "--project", "proj-1"]
+        cli.app, ["share", "update", "link-1", "--no-password", "--project", "proj-1"]
     )
 
     assert result.exit_code == 0, result.output
@@ -2759,14 +2759,142 @@ def test_memories_rm_surfaces_a_404_as_a_clean_error(api):
 # ---------------------------------------------------------------------------
 
 
-def test_skills_points_at_the_repo_and_makes_no_api_call(api):
+LIBRARY_SKILL = """---
+name: Scheduling modeling
+description: Model rosters.
+category: modeling
+tags: scheduling
+version: 3
+source: someone/else
+---
+
+# Body
+"""
+
+
+def _route_library(api):
+    summary = {
+        "slug": "scheduling-modeling",
+        "name": "Scheduling modeling",
+        "description": "Model rosters.",
+        "category": "modeling",
+        "tags": ["scheduling"],
+        "version": 3,
+    }
+    api.route("GET", "/api/skill-library", {"skills": [summary, {**summary, "slug": "vrp-modeling", "name": "VRP", "description": "Routes.", "category": "debugging", "tags": ["vrp"]}]})
+    api.route("GET", "/api/skill-library/scheduling-modeling", {**summary, "content": LIBRARY_SKILL})
+
+
+def test_skills_without_a_subcommand_shows_help_and_makes_no_api_call(api):
     result = runner.invoke(cli.app, ["skills"])
 
-    assert result.exit_code == 0, result.output
-    assert "harumi repo" in result.output
-    assert "skills/" in result.output
-    assert "SKILL.md" in result.output
+    assert "library" in result.output
+    assert "add" in result.output
     assert api.requests == []
+
+
+def test_skills_library_lists_presets(api):
+    _route_library(api)
+
+    result = runner.invoke(cli.app, ["skills", "library"])
+
+    assert result.exit_code == 0, result.output
+    assert "scheduling-modeling" in result.output
+    assert "vrp-modeling" in result.output
+    assert api.paths() == ["/api/skill-library"]
+
+
+def test_skills_library_filters_by_category_and_query(api):
+    _route_library(api)
+
+    by_category = runner.invoke(cli.app, ["skills", "library", "--category", "debugging"])
+    by_query = runner.invoke(cli.app, ["skills", "library", "--query", "roster"])
+
+    assert "vrp-modeling" in by_category.output
+    assert "scheduling-modeling" not in by_category.output
+    assert "scheduling-modeling" in by_query.output
+    assert "vrp-modeling" not in by_query.output
+
+
+def test_skills_add_writes_the_preset_with_provenance(api, bound_dir):
+    _route_library(api)
+
+    result = runner.invoke(cli.app, ["skills", "add", "scheduling-modeling"])
+
+    assert result.exit_code == 0, result.output
+    written = (bound_dir / "skills" / "scheduling-modeling" / "SKILL.md").read_text()
+    assert "source: harumi/scheduling-modeling" in written
+    assert "version: 3" in written
+    # The preset's own `source:` is replaced, not duplicated, and the body is untouched.
+    assert "someone/else" not in written
+    assert written.count("source:") == 1
+    assert written.endswith("# Body\n")
+    assert "git push harumi" in result.output
+
+
+def test_skills_add_refuses_to_overwrite_without_force(api, bound_dir):
+    _route_library(api)
+    runner.invoke(cli.app, ["skills", "add", "scheduling-modeling"])
+
+    again = runner.invoke(cli.app, ["skills", "add", "scheduling-modeling"])
+    forced = runner.invoke(cli.app, ["skills", "add", "scheduling-modeling", "--force"])
+
+    assert again.exit_code == 1
+    assert "already installed" in again.output
+    assert forced.exit_code == 0, forced.output
+
+
+def test_skills_add_does_not_clobber_a_users_own_skill_of_the_same_name(api, bound_dir):
+    _route_library(api)
+    mine = bound_dir / "skills" / "scheduling-modeling" / "SKILL.md"
+    mine.parent.mkdir(parents=True)
+    mine.write_text("---\nname: mine\n---\nmy own\n")
+
+    result = runner.invoke(cli.app, ["skills", "add", "scheduling-modeling"])
+
+    assert result.exit_code == 1
+    assert "not the library" in result.output
+    assert mine.read_text().endswith("my own\n")
+    # Refused before asking the API for anything.
+    assert api.requests == []
+
+
+def test_skills_add_outside_a_clone_is_a_clean_error(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["skills", "add", "scheduling-modeling"])
+
+    assert result.exit_code == 1
+    assert "harumi clone" in result.output
+    assert api.requests == []
+
+
+def test_skills_add_rejects_a_slug_with_a_path_separator(api, bound_dir):
+    result = runner.invoke(cli.app, ["skills", "add", "../escape"])
+
+    assert result.exit_code == 1
+    assert api.requests == []
+    assert not (bound_dir / "skills").exists()
+
+
+def test_skills_add_unknown_slug_is_a_clean_error(api, bound_dir):
+    api.route("GET", "/api/skill-library/nope", {"detail": "Unknown skill 'nope'"}, status=404)
+
+    result = runner.invoke(cli.app, ["skills", "add", "nope"])
+
+    assert result.exit_code == 1
+    assert "Error" in result.output
+    assert not (bound_dir / "skills").exists()
+
+
+def test_agent_skills_install_dry_run_shows_source_and_destination(tmp_path):
+    result = runner.invoke(
+        cli.app, ["agent-skills", "install", "--project", "--dry-run"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "->" in result.output
+    assert "harumi-cli" in result.output
 
 
 @pytest.mark.parametrize("content", ["", "   ", "x" * 4001])
@@ -2808,3 +2936,211 @@ def test_memories_add_accepts_content_at_the_limit(api):
     )
 
     assert result.exit_code == 0, result.output
+
+
+# ---------------------------------------------------------------------------
+# 0.11: renamed commands and the deprecated names that still work
+# ---------------------------------------------------------------------------
+
+
+def test_deprecated_names_are_hidden_from_help_and_the_surface():
+    import re
+
+    from scripts.emit_cli_surface import build_surface
+
+    help_text = runner.invoke(cli.app, ["--help"]).output
+    assert re.search(r"│ (push|repo|outputs|config|skill)\s", help_text) is None
+    assert re.search(r"│ import\s", help_text)
+
+    paths = {command["path"] for command in build_surface()["commands"]}
+    assert "push" not in paths and "outputs" not in paths
+    assert not any(path.startswith(("repo ", "config ", "skill ")) for path in paths)
+    assert not any(path.endswith((" remove", " delete", " set-password", " rm-password", " current")) for path in paths)
+
+
+@pytest.mark.parametrize(
+    "argv, method, route, use",
+    [
+        (["projects", "delete", "p1", "--yes"], "DELETE", "/api/projects/p1", "harumi projects rm"),
+        (["share", "remove", "link-1", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/link-1", "harumi share rm"),
+        (["schedules", "remove", "sched-1", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/schedules/sched-1", "harumi schedules rm"),
+        (["datasources", "remove", "sales_db", "--yes", "-p", "proj-1"], "DELETE", "/api/datasources/proj-1/sales_db", "harumi datasources rm"),
+        (["org", "delete", "org-1", "--yes"], "DELETE", "/api/users/organizations/org-1", "harumi org rm"),
+        (["share", "rm-password", "link-1", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/link-1/password", "share update <LINK_ID> --no-password"),
+        (["repo", "ls", "-p", "proj-1"], "GET", "/api/projects/proj-1/repo/files", "git ls-files"),
+    ],
+)
+def test_a_deprecated_name_still_runs_and_names_its_replacement(api, argv, method, route, use):
+    api.route(method, route, [] if argv[0] == "repo" else {**SHARE_LINK, "id": "x", "name": "x"})
+
+    result = runner.invoke(cli.app, argv)
+
+    assert "deprecated" in result.output
+    assert use in result.output
+    assert "removed in 0.12.0" in result.output
+    # It really ran: the request the new name makes was sent.
+    assert api.requests and api.requests[-1].url.path == route
+
+
+def test_org_remove_is_now_org_rm_member_and_org_delete_is_org_rm(api):
+    api.route("DELETE", "/api/users/organizations/org-1", None)
+
+    removed = runner.invoke(cli.app, ["org", "rm", "org-1", "--yes"])
+    stale = runner.invoke(cli.app, ["org", "rm", "org-1", "user-1", "--yes"])
+
+    assert removed.exit_code == 0, removed.output
+    assert "deprecated" not in removed.output
+    # `org rm` takes one argument; the old two-argument form is a usage error, not a silent org delete.
+    assert stale.exit_code != 0
+    assert api.paths() == ["/api/users/organizations/org-1"]
+
+
+def test_org_use_persists_the_org_and_the_old_config_name_still_works():
+    from harumi.config import Config
+
+    new = runner.invoke(cli.app, ["org", "use", "org-9"])
+    assert new.exit_code == 0, new.output
+    assert Config.load().org_id == "org-9"
+
+    old = runner.invoke(cli.app, ["config", "set-org", "org-10"])
+    assert old.exit_code == 0, old.output
+    assert "harumi org use" in old.output
+    assert Config.load().org_id == "org-10"
+
+
+def test_env_current_and_skill_path_and_profile_show_are_deprecated_not_gone(api):
+    api.route("GET", "/api/users/profile", {"id": "u1", "email": "dev@harumi.test"})
+
+    assert "harumi env list" in runner.invoke(cli.app, ["env", "current"]).output
+    assert "agent-skills install --dry-run" in runner.invoke(cli.app, ["skill", "path"]).output
+    shown = runner.invoke(cli.app, ["profile", "show"])
+    assert "harumi whoami" in shown.output
+    assert "dev@harumi.test" in shown.output
+
+
+def test_whoami_shows_the_profile_environment_and_org(api):
+    api.route(
+        "GET",
+        "/api/users/profile",
+        {"id": "u1", "email": "dev@harumi.test", "first_name": "Ada", "last_name": "Lovelace", "bio": "Math"},
+    )
+
+    result = runner.invoke(cli.app, ["whoami", "--org", "org-7"])
+
+    assert result.exit_code == 0, result.output
+    for expected in ("dev@harumi.test", "u1", "Ada Lovelace", "Math", "org-7", "env:"):
+        assert expected in result.output
+
+
+def test_new_no_clone_creates_only_and_points_at_clone(api, git_ops, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    api.route("POST", "/api/projects", {"id": "proj-9", "name": "Widget", "notebook_ids": []})
+    _route_project_repo(api, "proj-9", "widget")
+
+    result = runner.invoke(cli.app, ["new", "Widget", "--no-clone"])
+    with_dir = runner.invoke(cli.app, ["new", "Widget", "--no-clone", "--dir", str(tmp_path / "x")])
+
+    assert result.exit_code == 0, result.output
+    assert "harumi clone proj-9" in result.output
+    assert git_ops["clone"] == []
+    assert with_dir.exit_code == 1
+    assert "--dir" in with_dir.output
+
+
+def test_projects_create_is_a_deprecated_new_no_clone(api, git_ops, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    api.route("POST", "/api/projects", {"id": "proj-9", "name": "Widget", "notebook_ids": []})
+    _route_project_repo(api, "proj-9", "widget")
+
+    result = runner.invoke(cli.app, ["projects", "create", "Widget"])
+
+    assert result.exit_code == 0, result.output
+    assert "harumi new <NAME> --no-clone" in result.output
+    assert "harumi clone proj-9" in result.output
+    assert git_ops["clone"] == []
+
+
+def test_push_is_a_deprecated_import(api, git_ops, tmp_path):
+    from harumi.config import save_git_token
+
+    save_git_token("gitea-token", username="dev@harumi.test")
+    folder = tmp_path / "solver"
+    folder.mkdir()
+    (folder / "main.py").write_text("print(1)\n")
+    api.route(
+        "POST",
+        "/api/projects",
+        {"id": "proj-1", "name": "solver", "notebook_ids": [], "repo": {"owner": "a", "name": "s", "clone_url": "https://git.harumi.test/a/s.git", "default_branch": "main"}},
+    )
+    _route_project_repo(api, "proj-1", "solver")
+
+    result = runner.invoke(cli.app, ["push", str(folder)])
+
+    assert "harumi import" in result.output
+    assert git_ops["push_folder"], result.output
+
+
+def test_runs_download_defaults_to_the_latest_run(api, tmp_path, monkeypatch):
+    downloaded = {}
+
+    def fake_download(_api, project_id, run, dest):
+        downloaded.update(project=project_id, run=run.id, dest=dest)
+        return dest / f"{run.id}.zip"
+
+    monkeypatch.setattr("harumi.execution.download_run_output", fake_download)
+    api.route("GET", "/api/projects/proj-1/runs", {"runs": [{**RUN, "id": "newest"}, {**RUN, "id": "older"}]})
+
+    result = runner.invoke(cli.app, ["runs", "download", "--project", "proj-1", "-o", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert downloaded == {"project": "proj-1", "run": "newest", "dest": tmp_path}
+    assert "newest.zip" in result.output
+
+
+def test_runs_download_takes_an_explicit_run_id(api, tmp_path, monkeypatch):
+    monkeypatch.setattr("harumi.execution.download_run_output", lambda _a, _p, run, dest: dest / f"{run.id}.zip")
+    api.route("GET", "/api/projects/proj-1/runs/run-1", RUN)
+
+    result = runner.invoke(cli.app, ["runs", "download", "run-1", "--project", "proj-1", "-o", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert api.paths() == ["/api/projects/proj-1/runs/run-1"]
+
+
+def test_runs_download_with_no_runs_is_a_clean_error(api):
+    api.route("GET", "/api/projects/proj-1/runs", {"runs": []})
+
+    result = runner.invoke(cli.app, ["runs", "download", "--project", "proj-1"])
+
+    assert result.exit_code == 1
+    assert "no runs" in result.output
+
+
+def test_share_update_password_can_combine_with_other_flags_and_alone_needs_no_other_field(api):
+    api.route("PUT", "/api/projects/proj-1/share-links/link-1/password", {**SHARE_LINK, "password_set": True})
+    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", {**SHARE_LINK, "label": "renamed"})
+
+    alone = runner.invoke(
+        cli.app, ["share", "update", "link-1", "--password", "--project", "proj-1"], input="correcthorse\n"
+    )
+    both = runner.invoke(
+        cli.app,
+        ["share", "update", "link-1", "--label", "renamed", "--password", "--project", "proj-1"],
+        input="correcthorse\n",
+    )
+    nothing = runner.invoke(cli.app, ["share", "update", "link-1", "--project", "proj-1"])
+
+    assert alone.exit_code == 0, alone.output
+    assert both.exit_code == 0, both.output
+    assert "correcthorse" not in alone.output + both.output
+    assert [r.method for r in api.requests] == ["PUT", "PUT", "PATCH"]
+    assert nothing.exit_code == 1
+    assert "--password" in nothing.output
+
+
+def test_run_output_dir_is_deprecated_but_still_accepted(api, git, bound_dir):
+    api.route("POST", "/api/projects/proj-bound/execute", {"execution_log_id": "e1", "project_run_id": "run-1", "status": "queued"})
+
+    result = runner.invoke(cli.app, ["run", "--branch", "main", "-o", "out"])
+
+    assert "harumi runs download" in result.output

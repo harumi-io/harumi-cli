@@ -354,7 +354,7 @@ def push_folder(
 ) -> str:
     """Commit everything in ``folder`` and push it to ``remote/branch``.
 
-    Used by ``harumi push`` to seed a freshly-provisioned project repo from a
+    Used by ``harumi import`` to seed a freshly-provisioned project repo from a
     local folder. Initializes a git repo in-place if the folder is
     not already one, force-updates the target branch to a single commit of the
     current tree, and pushes. Returns the commit SHA.

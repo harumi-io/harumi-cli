@@ -17,7 +17,7 @@ description: >-
 
 Gets the `harumi` CLI installed, authenticated, and pointed at the right backend environment. For using the CLI once it works, switch to the `harumi-cli` skill.
 
-The CLI is the `harumi` package on PyPI (`pip install harumi`). It installs one console script, `harumi`, plus the importable `harumi` Python package. Requires **Python ≥ 3.9** and **git** on PATH (git is used for `harumi run`'s scratch-branch push and `harumi push`/`new`/`clone`).
+The CLI is the `harumi` package on PyPI (`pip install harumi`). It installs one console script, `harumi`, plus the importable `harumi` Python package. Requires **Python ≥ 3.9** and **git** on PATH (git is used for `harumi run`'s scratch-branch push and `harumi import`/`new`/`clone`).
 
 ## Order of operations
 
@@ -91,12 +91,12 @@ Prefer `python3 -m pip ...` over bare `pip` whenever there's doubt about which `
 
 If the install succeeds but `harumi --version` still says command not found, the script directory isn't on PATH. See [Install troubleshooting](#install-troubleshooting).
 
-**Once installed, seed this skill pair onto the user's machine too** — every install method above (pipx, uv, pip) ships `harumi skill install`, which copies both `harumi-cli-setup` and `harumi-cli` into whichever coding agents it detects (`~/.cursor/skills/`, `~/.claude/skills/`, `~/.codex/skills/`, or `--project` for the repo the user is in):
+**Once installed, seed this skill pair onto the user's machine too** — every install method above (pipx, uv, pip) ships `harumi agent-skills install`, which copies both `harumi-cli-setup` and `harumi-cli` into whichever coding agents it detects (`~/.cursor/skills/`, `~/.claude/skills/`, `~/.codex/skills/`, or `--project` for the repo the user is in):
 
 ```bash
-harumi skill install            # detected agents, global scope
-harumi skill install --project  # this repo only
-harumi skill path                # print the bundled skill dir to copy manually
+harumi agent-skills install            # detected agents, global scope
+harumi agent-skills install --project  # this repo only
+harumi agent-skills install --dry-run  # print each source -> destination without writing
 ```
 
 ## 2. Pick the environment
@@ -111,7 +111,6 @@ The CLI ships two built-in environments. Each is backed by its **own Supabase**,
 ```bash
 harumi env list            # selectable envs, active one flagged (staging hidden by default)
 harumi env list --all      # include internal/VPN-only environments (same as HARUMI_INTERNAL=1)
-harumi env current         # active env + its endpoints
 harumi env use staging     # persist as the default
 harumi --env staging login # or override for a single command
 ```
@@ -149,18 +148,17 @@ If the user belongs to exactly one org, `harumi login` stores it automatically a
 
 ```bash
 harumi org list                    # see the orgs and your role in each
-harumi config set-org <ORG_ID>     # persist it for the active environment
+harumi org use <ORG_ID>            # persist it for the active environment
 harumi --help                      # (org can also be overridden per-command with --org)
 ```
 
-The resolved org is sent as the `X-Organization` header on every request, and is used as the owning workspace for projects created by `projects create` / `import`. It is stored **per environment**. To create a project in your personal workspace despite a configured org, pass `--personal`.
+The resolved org is sent as the `X-Organization` header on every request, and is used as the owning workspace for projects created by `new` / `import`. It is stored **per environment**. To create a project in your personal workspace despite a configured org, pass `--personal`.
 
 ## 5. Verify
 
 ```bash
 harumi --version    # prints `harumi <x.y.z>` — not another tool (see step 1)
-harumi whoami       # session is valid — prints email, user id, active environment
-harumi env current  # confirms which backend you're talking to
+harumi whoami       # session is valid — prints email, user id, active environment and org
 harumi specs        # confirms real API reachability + lists kernel sizes
 harumi projects list
 ```
@@ -169,7 +167,7 @@ harumi projects list
 
 `harumi whoami` failing with `Not logged in. Run harumi login first.` means step 3 didn't complete (or the session expired). `harumi specs` failing with a network/timeout error on a `*.dev.harumi.io` host means the VPN isn't connected.
 
-Setup is done once `whoami` and `specs` both succeed. Hand off to the `harumi-cli` skill for the actual work — the next step there is usually one of the three onboarding verbs (`harumi new`, `harumi push`, or `harumi clone <PROJECT_ID>`), or `harumi start` if it's unclear which applies.
+Setup is done once `whoami` and `specs` both succeed. Hand off to the `harumi-cli` skill for the actual work — the next step there is usually one of the three onboarding verbs (`harumi new`, `harumi import`, or `harumi clone <PROJECT_ID>`), or `harumi start` if it's unclear which applies.
 
 ## Where things are stored
 
@@ -231,15 +229,15 @@ Tell the user which of these you're doing rather than silently working around it
 | Permission denied writing to site-packages | Installing into system Python | Use pipx/uv or a venv — do **not** `sudo pip install` |
 | Installed fine, but `import harumi` fails in the user's script | Installed with pipx/uv, which isolate the CLI from other interpreters | That's expected. For library use, `pip install harumi` into the venv running the code — the two installs can coexist |
 | `pipx: command not found` | pipx not installed | `brew install pipx` (macOS), `python3 -m pip install --user pipx`, or choose another method from step 1 |
-| `git not found` on `harumi run` / `harumi push`/`new`/`clone` | git missing from PATH | Install git |
-| `Not logged in. Run harumi login first.` | No session, or it expired, for the **active** environment | `harumi login` (check `harumi env current` — you may be logged in on the other env) |
+| `git not found` on `harumi run` / `harumi import`/`new`/`clone` | git missing from PATH | Install git |
+| `Not logged in. Run harumi login first.` | No session, or it expired, for the **active** environment | `harumi login` (check `harumi whoami` — you may be logged in on the other env) |
 | `harumi-api returned HTTP 422: ... Signups not allowed for otp` | First login for this email | `harumi login --signup` |
 | `Could not provision a Gitea token: ...` (yellow, non-fatal) | Harumi Git unreachable or not configured on that backend | Non-git commands still work; re-run `harumi login` once reachable |
 | `No Gitea token found. Run harumi login` | `git_token` missing from credentials | `harumi login` again |
 | `No Gitea username on file` | Token saved by an older CLI version that predates the field | `harumi login` again to re-provision |
 | Timeouts / connection refused on `api.dev.harumi.io` or `git.dev.harumi.io` | Staging endpoints are internal ALBs | Connect to the VPN, or switch back with `harumi env use production` |
 | `Unknown environment 'x'. Known environments: production, staging.` | Typo in `--env` / `HARUMI_ENV` / `env use` | Use one of the two names |
-| `You belong to multiple organizations.` | Ambiguous org after login | `harumi config set-org <ORG_ID>` (see step 4) |
+| `You belong to multiple organizations.` | Ambiguous org after login | `harumi org use <ORG_ID>` (see step 4) |
 
 ## Notes for this skill
 

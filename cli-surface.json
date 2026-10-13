@@ -1,10 +1,120 @@
 {
-  "cli_version": "0.10.0",
+  "cli_version": "0.11.0",
   "commands": [
+    {
+      "path": "agent-skills install",
+      "help": "Copy the harumi-cli and harumi-cli-setup skills onto this machine.",
+      "params": [
+        {
+          "opts": [
+            "--agent",
+            "-a"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": true,
+          "default": null,
+          "help": "Target agent(s): cursor, claude-code, codex, universal. Default: auto-detect."
+        },
+        {
+          "opts": [
+            "--project"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Write to ./.agents/skills instead of a global agent directory."
+        },
+        {
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Print each source -> destination without writing anything."
+        },
+        {
+          "opts": [
+            "--force"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Overwrite a destination even if it doesn't look like a skill."
+        }
+      ]
+    },
     {
       "path": "blueprints",
       "help": "List project blueprints.",
       "params": [
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "check",
+      "help": "Report everything blocking this project from running, before you run it.",
+      "params": [
+        {
+          "opts": [
+            "--ref"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Branch/commit to check (defaults to the default branch)."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
         {
           "opts": [
             "--api-url"
@@ -161,24 +271,6 @@
           "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "config set-org",
-      "help": "Persist the organization id sent as X-Organization on every request.",
-      "params": [
-        {
-          "opts": [
-            "org_id"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Organization id to persist as X-Organization."
         }
       ]
     },
@@ -692,7 +784,7 @@
       ]
     },
     {
-      "path": "datasources remove",
+      "path": "datasources rm",
       "help": "Delete a datasource (removes the DB row and its stored credentials).",
       "params": [
         {
@@ -1159,11 +1251,6 @@
       ]
     },
     {
-      "path": "env current",
-      "help": "Show the active environment and its endpoints.",
-      "params": []
-    },
-    {
       "path": "env list",
       "help": "List selectable environments (the active one is flagged).",
       "params": [
@@ -1431,6 +1518,110 @@
           "multiple": false,
           "default": null,
           "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "import",
+      "help": "Turn an existing local folder of code into a new Harumi project.",
+      "params": [
+        {
+          "opts": [
+            "path"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "path",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Folder of existing code to turn into a new project. Defaults to the current directory."
+        },
+        {
+          "opts": [
+            "--project-name"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Name for the new project (defaults to the folder name)."
+        },
+        {
+          "opts": [
+            "--from-git"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Also clone this git URL (e.g. an old GitHub repo) flat into the folder before pushing."
+        },
+        {
+          "opts": [
+            "--bind"
+          ],
+          "secondary_opts": [
+            "--no-bind"
+          ],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": true,
+          "help": "Bind the folder to the new project afterward (default: yes)."
+        },
+        {
+          "opts": [
+            "--personal"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Create in your personal workspace, ignoring the configured org."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--git-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the Harumi Git base URL."
         },
         {
           "opts": [
@@ -1908,6 +2099,18 @@
         },
         {
           "opts": [
+            "--no-clone"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Only create the project: don't clone or bind anything locally (for scripts)."
+        },
+        {
+          "opts": [
             "--api-url"
           ],
           "secondary_opts": [],
@@ -1959,49 +2162,6 @@
           "multiple": false,
           "default": null,
           "help": "Organization name."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        }
-      ]
-    },
-    {
-      "path": "org delete",
-      "help": "Delete an organization.",
-      "params": [
-        {
-          "opts": [
-            "organization_id"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Organization id."
-        },
-        {
-          "opts": [
-            "--yes",
-            "-y"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": false,
-          "help": "Skip the confirmation prompt."
         },
         {
           "opts": [
@@ -2120,7 +2280,92 @@
       ]
     },
     {
-      "path": "org remove",
+      "path": "org rename",
+      "help": "Rename an organization.",
+      "params": [
+        {
+          "opts": [
+            "organization_id"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Organization id."
+        },
+        {
+          "opts": [
+            "business_name"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "New organization name."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        }
+      ]
+    },
+    {
+      "path": "org rm",
+      "help": "Delete an organization.",
+      "params": [
+        {
+          "opts": [
+            "organization_id"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Organization id."
+        },
+        {
+          "opts": [
+            "--yes",
+            "-y"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Skip the confirmation prompt."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        }
+      ]
+    },
+    {
+      "path": "org rm-member",
       "help": "Remove a member from an organization.",
       "params": [
         {
@@ -2159,48 +2404,6 @@
           "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        }
-      ]
-    },
-    {
-      "path": "org rename",
-      "help": "Rename an organization.",
-      "params": [
-        {
-          "opts": [
-            "organization_id"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Organization id."
-        },
-        {
-          "opts": [
-            "business_name"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "New organization name."
         },
         {
           "opts": [
@@ -2271,82 +2474,20 @@
       ]
     },
     {
-      "path": "outputs",
-      "help": "List or download run outputs for a project.",
+      "path": "org use",
+      "help": "Persist the organization id sent as X-Organization on every request.",
       "params": [
         {
           "opts": [
-            "--project",
-            "-p"
+            "org_id"
           ],
           "secondary_opts": [],
-          "kind": "option",
+          "kind": "argument",
           "type": "str",
-          "required": false,
+          "required": true,
           "multiple": false,
           "default": null,
-          "help": "Project id (uses .harumi binding if omitted)."
-        },
-        {
-          "opts": [
-            "--latest"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": false,
-          "help": "Show only the most recent run."
-        },
-        {
-          "opts": [
-            "--download"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Download this run id's committed output."
-        },
-        {
-          "opts": [
-            "--output-dir",
-            "-o"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "path",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Directory to download into. Default: current directory."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Organization id to persist as X-Organization."
         }
       ]
     },
@@ -2389,181 +2530,6 @@
           "multiple": false,
           "default": null,
           "help": "New bio text."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "profile show",
-      "help": "Show your account profile.",
-      "params": [
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "projects create",
-      "help": "Create a new Harumi project.",
-      "params": [
-        {
-          "opts": [
-            "name"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Project name."
-        },
-        {
-          "opts": [
-            "--customer-id"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Organization id to create the project under. Defaults to the configured org."
-        },
-        {
-          "opts": [
-            "--personal"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": false,
-          "help": "Create in your personal workspace, ignoring the configured org."
-        },
-        {
-          "opts": [
-            "--blueprint"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Blueprint slug to seed the project from (see `harumi blueprints`, optional)."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--git-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the Harumi Git base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "projects delete",
-      "help": "Delete a project.",
-      "params": [
-        {
-          "opts": [
-            "project_id"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Project id."
-        },
-        {
-          "opts": [
-            "--yes",
-            "-y"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": false,
-          "help": "Skip the confirmation prompt."
         },
         {
           "opts": [
@@ -2718,116 +2684,12 @@
       ]
     },
     {
-      "path": "push",
-      "help": "Turn an existing local folder of code into a new Harumi project.",
+      "path": "projects rm",
+      "help": "Delete a project.",
       "params": [
         {
           "opts": [
-            "path"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "path",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Folder of existing code to turn into a new project. Defaults to the current directory."
-        },
-        {
-          "opts": [
-            "--project-name"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Name for the new project (defaults to the folder name)."
-        },
-        {
-          "opts": [
-            "--from-git"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Also clone this git URL (e.g. an old GitHub repo) flat into the folder before pushing."
-        },
-        {
-          "opts": [
-            "--bind"
-          ],
-          "secondary_opts": [
-            "--no-bind"
-          ],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": true,
-          "help": "Bind the folder to the new project afterward (default: yes)."
-        },
-        {
-          "opts": [
-            "--personal"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": false,
-          "help": "Create in your personal workspace, ignoring the configured org."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--git-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the Harumi Git base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "repo branch-create",
-      "help": "Create a new version (git branch).",
-      "params": [
-        {
-          "opts": [
-            "name"
+            "project_id"
           ],
           "secondary_opts": [],
           "kind": "argument",
@@ -2835,74 +2697,7 @@
           "required": true,
           "multiple": false,
           "default": null,
-          "help": "New branch (version) name."
-        },
-        {
-          "opts": [
-            "--from"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Base branch (defaults to the live branch)."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "repo branch-rm",
-      "help": "Delete a version (git branch).",
-      "params": [
-        {
-          "opts": [
-            "name"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Branch (version) name."
+          "help": "Project id."
         },
         {
           "opts": [
@@ -2916,846 +2711,6 @@
           "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "repo branches",
-      "help": "List versions (git branches).",
-      "params": [
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "repo cat",
-      "help": "Print (or save) a file's content.",
-      "params": [
-        {
-          "opts": [
-            "path"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "File path within the repo."
-        },
-        {
-          "opts": [
-            "--ref"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Branch/commit to read from."
-        },
-        {
-          "opts": [
-            "--output",
-            "-o"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "path",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Write to this local path instead of stdout."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "repo commits",
-      "help": "Show recent commit history.",
-      "params": [
-        {
-          "opts": [
-            "path"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "File or folder to filter history to (default: the whole branch)."
-        },
-        {
-          "opts": [
-            "--ref"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Branch/commit to read history on (defaults to the default branch)."
-        },
-        {
-          "opts": [
-            "--page"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "int",
-          "required": false,
-          "multiple": false,
-          "default": 1,
-          "help": "Page number, 1-indexed."
-        },
-        {
-          "opts": [
-            "--per-page"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "int",
-          "required": false,
-          "multiple": false,
-          "default": 30,
-          "help": "Commits per page (max 100)."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "repo dir",
-      "help": "One folder level of the repo (GitHub-style browser).",
-      "params": [
-        {
-          "opts": [
-            "path"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": "",
-          "help": "Folder within the repo (default: repo root)."
-        },
-        {
-          "opts": [
-            "--ref"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Branch/commit to browse (defaults to the default branch)."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "repo download",
-      "help": "Download the repo (or a folder within it) as a zip.",
-      "params": [
-        {
-          "opts": [
-            "--output",
-            "-o"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "path",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Local zip path to write."
-        },
-        {
-          "opts": [
-            "--path"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": "",
-          "help": "Folder within the repo to download (default: whole repo)."
-        },
-        {
-          "opts": [
-            "--ref"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Branch/commit to download from."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "repo ls",
-      "help": "List all files in the repo (flat, recursive).",
-      "params": [
-        {
-          "opts": [
-            "--ref"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Branch/commit to list (defaults to the default branch)."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "repo mv",
-      "help": "Rename/move a file, or every file under a folder, as one commit.",
-      "params": [
-        {
-          "opts": [
-            "from_path"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Source path (file or folder) within the repo."
-        },
-        {
-          "opts": [
-            "to_path"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Destination path within the repo."
-        },
-        {
-          "opts": [
-            "--message",
-            "-m"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Commit message."
-        },
-        {
-          "opts": [
-            "--branch"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Target branch (defaults to the default branch)."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "repo promote",
-      "help": "Promote a version into the live branch via a merge commit.",
-      "params": [
-        {
-          "opts": [
-            "name"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Version (branch) to promote into live."
-        },
-        {
-          "opts": [
-            "--title"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "PR/merge title."
-        },
-        {
-          "opts": [
-            "--delete-after"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": false,
-          "help": "Delete the version branch after a successful promote."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "repo put",
-      "help": "Create or update a file in the repo (create if absent, else update) as one commit.",
-      "params": [
-        {
-          "opts": [
-            "local_path"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "path",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Local file to upload."
-        },
-        {
-          "opts": [
-            "repo_path"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Destination path within the repo."
-        },
-        {
-          "opts": [
-            "--message",
-            "-m"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Commit message."
-        },
-        {
-          "opts": [
-            "--branch"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Target branch (defaults to the default branch)."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "repo readiness",
-      "help": "Report everything blocking this project from running, before you run it.",
-      "params": [
-        {
-          "opts": [
-            "--ref"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Branch/commit to check (defaults to the default branch)."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "repo rm",
-      "help": "Delete a file, or every file under a folder, as one commit.",
-      "params": [
-        {
-          "opts": [
-            "path"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "File or folder path within the repo."
-        },
-        {
-          "opts": [
-            "--message",
-            "-m"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Commit message."
-        },
-        {
-          "opts": [
-            "--branch"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Target branch (defaults to the default branch)."
-        },
-        {
-          "opts": [
-            "--yes",
-            "-y"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": false,
-          "help": "Skip the confirmation prompt."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
         },
         {
           "opts": [
@@ -3853,19 +2808,6 @@
         },
         {
           "opts": [
-            "--output-dir",
-            "-o"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "path",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Download output artifacts here (requires --watch)."
-        },
-        {
-          "opts": [
             "--api-url"
           ],
           "secondary_opts": [],
@@ -3917,6 +2859,74 @@
           "multiple": false,
           "default": null,
           "help": "Run id."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
+    },
+    {
+      "path": "runs download",
+      "help": "Download a run's committed output as a zip (the latest run when no id is given).",
+      "params": [
+        {
+          "opts": [
+            "run_id"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run id. Defaults to the project's latest run."
+        },
+        {
+          "opts": [
+            "--output-dir",
+            "-o"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "path",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Directory to download into. Default: current directory."
         },
         {
           "opts": [
@@ -4293,7 +3303,7 @@
       ]
     },
     {
-      "path": "schedules remove",
+      "path": "schedules rm",
       "help": "Delete a cron schedule.",
       "params": [
         {
@@ -4887,7 +3897,7 @@
       ]
     },
     {
-      "path": "share remove",
+      "path": "share rm",
       "help": "Permanently delete a share link.",
       "params": [
         {
@@ -4914,61 +3924,6 @@
           "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "share rm-password",
-      "help": "Remove a share link's password.",
-      "params": [
-        {
-          "opts": [
-            "link_id"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Share link id."
         },
         {
           "opts": [
@@ -5037,61 +3992,6 @@
           "multiple": false,
           "default": false,
           "help": "Skip the confirmation prompt."
-        },
-        {
-          "opts": [
-            "--project",
-            "-p"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the harumi-api base URL."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Override the organization sent as X-Organization."
-        }
-      ]
-    },
-    {
-      "path": "share set-password",
-      "help": "Set or change a share link's password (min 8 characters, prompted, hidden input).",
-      "params": [
-        {
-          "opts": [
-            "link_id"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Share link id."
         },
         {
           "opts": [
@@ -5232,6 +4132,20 @@
         },
         {
           "opts": [
+            "--password"
+          ],
+          "secondary_opts": [
+            "--no-password"
+          ],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "--password sets or changes the link's password (prompted, hidden, min 8 characters); --no-password removes it. Previously unlocked viewers must re-enter it."
+        },
+        {
+          "opts": [
             "--project",
             "-p"
           ],
@@ -5270,45 +4184,20 @@
       ]
     },
     {
-      "path": "skill install",
-      "help": "Copy the harumi-cli and harumi-cli-setup skills onto this machine.",
+      "path": "skills add",
+      "help": "Install a library preset into this project's clone as skills/<slug>/SKILL.md.",
       "params": [
         {
           "opts": [
-            "--agent",
-            "-a"
+            "slug"
           ],
           "secondary_opts": [],
-          "kind": "option",
+          "kind": "argument",
           "type": "str",
-          "required": false,
-          "multiple": true,
+          "required": true,
+          "multiple": false,
           "default": null,
-          "help": "Target agent(s): cursor, claude-code, codex, universal. Default: auto-detect."
-        },
-        {
-          "opts": [
-            "--project"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": false,
-          "help": "Write to ./.agents/skills instead of a global agent directory."
-        },
-        {
-          "opts": [
-            "--dry-run"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": false,
-          "help": "Print what would be written without writing it."
+          "help": "Preset slug (see `harumi skills library`)."
         },
         {
           "opts": [
@@ -5320,19 +4209,88 @@
           "required": false,
           "multiple": false,
           "default": false,
-          "help": "Overwrite a destination even if it doesn't look like a skill."
+          "help": "Overwrite skills/<slug>/SKILL.md even if it already exists."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
         }
       ]
     },
     {
-      "path": "skill path",
-      "help": "Print the local directory containing the bundled skills.",
-      "params": []
-    },
-    {
-      "path": "skills",
-      "help": "Explain how to edit a project's skills (they live in its git repo).",
-      "params": []
+      "path": "skills library",
+      "help": "List the preset skills you can install into a project with `harumi skills add`.",
+      "params": [
+        {
+          "opts": [
+            "--category"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Only presets in this category."
+        },
+        {
+          "opts": [
+            "--query",
+            "-q"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Only presets whose name, description or tags contain this text."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the harumi-api base URL."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Override the organization sent as X-Organization."
+        }
+      ]
     },
     {
       "path": "specs",
@@ -5405,8 +4363,27 @@
       ]
     },
     {
+      "path": "whats-new",
+      "help": "Show what changed in the installed version (or every version with --all).",
+      "params": [
+        {
+          "opts": [
+            "--all",
+            "-a"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Show every release's notes, newest first."
+        }
+      ]
+    },
+    {
       "path": "whoami",
-      "help": "Show the currently logged-in user.",
+      "help": "Show the logged-in user: profile, active environment and organization.",
       "params": [
         {
           "opts": [

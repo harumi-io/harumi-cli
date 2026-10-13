@@ -19,6 +19,11 @@ from typing import Optional
 
 PROJECT_SKILLS_DIR = ".agents/skills"
 
+# Where a project keeps its own skills inside its repo (what the project's
+# assistant loads). Not the same as PROJECT_SKILLS_DIR, which is an agent's
+# local skills folder.
+SKILLS_DIR = "skills"
+
 
 @dataclass(frozen=True)
 class Agent:
@@ -82,7 +87,7 @@ def agents_missing_skill() -> list[Agent]:
     """Detected agents (see `detect_agents`) that don't have the `harumi-cli`
     skill in their global skills directory yet.
 
-    Powers a first-run nudge toward `harumi skill install` (see
+    Powers a first-run nudge toward `harumi agent-skills install` (see
     `cli._print_skill_install_hint`). `pip`/`pipx`/`uv` have no post-install
     hook to seed the skill automatically during the install itself, so the
     CLI's own next bare invocation is the closest automatic moment — and it
@@ -142,3 +147,58 @@ def install(
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(skill_dir, dest)
     return written
+
+
+# ---------------------------------------------------------------------------
+# Library presets installed into a project (`harumi skills add`)
+# ---------------------------------------------------------------------------
+
+def library_source(slug: str) -> str:
+    """The `source:` value an installed library preset carries."""
+    return f"harumi/{slug}"
+
+
+def _frontmatter_lines(text: str) -> Optional[tuple[list[str], int]]:
+    """(frontmatter lines, index of the closing `---`) or None when there is none."""
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            return lines[1:i], i
+    return None
+
+
+def frontmatter_source(text: str) -> Optional[str]:
+    """The `source:` recorded in a SKILL.md's frontmatter, if any."""
+    parsed = _frontmatter_lines(text)
+    if parsed is None:
+        return None
+    for line in parsed[0]:
+        key, sep, value = line.partition(":")
+        if sep and key.strip().lower() == "source":
+            return value.strip().strip("'\"") or None
+    return None
+
+
+def with_install_provenance(content: str, slug: str, version: int) -> str:
+    """A preset's SKILL.md as it lands in a project: `source:` and `version:`
+    set in the frontmatter, replacing any the preset already had. The body is
+    untouched. Mirrors the platform's install (`withInstallProvenance` in
+    harumi-platform), so a skill installed from either side is identical.
+    Raises ValueError when the frontmatter is opened but never closed.
+    """
+    lines = content.split("\n")
+    provenance = [f"source: {library_source(slug)}", f"version: {version}"]
+    if lines[0].strip() != "---":
+        return "\n".join(["---", *provenance, "---", "", content])
+    parsed = _frontmatter_lines(content)
+    if parsed is None:
+        raise ValueError("SKILL.md frontmatter is never closed")
+    frontmatter, end = parsed
+    kept = [
+        line
+        for line in frontmatter
+        if line.partition(":")[0].strip().lower() not in {"source", "version"} or ":" not in line
+    ]
+    return "\n".join(["---", *kept, *provenance, *lines[end:]])

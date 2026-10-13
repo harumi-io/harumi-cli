@@ -110,3 +110,33 @@ def test_refuses_to_overwrite_non_skill_directory_without_force(tmp_path, monkey
     # --force overwrites it.
     skills.install(agent_keys=["cursor"], force=True)
     assert (collision / "SKILL.md").exists()
+
+
+# -- library presets installed into a project (`harumi skills add`) -----------
+
+
+def test_provenance_replaces_existing_source_and_version_and_keeps_the_body():
+    preset = "---\nname: X\nversion: 1\nsource: other/x\ndescription: d\n---\n\n# Body\n"
+
+    out = skills.with_install_provenance(preset, "x", 4)
+
+    assert out == "---\nname: X\ndescription: d\nsource: harumi/x\nversion: 4\n---\n\n# Body\n"
+
+
+def test_provenance_adds_a_frontmatter_to_a_preset_without_one():
+    out = skills.with_install_provenance("# Just a body\n", "x", 2)
+
+    assert out == "---\nsource: harumi/x\nversion: 2\n---\n\n# Just a body\n"
+
+
+def test_provenance_rejects_unclosed_frontmatter():
+    with pytest.raises(ValueError):
+        skills.with_install_provenance("---\nname: X\n# never closed\n", "x", 1)
+
+
+def test_frontmatter_source_reads_what_an_install_wrote():
+    installed = skills.with_install_provenance("---\nname: X\n---\nbody\n", "vrp-modeling", 1)
+
+    assert skills.frontmatter_source(installed) == "harumi/vrp-modeling"
+    assert skills.frontmatter_source("---\nname: mine\n---\n") is None
+    assert skills.frontmatter_source("no frontmatter") is None

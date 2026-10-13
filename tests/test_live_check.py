@@ -74,24 +74,24 @@ class TestPlanIsValid:
 
     def test_the_canary_is_created_before_anything_uses_it_and_deleted_last(self):
         paths = [step.path for step in PLAN]
-        assert paths.index("projects create") < paths.index("repo put")
-        deletes = [step for step in PLAN if step.path == "projects delete"]
-        assert deletes, "expected at least one `projects delete` teardown step"
+        assert paths.index("new") < paths.index("check")
+        deletes = [step for step in PLAN if step.path == "projects rm"]
+        assert deletes, "expected at least one `projects rm` teardown step"
         for delete in deletes:
             assert delete.teardown, "delete must be a teardown step or a mid-plan failure leaks the project"
 
     def test_project_deletion_only_ever_targets_a_captured_id(self):
-        """A hardcoded id here would delete someone's real project. `push`
+        """A hardcoded id here would delete someone's real project. `import`
         and `new` each create an independent project, so they get their own
         deletes targeting their own captured ids rather than reusing
         {project}."""
-        deletes = [step for step in PLAN if step.path == "projects delete"]
+        deletes = [step for step in PLAN if step.path == "projects rm"]
         targets = {delete.args[0] for delete in deletes}
         assert targets == {"{project}", "{push_project}", "{new_project}"}
 
     def test_compute_costing_steps_are_gated(self):
         for step in PLAN:
-            if step.path in {"run", "runs get", "runs cancel", "outputs"}:
+            if step.path in {"run", "runs get", "runs cancel"}:
                 assert step.gated, f"{step.path} costs real compute and must need --include-run"
 
 
@@ -129,7 +129,7 @@ class TestValidationActuallyCatchesMistakes:
         assert any("not a real command" in p for p in problems)
 
     def test_executing_a_manual_command_is_rejected(self, patched):
-        problems = patched(plan=PLAN + (Step("org delete", ("org-1", "--yes")),))
+        problems = patched(plan=PLAN + (Step("org rm", ("org-1", "--yes")),))
         assert any("MANUAL" in p for p in problems)
 
     def test_using_an_id_before_it_is_captured_is_rejected(self, patched):
@@ -146,7 +146,7 @@ class TestValidationActuallyCatchesMistakes:
         assert any("no reason" in p for p in problems)
 
     def test_dropping_the_teardown_is_rejected(self, patched):
-        problems = patched(plan=tuple(s for s in PLAN if s.path != "projects delete"))
+        problems = patched(plan=tuple(s for s in PLAN if s.path != "projects rm"))
         assert any("leak the canary" in p for p in problems)
 
 
@@ -191,12 +191,12 @@ class TestRunnerSubstitution:
         assert runner.execute(Step("run", gated=True)).status == "skip"
 
     def test_projects_create_id_is_recovered_from_printed_output(self, tmp_path):
-        """`projects create` no longer binds the directory (that moved to
-        `link`/`new`/`push`/`clone`), so its id comes from the same UUID
+        """`new --no-clone` doesn't bind the directory (that is
+        `link`/`new`/`import`/`clone`), so its id comes from the same UUID
         fallback as everything else — not a `.harumi` binding."""
         runner = self._runner(tmp_path)
         captured = runner._capture(
-            Step("projects create", capture="project"),
+            Step("new", capture="project"),
             "Created project demo (id=3f8b1c2d-4e5a-6b7c-8d9e-0f1a2b3c4d5e).",
         )
         assert captured == "3f8b1c2d-4e5a-6b7c-8d9e-0f1a2b3c4d5e"
@@ -222,7 +222,7 @@ class TestRunnerSubstitution:
         assert self._runner(tmp_path)._capture(step, stdout) == "bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb"
 
     def test_execute_detaches_the_child_so_hidden_prompts_read_stdin_not_the_tty(self, tmp_path, monkeypatch):
-        """Regression: `secrets set` / `share set-password` prompt via
+        """Regression: `secrets set` / `share update --password` prompt via
         getpass.getpass(), which opens /dev/tty directly and ignores a piped
         stdin unless the child has no controlling terminal. Without
         start_new_session=True this hangs forever instead of reading the
@@ -239,7 +239,7 @@ class TestRunnerSubstitution:
 
     def test_two_canary_names_generated_in_the_same_second_do_not_collide(self):
         """A bare timestamp collides if two runs start in the same second (e.g.
-        a scheduled job overlapping a manual run) — `projects create` would
+        a scheduled job overlapping a manual run) — `new --no-clone` would
         then fail on a name clash that looks like a backend bug."""
         from scripts.live_check import _canary_name
 
@@ -253,7 +253,7 @@ class TestRunnerSubstitution:
         (tmp_path / ".harumi" / "config.json").write_text("{not valid json")
         runner = self._runner(tmp_path)
         captured = runner._capture(
-            Step("projects create", capture="project"),
+            Step("new", capture="project"),
             "Created project (id=11111111-2222-3333-4444-555555555555).",
         )
         assert captured == "11111111-2222-3333-4444-555555555555"
@@ -261,13 +261,13 @@ class TestRunnerSubstitution:
     def test_teardown_runs_even_when_a_main_step_raises(self, tmp_path, monkeypatch):
         """Regression: run_plan()'s main loop had no try/finally, so a
         KeyboardInterrupt (or any other exception) during the main steps would
-        skip straight past `projects delete` / `logout` and leak the canary
+        skip straight past `projects rm` / `logout` and leak the canary
         project on the real backend."""
         executed: list[str] = []
 
         def fake_execute(step):
             executed.append(step.path)
-            if step.path == "repo put":
+            if step.path == "check":
                 raise KeyboardInterrupt
             return Result(step, [], "ok")
 
@@ -276,7 +276,7 @@ class TestRunnerSubstitution:
         with pytest.raises(KeyboardInterrupt):
             runner.run_plan()
 
-        assert "projects delete" in executed
+        assert "projects rm" in executed
         assert "logout" in executed
 
     def test_seed_git_repo_leaves_a_committed_head_the_cli_can_push_from(self, tmp_path):
@@ -378,7 +378,7 @@ class TestTierSanity:
     def test_canary_steps_all_scope_themselves_to_a_project(self):
         """A canary-tier command with no project scope would act on the account
         at large."""
-        exempt = {"projects create", "push", "new", "clone", "config set-org", "env use", "run", "outputs"}
+        exempt = {"import", "new", "clone", "org use", "env use", "run"}
         for step in PLAN:
             if TIERS[step.path][0] != CANARY or step.path in exempt:
                 continue
