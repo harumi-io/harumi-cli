@@ -120,6 +120,7 @@ git archive --format=zip -o repo.zip harumi/main      # zip the repo
 - To iterate you often don't need to commit at all: `harumi run` pushes uncommitted work to a scratch branch.
 - Run `harumi check` to see what blocks the project from running.
 - Never run `harumi import` on an existing project (it creates a new one).
+- The `harumi` remote's URL embeds the user's Gitea token (stored in `.git/config`, printed by `git remote -v`). Never paste `git remote -v` output or `.git/config` into chat, logs, issues or commits.
 
 ## Dashboards & widgets
 

@@ -1768,7 +1768,7 @@ def test_share_update_password_prompts_and_never_echoes_it(api):
     result = runner.invoke(
         cli.app,
         ["share", "update", "link-1", "--password", "--project", "proj-1"],
-        input="correcthorse\n",
+        input="correcthorse\ncorrecthorse\n",
     )
 
     assert result.exit_code == 0, result.output
@@ -2944,13 +2944,16 @@ def test_memories_add_accepts_content_at_the_limit(api):
 
 
 def test_deprecated_names_are_hidden_from_help_and_the_surface():
-    import re
+    from typer.main import get_command
 
     from scripts.emit_cli_surface import build_surface
 
-    help_text = runner.invoke(cli.app, ["--help"]).output
-    assert re.search(r"│ (push|repo|outputs|config|skill)\s", help_text) is None
-    assert re.search(r"│ import\s", help_text)
+    # Ask the command tree rather than scraping --help: the rendered help is
+    # colourised differently on CI.
+    top = get_command(cli.app).commands
+    for old in ("push", "repo", "outputs", "config", "skill"):
+        assert top[old].hidden, f"{old} should be hidden"
+    assert not top["import"].hidden
 
     paths = {command["path"] for command in build_surface()["commands"]}
     assert "push" not in paths and "outputs" not in paths
@@ -3121,19 +3124,20 @@ def test_share_update_password_can_combine_with_other_flags_and_alone_needs_no_o
     api.route("PATCH", "/api/projects/proj-1/share-links/link-1", {**SHARE_LINK, "label": "renamed"})
 
     alone = runner.invoke(
-        cli.app, ["share", "update", "link-1", "--password", "--project", "proj-1"], input="correcthorse\n"
+        cli.app, ["share", "update", "link-1", "--password", "--project", "proj-1"], input="correcthorse\ncorrecthorse\n"
     )
     both = runner.invoke(
         cli.app,
         ["share", "update", "link-1", "--label", "renamed", "--password", "--project", "proj-1"],
-        input="correcthorse\n",
+        input="correcthorse\ncorrecthorse\n",
     )
     nothing = runner.invoke(cli.app, ["share", "update", "link-1", "--project", "proj-1"])
 
     assert alone.exit_code == 0, alone.output
     assert both.exit_code == 0, both.output
     assert "correcthorse" not in alone.output + both.output
-    assert [r.method for r in api.requests] == ["PUT", "PUT", "PATCH"]
+    # The password goes last, so a rejected field change can't half-apply it.
+    assert [r.method for r in api.requests] == ["PUT", "PATCH", "PUT"]
     assert nothing.exit_code == 1
     assert "--password" in nothing.output
 
@@ -3144,3 +3148,67 @@ def test_run_output_dir_is_deprecated_but_still_accepted(api, git, bound_dir):
     result = runner.invoke(cli.app, ["run", "--branch", "main", "-o", "out"])
 
     assert "harumi runs download" in result.output
+
+
+def test_share_update_does_not_touch_the_password_when_the_other_fields_are_rejected(api):
+    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", {"detail": "bad label"}, status=422)
+    api.route("PUT", "/api/projects/proj-1/share-links/link-1/password", SHARE_LINK)
+
+    result = runner.invoke(
+        cli.app,
+        ["share", "update", "link-1", "--label", "x", "--password", "--project", "proj-1"],
+        input="correcthorse\ncorrecthorse\n",
+    )
+
+    assert result.exit_code == 1
+    assert [r.method for r in api.requests] == ["PATCH"]
+
+
+def test_share_update_says_so_when_only_the_password_part_fails(api):
+    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
+    api.route("PUT", "/api/projects/proj-1/share-links/link-1/password", {"detail": "too short"}, status=422)
+
+    result = runner.invoke(
+        cli.app,
+        ["share", "update", "link-1", "--label", "x", "--password", "--project", "proj-1"],
+        input="short\nshort\n",
+    )
+
+    assert result.exit_code == 1
+    assert "already updated" in result.output
+
+
+def test_share_update_password_prompt_must_be_confirmed(api):
+    api.route("PUT", "/api/projects/proj-1/share-links/link-1/password", {**SHARE_LINK, "password_set": True})
+
+    result = runner.invoke(
+        cli.app,
+        ["share", "update", "link-1", "--password", "--project", "proj-1"],
+        input="correcthorse\ntypo-horse\ncorrecthorse\ncorrecthorse\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    # The mismatched pair was rejected and re-asked; only the confirmed value was sent.
+    assert api.body_for("PUT", "/api/projects/proj-1/share-links/link-1/password") == {"password": "correcthorse"}
+    assert len([r for r in api.requests if r.method == "PUT"]) == 1
+
+
+@pytest.mark.parametrize("slug", ["..\\..\\x", "a/b", "../x", "A-Upper", "-lead", "", "x..y"])
+def test_skills_add_rejects_slugs_that_could_escape_the_clone(api, bound_dir, slug):
+    result = runner.invoke(cli.app, ["skills", "add", slug])
+
+    assert result.exit_code != 0
+    assert api.requests == []
+    assert not (bound_dir / "skills").exists()
+
+
+def test_skills_library_category_filter_ignores_case_on_both_sides(api):
+    api.route(
+        "GET",
+        "/api/skill-library",
+        {"skills": [{"slug": "a-skill", "name": "A", "description": "d", "category": "Modeling", "tags": [], "version": 1}]},
+    )
+
+    result = runner.invoke(cli.app, ["skills", "library", "--category", "MODELING"])
+
+    assert "a-skill" in result.output

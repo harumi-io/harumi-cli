@@ -176,7 +176,7 @@ def frontmatter_source(text: str) -> Optional[str]:
         return None
     for line in parsed[0]:
         key, sep, value = line.partition(":")
-        if sep and key.strip().lower() == "source":
+        if sep and not line[:1].isspace() and key.strip().lower() == "source":
             return value.strip().strip("'\"") or None
     return None
 
@@ -188,17 +188,27 @@ def with_install_provenance(content: str, slug: str, version: int) -> str:
     harumi-platform), so a skill installed from either side is identical.
     Raises ValueError when the frontmatter is opened but never closed.
     """
+    # Work on LF and restore the file's own line endings at the end, so a CRLF
+    # preset doesn't come out with mixed endings.
+    newline = "\r\n" if "\r\n" in content else "\n"
+    content = content.replace("\r\n", "\n")
     lines = content.split("\n")
     provenance = [f"source: {library_source(slug)}", f"version: {version}"]
     if lines[0].strip() != "---":
-        return "\n".join(["---", *provenance, "---", "", content])
+        return newline.join(["---", *provenance, "---", "", content])
     parsed = _frontmatter_lines(content)
     if parsed is None:
         raise ValueError("SKILL.md frontmatter is never closed")
     frontmatter, end = parsed
+    # Only *top-level* keys are replaced. An indented `version:` belongs to a
+    # nested mapping or a block scalar and must be left alone.
     kept = [
         line
         for line in frontmatter
-        if line.partition(":")[0].strip().lower() not in {"source", "version"} or ":" not in line
+        if not (
+            ":" in line
+            and not line[:1].isspace()
+            and line.partition(":")[0].strip().lower() in {"source", "version"}
+        )
     ]
-    return "\n".join(["---", *kept, *provenance, *lines[end:]])
+    return newline.join(["---", *kept, *provenance, *lines[end:]])

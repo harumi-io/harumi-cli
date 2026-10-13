@@ -281,6 +281,8 @@ There is no `harumi repo`. A project's repo is a plain git repo; `harumi clone` 
 | Delete a branch | `git push harumi --delete NAME` (the old command refused when a schedule pinned the branch: check `harumi schedules list` first) |
 | Promote into live | `git fetch harumi && git switch main && git merge --ff-only harumi/main && git merge --no-ff harumi/NAME && git push harumi main` |
 
+The remote's URL embeds your Gitea token (kept in `.git/config`, printed by `git remote -v`): never paste either into chat, logs or issues.
+
 Commit once per change and push once; the old file-by-file commands made one server commit per file and never updated the local clone.
 
 ## `check`

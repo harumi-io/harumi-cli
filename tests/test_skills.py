@@ -140,3 +140,20 @@ def test_frontmatter_source_reads_what_an_install_wrote():
     assert skills.frontmatter_source(installed) == "harumi/vrp-modeling"
     assert skills.frontmatter_source("---\nname: mine\n---\n") is None
     assert skills.frontmatter_source("no frontmatter") is None
+
+
+def test_provenance_leaves_nested_version_and_source_keys_alone():
+    preset = "---\nname: X\nmetadata:\n  version: 2\n  source: internal\nversion: 1\n---\nbody\n"
+
+    out = skills.with_install_provenance(preset, "x", 5)
+
+    assert "metadata:\n  version: 2\n  source: internal\n" in out
+    assert out.count("\nversion: 5\n") == 1
+    assert "version: 1" not in out
+
+
+def test_provenance_keeps_crlf_line_endings_consistent():
+    out = skills.with_install_provenance("---\r\nname: X\r\n---\r\nbody\r\n", "x", 1)
+
+    assert "\r\n" in out
+    assert out.replace("\r\n", "") .count("\n") == 0

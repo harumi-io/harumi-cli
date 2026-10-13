@@ -221,3 +221,17 @@ def test_whats_new_prints_the_installed_versions_notes_and_all_prints_history():
     assert "--all" in one.output
     assert "harumi 0.10.0" not in one.output
     assert "harumi 0.10.0" in everything.output
+
+
+@pytest.mark.parametrize(
+    "argv, active",
+    [
+        (["--env", "staging", "whats-new"], False),  # the value of --env is not the command
+        (["whats-new", "--all"], False),
+        (["--env", "staging", "--version"], False),
+        (["run", "--version", "x"], True),  # a --version after the command isn't the global flag
+        (["--env", "whats-new", "run"], True),  # "whats-new" here is the env's value
+    ],
+)
+def test_command_and_global_flag_detection_uses_position_not_substrings(argv, active):
+    assert update.enabled(argv, {}, Tty()) is active

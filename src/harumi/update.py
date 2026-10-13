@@ -98,16 +98,39 @@ def upgrade_command() -> str:
     return "python3 -m pip install --upgrade harumi"
 
 
+def _command_name(argv: list[str]) -> tuple[Optional[str], list[str]]:
+    """The subcommand and the global flags that precede it.
+
+    Only `--env` takes a value among the global options, so its value must not be
+    mistaken for the command (`harumi --env staging whats-new`). Anything after
+    the command belongs to the command, so a `--version` there is not ours.
+    """
+    flags: list[str] = []
+    skip_next = False
+    for token in argv:
+        if skip_next:
+            skip_next = False
+        elif token == "--env":
+            flags.append(token)
+            skip_next = True
+        elif token.startswith("-"):
+            flags.append(token)
+        else:
+            return token, flags
+    return None, flags
+
+
 def enabled(argv: list[str], environ: Mapping[str, str], stream: TextIO) -> bool:
     """Whether this invocation may print an update message at all."""
     if environ.get(DISABLE_ENV, "").lower() in {"1", "true", "yes"}:
         return False
     if environ.get("CI"):
         return False
-    if "--version" in argv:
+    command, global_flags = _command_name(argv)
+    if "--version" in global_flags:
         return False
     # `whats-new` is the thing the notice points at; don't nag inside it.
-    if argv[:1] == ["whats-new"]:
+    if command == "whats-new":
         return False
     try:
         return stream.isatty()

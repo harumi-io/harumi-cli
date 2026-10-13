@@ -145,6 +145,7 @@ import functools
 import json
 import mimetypes
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -952,7 +953,7 @@ def skills_library(
     client = _get_client(api_url=api_url, org=org)
     presets = client.list_skill_library()
     if category:
-        presets = [p for p in presets if p.category == category.lower()]
+        presets = [p for p in presets if p.category.lower() == category.lower()]
     if query:
         needle = query.lower()
         presets = [
@@ -992,8 +993,8 @@ def skills_add(
         )
         return
     project_dir = binding.config_path.parent.parent
-    if "/" in slug or slug in {"", ".", ".."}:
-        _fail(f"{slug!r} is not a valid skill slug.")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", slug) or ".." in slug:
+        _fail(f"{slug!r} is not a valid skill slug (lowercase letters, digits, '.', '_' and '-').")
 
     dest = project_dir / skills_mod.SKILLS_DIR / slug / "SKILL.md"
     if dest.exists() and not force:
@@ -3003,18 +3004,35 @@ def share_update(
     if not body and password is None:
         _fail("No fields to update. Pass at least one flag (e.g. --label, --chat, --password).")
 
+    # Ask for the password before changing anything, and apply it last: setting or
+    # removing it signs out every viewer who had unlocked the link, so it must not
+    # happen if the other fields were rejected.
+    new_password = None
     if password is True:
-        new_password = typer.prompt("Enter share link password (hidden, min 8 characters)", hide_input=True)
-        client.set_share_link_password(project_id, link_id, new_password)
-        console.print("[bold green]Set[/bold green] the share link password. Previously unlocked viewers must re-enter it.")
-    elif password is False:
-        client.remove_share_link_password(project_id, link_id)
-        console.print("[bold red]Removed[/bold red] the share link password.")
+        new_password = typer.prompt(
+            "Enter share link password (hidden, min 8 characters)",
+            hide_input=True,
+            confirmation_prompt=True,
+        )
 
     if body:
         link = client.update_share_link(project_id, link_id, body)
         console.print("[bold green]Updated[/bold green] share link.")
         _print_share_link(link)
+
+    try:
+        if password is True:
+            client.set_share_link_password(project_id, link_id, new_password)
+            console.print("[bold green]Set[/bold green] the share link password. Previously unlocked viewers must re-enter it.")
+        elif password is False:
+            client.remove_share_link_password(project_id, link_id)
+            console.print("[bold red]Removed[/bold red] the share link password.")
+    except HarumiError:
+        if body:
+            err_console.print(
+                "[yellow]The other fields were already updated; only the password change failed.[/yellow]"
+            )
+        raise
 
 
 @share_app.command("rm")
