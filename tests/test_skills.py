@@ -157,3 +157,16 @@ def test_provenance_keeps_crlf_line_endings_consistent():
 
     assert "\r\n" in out
     assert out.replace("\r\n", "") .count("\n") == 0
+
+
+def test_provenance_keeps_crlf_consistent_when_the_preset_has_no_frontmatter():
+    out = skills.with_install_provenance("# Title\r\nbody\r\n", "x", 1)
+
+    assert out == "---\r\nsource: harumi/x\r\nversion: 1\r\n---\r\n\r\n# Title\r\nbody\r\n"
+    assert "\n" not in out.replace("\r\n", "")
+
+
+def test_provenance_leaves_lf_files_as_lf():
+    out = skills.with_install_provenance("# Title\nbody\n", "x", 1)
+
+    assert "\r" not in out

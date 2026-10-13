@@ -195,7 +195,8 @@ def with_install_provenance(content: str, slug: str, version: int) -> str:
     lines = content.split("\n")
     provenance = [f"source: {library_source(slug)}", f"version: {version}"]
     if lines[0].strip() != "---":
-        return newline.join(["---", *provenance, "---", "", content])
+        out = "\n".join(["---", *provenance, "---", "", content])
+        return out.replace("\n", newline)
     parsed = _frontmatter_lines(content)
     if parsed is None:
         raise ValueError("SKILL.md frontmatter is never closed")
@@ -211,4 +212,4 @@ def with_install_provenance(content: str, slug: str, version: int) -> str:
             and line.partition(":")[0].strip().lower() in {"source", "version"}
         )
     ]
-    return newline.join(["---", *kept, *provenance, *lines[end:]])
+    return "\n".join(["---", *kept, *provenance, *lines[end:]]).replace("\n", newline)
