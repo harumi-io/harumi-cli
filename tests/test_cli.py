@@ -2767,3 +2767,44 @@ def test_skills_points_at_the_repo_and_makes_no_api_call(api):
     assert "skills/" in result.output
     assert "SKILL.md" in result.output
     assert api.requests == []
+
+
+@pytest.mark.parametrize("content", ["", "   ", "x" * 4001])
+def test_memories_add_rejects_blank_or_oversized_content_without_calling_the_api(api, content):
+    result = runner.invoke(
+        cli.app, ["memories", "add", content, "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 1
+    assert "Error" in result.output
+    assert api.requests == []
+
+
+def test_memories_add_rejects_blank_prompt_answer(api):
+    result = runner.invoke(
+        cli.app, ["memories", "add", "--project", "proj-1"], input="   \n"
+    )
+
+    assert result.exit_code == 1
+    assert api.requests == []
+
+
+@pytest.mark.parametrize("content", ["", "   ", "x" * 4001])
+def test_memories_edit_rejects_blank_or_oversized_content_without_calling_the_api(api, content):
+    result = runner.invoke(
+        cli.app, ["memories", "edit", "mem-1", "--content", content, "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 1
+    assert "Error" in result.output
+    assert api.requests == []
+
+
+def test_memories_add_accepts_content_at_the_limit(api):
+    api.route("POST", "/api/projects/proj-1/memories", MEMORY, status=201)
+
+    result = runner.invoke(
+        cli.app, ["memories", "add", "x" * 4000, "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 0, result.output

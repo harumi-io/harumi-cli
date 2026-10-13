@@ -3485,12 +3485,23 @@ app.add_typer(memories_app, name="memories")
 
 _MEMORY_MODES = ("always", "on_demand")
 _MEMORY_PREVIEW_CHARS = 80
+# Mirrors MemoryContent in harumi-api/src/api/memories/schemas.py: stripped, 1-4000 chars.
+_MEMORY_MAX_CHARS = 4000
 
 
 def _check_memory_mode(mode: Optional[str]) -> Optional[str]:
     if mode is not None and mode not in _MEMORY_MODES:
         _fail(f"Invalid --mode {mode!r}. Use one of: {', '.join(_MEMORY_MODES)}.")
     return mode
+
+
+def _check_memory_content(content: str) -> str:
+    """Reject text the API would 422 on, before spending a request on it."""
+    if not content.strip():
+        _fail("Memory content can't be empty.")
+    if len(content.strip()) > _MEMORY_MAX_CHARS:
+        _fail(f"Memory content is too long ({len(content.strip())} characters; the limit is {_MEMORY_MAX_CHARS}).")
+    return content
 
 
 def _memory_preview(content: str) -> str:
@@ -3553,6 +3564,7 @@ def memories_add(
 
     if content is None:
         content = typer.prompt("Memory")
+    _check_memory_content(content)
 
     client = _get_client(api_url=api_url, org=org)
     memory = client.create_memory(project_id, content, retrieval_mode=mode)
@@ -3575,6 +3587,8 @@ def memories_edit(
 
     if content is None and mode is None:
         _fail("No fields to update. Pass --content and/or --mode.")
+    if content is not None:
+        _check_memory_content(content)
 
     client = _get_client(api_url=api_url, org=org)
     memory = client.update_memory(project_id, memory_id, content=content, retrieval_mode=mode)
