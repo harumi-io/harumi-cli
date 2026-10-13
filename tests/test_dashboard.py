@@ -1293,7 +1293,7 @@ def test_an_invalid_series_mark_is_reported_as_ignored_without_dropping_the_widg
     assert "mark" in issues[0].message and "line, bar, area" in issues[0].message
 
 
-def test_validate_warns_about_a_legacy_widgets_series_mark_via_the_resolved_entry():
+def test_widget_warnings_receives_the_alias_resolved_entry():
     """`widget_warnings` reads the alias-resolved entry, so a key an alias implies
     is seen by the warning pass as well as the parse."""
     seen = {}
