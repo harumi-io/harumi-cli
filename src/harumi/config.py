@@ -4,7 +4,7 @@ Precedence for every setting: explicit constructor arg > environment
 variable > ~/.harumi/config.json > hardcoded default.
 
 Project binding (.harumi/config.json in the working directory) stores the
-project_id and Gitea repo metadata written by `harumi new`/`harumi push`/
+project_id and Gitea repo metadata written by `harumi new`/`harumi import`/
 `harumi clone`/`harumi link`. It is searched from the cwd upward so it works
 from subdirectories of the project.
 """

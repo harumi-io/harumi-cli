@@ -51,6 +51,10 @@ def _leaves(command: Any, path: list[str]):
     subcommands = getattr(command, "commands", None)
     if subcommands:
         for name, sub in subcommands.items():
+            # Hidden commands (deprecated aliases kept for one release) aren't
+            # part of the documented contract; a hidden group hides its leaves.
+            if getattr(sub, "hidden", False):
+                continue
             yield from _leaves(sub, path + [name])
     else:
         yield path, command

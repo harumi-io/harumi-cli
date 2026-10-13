@@ -27,9 +27,11 @@ from harumi.models import (
     RepoInfo,
     Schedule,
     Secret,
+    SkillLibraryDetail,
+    SkillLibrarySummary,
 )
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 
 __all__ = [
     "Client",
@@ -48,5 +50,7 @@ __all__ = [
     "RepoInfo",
     "Schedule",
     "Secret",
+    "SkillLibraryDetail",
+    "SkillLibrarySummary",
     "__version__",
 ]

@@ -83,55 +83,40 @@ TIERS: dict[str, tuple[str, str]] = {
     "whoami": (READ, "cannot be faked by a same-named binary, so it proves the session"),
     "usage": (READ, "read-only credit-allowance lookup, safe against any environment"),
     "status": (READ, "reads the public status page; needs no session"),
-    "profile show": (READ, ""),
+    "whats-new": (LOCAL, "prints the release notes bundled in the package"),
     "profile set": (MANUAL, "would mutate the real signed-in user's name/bio"),
     "env list": (LOCAL, ""),
-    "env current": (LOCAL, ""),
     "env use": (LOCAL, "writes only the throwaway HARUMI_HOME config"),
-    "config set-org": (LOCAL, "writes only the throwaway HARUMI_HOME config"),
     # -- discovery ------------------------------------------------------------
     "specs": (READ, "proves real API reachability"),
     "blueprints": (READ, ""),
-    "outputs": (READ, ""),
     # -- organizations --------------------------------------------------------
     "org list": (READ, ""),
     "org members": (READ, ""),
     "org create": (MANUAL, "creates a real, billable organization"),
-    "org delete": (MANUAL, "destroys a real organization and everything in it"),
+    "org rm": (MANUAL, "destroys a real organization and everything in it"),
+    "org use": (LOCAL, "writes only the throwaway HARUMI_HOME config"),
     "org rename": (MANUAL, "renames a real organization other people can see"),
     "org invite": (MANUAL, "sends email to a real person"),
-    "org remove": (MANUAL, "removes a real member's access"),
+    "org rm-member": (MANUAL, "removes a real member's access"),
     "org role": (MANUAL, "changes a real member's permissions"),
     # -- projects -------------------------------------------------------------
     "projects list": (READ, ""),
     "projects get": (READ, ""),
-    "projects create": (CANARY, "creates the canary project the rest of the plan uses"),
     "projects rename": (CANARY, ""),
-    "projects delete": (CANARY, "teardown; only ever a project this run created"),
+    "projects rm": (CANARY, "teardown; only ever a project this run created"),
     "link": (CANARY, "binds a throwaway directory to the canary"),
-    "new": (CANARY, "creates + clones its own project, self-contained like `push`"),
-    "push": (CANARY, "creates a project from a throwaway folder, so it is self-contained like `projects create`"),
+    "new": (CANARY, "creates + clones its own project; with --no-clone it creates the canary the rest of the plan uses"),
+    "import": (CANARY, "creates a project from a throwaway folder, so it is self-contained like `new`"),
     "clone": (CANARY, "clones the canary's repo into a second throwaway directory"),
     "start": (
         MANUAL,
         "interactive menu (reads a raw prompt response); the three journeys it "
-        "dispatches to (`new`/`push`/`clone`) are already exercised directly",
+        "dispatches to (`new`/`import`/`clone`) are already exercised directly",
     ),
     # -- repo -----------------------------------------------------------------
-    "repo ls": (READ, ""),
-    "repo dir": (READ, ""),
-    "repo commits": (READ, ""),
-    "repo readiness": (READ, ""),
-    "repo cat": (READ, ""),
-    "repo download": (READ, ""),
-    "repo branches": (READ, ""),
-    "repo put": (CANARY, ""),
-    "repo mv": (CANARY, ""),
-    "repo rm": (CANARY, ""),
-    "repo branch-create": (CANARY, ""),
-    "repo branch-rm": (CANARY, ""),
-    "repo promote": (CANARY, ""),
     # -- files ------------------------------------------------------------
+    "check": (READ, "server-side readiness checks on the canary"),
     "files ls": (READ, ""),
     "files put": (CANARY, ""),
     "files get": (READ, "reads back the file `files put` just uploaded"),
@@ -141,6 +126,11 @@ TIERS: dict[str, tuple[str, str]] = {
     "runs list": (READ, ""),
     "runs get": (READ, ""),
     "runs cancel": (CANARY, "only cancels the run this harness queued"),
+    "runs download": (
+        MANUAL,
+        "needs a finished run with a committed output; the harness cancels the only run it queues. "
+        "Request and file handling are covered offline in tests/test_cli.py",
+    ),
     "compare": (
         MANUAL,
         "needs two distinct finished runs; the harness queues at most one (and `compare` refuses "
@@ -152,7 +142,7 @@ TIERS: dict[str, tuple[str, str]] = {
     "schedules get": (READ, ""),
     "schedules add": (CANARY, ""),
     "schedules update": (CANARY, ""),
-    "schedules remove": (CANARY, ""),
+    "schedules rm": (CANARY, ""),
     # -- secrets --------------------------------------------------------------
     "secrets list": (READ, ""),
     "secrets set": (CANARY, ""),
@@ -163,16 +153,15 @@ TIERS: dict[str, tuple[str, str]] = {
     "memories edit": (CANARY, ""),
     "memories rm": (CANARY, ""),
     # -- skills ---------------------------------------------------------------
-    "skills": (LOCAL, "prints a pointer to `harumi repo`; makes no API call"),
+    "skills library": (READ, "lists the platform's preset skills"),
+    "skills add": (LOCAL, "fetches a preset (read-only) and writes it only into the throwaway workdir; nothing is pushed"),
     # -- share links ----------------------------------------------------------
     "share list": (READ, ""),
     "share get": (READ, ""),
     "share add": (CANARY, ""),
     "share update": (CANARY, ""),
     "share rotate": (CANARY, ""),
-    "share set-password": (CANARY, ""),
-    "share rm-password": (CANARY, ""),
-    "share remove": (CANARY, ""),
+    "share rm": (CANARY, ""),
     # -- datasources ----------------------------------------------------------
     # The whole group needs a database the backend can actually reach. Creating
     # one against production would also mean putting real credentials in CI.
@@ -180,14 +169,13 @@ TIERS: dict[str, tuple[str, str]] = {
     "datasources get": (MANUAL, "needs a datasource to already exist; the canary project has none"),
     "datasources add": (MANUAL, "needs a reachable customer database, and mTLS certs when proxied"),
     "datasources update": (MANUAL, "would mutate a real datasource"),
-    "datasources remove": (MANUAL, "would delete a real datasource"),
+    "datasources rm": (MANUAL, "would delete a real datasource"),
     "datasources test": (MANUAL, "needs a reachable customer database"),
     "datasources query": (MANUAL, "needs an existing datasource with a live database behind it"),
     # -- local tooling --------------------------------------------------------
     "dashboard widgets": (LOCAL, ""),
     "dashboard validate": (LOCAL, ""),
-    "skill install": (LOCAL, "run with --dry-run so it never writes real skill dirs"),
-    "skill path": (LOCAL, ""),
+    "agent-skills install": (LOCAL, "run with --dry-run so it never writes real skill dirs"),
 }
 
 
@@ -221,67 +209,49 @@ class Step:
     teardown: bool = False
 
 
-# Ordered. Dependencies are real: `runs get` needs a run id, `repo cat` needs a
-# file that an earlier `repo put` created, and everything after `projects create`
+# Ordered. Dependencies are real: `runs get` needs a run id, `files get` needs a
+# file that an earlier `files put` created, and everything after `new --no-clone`
 # needs the canary id.
 PLAN: tuple[Step, ...] = (
     # -- preflight: no project needed ----------------------------------------
-    Step("env current"),
     Step("env list", ("--all",)),
     Step("whoami"),
     Step("usage"),
     Step("status"),
+    Step("whats-new"),
     Step("specs"),
     Step("blueprints"),
-    Step("profile show"),
     Step("org list"),
     # Skipped automatically for a personal-workspace session, where {org} is empty.
     Step("org members", ("{org}",)),
     Step("projects list"),
     Step("dashboard widgets"),
     Step("dashboard validate", ("{spec}",)),
-    Step("skill path"),
-    Step("skill install", ("--dry-run",)),
+    Step("agent-skills install", ("--dry-run",)),
+    Step("skills library"),
     # -- create the canary ----------------------------------------------------
-    # `projects create` is the pure primitive: it makes the project but binds
-    # nothing locally, unlike `new`/`push`/`clone`. `link` (formerly `init`)
-    # does the binding+remote-config step afterward, using the same seeded
-    # git repo the harness already set up in `workdir`.
-    Step("projects create", ("{canary}",), capture="project"),
+    # `new --no-clone` is the pure primitive: it makes the project but binds
+    # nothing locally, unlike a plain `new` or `clone`. `link` does the
+    # binding+remote-config step afterward, using the same seeded git repo the
+    # harness already set up in `workdir`.
+    Step("new", ("{canary}", "--no-clone"), capture="project"),
     Step("projects get", ("{project}",)),
     Step("projects rename", ("{project}", "{canary}-renamed")),
     Step("link", ("--project", "{project}")),
-    # -- repo: write, read, move, branch, promote -----------------------------
-    Step("repo branches", ("--project", "{project}")),
-    Step("repo ls", ("--project", "{project}")),
-    Step("repo put", ("{seed}", "main.py", "--project", "{project}", "-m", "livecheck: seed entrypoint")),
-    Step("repo put", ("{seed}", "livecheck/hello.py", "--project", "{project}", "-m", "livecheck: add")),
-    Step("repo cat", ("livecheck/hello.py", "--project", "{project}")),
-    Step("repo dir", ("livecheck", "--project", "{project}")),
-    Step("repo commits", ("--project", "{project}")),
-    Step("repo readiness", ("--project", "{project}")),
-    Step("repo mv", ("livecheck/hello.py", "livecheck/renamed.py", "--project", "{project}", "-m", "livecheck: mv")),
-    Step("repo branch-create", ("livecheck-branch", "--project", "{project}")),
-    # Give the branch a commit of its own, so `promote` has a real diff to
-    # merge rather than erroring on an empty one.
-    Step(
-        "repo put",
-        ("{seed}", "livecheck/on-branch.py", "--branch", "livecheck-branch", "--project", "{project}", "-m", "livecheck: branch commit"),
-    ),
-    Step("repo promote", ("livecheck-branch", "--project", "{project}", "--title", "livecheck promote")),
-    Step("repo branch-rm", ("livecheck-branch", "--yes", "--project", "{project}")),
-    Step("repo rm", ("livecheck/renamed.py", "--yes", "--project", "{project}", "-m", "livecheck: rm")),
-    Step("repo download", ("--output", "{tmp}/repo.zip", "--project", "{project}")),
+    # -- repo: the project's repo is plain git now; these are the server-side
+    # commands that remain around it ------------------------------------------
+    Step("check", ("--project", "{project}")),
+    Step("skills add", ("scheduling-modeling",)),
     # -- files: upload, list, download, delete --------------------------------
     Step("files put", ("{seed}", "livecheck.py", "--project", "{project}")),
     Step("files ls", ("--project", "{project}")),
     Step("files get", ("livecheck.py", "--output", "{tmp}/livecheck-downloaded.py", "--project", "{project}")),
     Step("files rm", ("livecheck.py", "--yes", "--project", "{project}")),
-    # -- push: turns a plain folder into its own second project --------------
-    # Independent of the canary project above — `push` never takes
+    # -- import: turns a plain folder into its own second project -------------
+    # Independent of the canary project above — `import` never takes
     # --project, it always creates a new one — so it gets its own capture
     # key and its own teardown delete instead of reusing {project}.
-    Step("push", ("{push_folder}", "--project-name", "{canary}-push"), capture="push_project"),
+    Step("import", ("{push_folder}", "--project-name", "{canary}-push"), capture="push_project"),
     # -- new / clone: the other two onboarding journeys ------------------------
     # Also independent of the canary — `new` creates+clones its own project
     # into its own throwaway directory, and `clone` re-fetches that same
@@ -297,23 +267,21 @@ PLAN: tuple[Step, ...] = (
     Step("schedules list", ("--project", "{project}")),
     Step("schedules get", ("{schedule}", "--project", "{project}")),
     Step("schedules update", ("{schedule}", "--cron", "0 4 * * *", "--project", "{project}")),
-    Step("schedules remove", ("{schedule}", "--yes", "--project", "{project}")),
+    Step("schedules rm", ("{schedule}", "--yes", "--project", "{project}")),
     # -- memories -------------------------------------------------------------
     Step("memories add", ("livecheck memory", "--project", "{project}"), capture="memory"),
     Step("memories list", ("--project", "{project}")),
     Step("memories edit", ("{memory}", "--mode", "always", "--project", "{project}")),
     Step("memories rm", ("{memory}", "--yes", "--project", "{project}")),
-    # -- skills (local pointer; no API call) ----------------------------------
-    Step("skills"),
     # -- share links ----------------------------------------------------------
     Step("share add", ("--label", "livecheck", "--project", "{project}"), capture="share"),
     Step("share list", ("--project", "{project}")),
     Step("share get", ("{share}", "--project", "{project}")),
     Step("share update", ("{share}", "--label", "livecheck-updated", "--project", "{project}")),
-    Step("share set-password", ("{share}", "--project", "{project}"), stdin="livecheck-pw\nlivecheck-pw\n"),
-    Step("share rm-password", ("{share}", "--project", "{project}")),
+    Step("share update", ("{share}", "--password", "--project", "{project}"), stdin="livecheck-pw\nlivecheck-pw\n"),
+    Step("share update", ("{share}", "--no-password", "--project", "{project}")),
     Step("share rotate", ("{share}", "--yes", "--project", "{project}")),
-    Step("share remove", ("{share}", "--yes", "--project", "{project}")),
+    Step("share rm", ("{share}", "--yes", "--project", "{project}")),
     # -- datasources (read-only half) -----------------------------------------
     Step("datasources list", ("--project", "{project}")),
     # -- runs -----------------------------------------------------------------
@@ -331,13 +299,12 @@ PLAN: tuple[Step, ...] = (
     ),
     Step("runs get", ("{run}", "--project", "{project}"), gated=True),
     Step("runs cancel", ("{run}", "--project", "{project}"), gated=True),
-    Step("outputs", ("--project", "{project}"), gated=True),
     # -- teardown -------------------------------------------------------------
-    Step("config set-org", ("{org}",)),
+    Step("org use", ("{org}",)),
     Step("env use", ("{env}",)),
-    Step("projects delete", ("{push_project}", "--yes"), teardown=True),
-    Step("projects delete", ("{new_project}", "--yes"), teardown=True),
-    Step("projects delete", ("{project}", "--yes"), teardown=True),
+    Step("projects rm", ("{push_project}", "--yes"), teardown=True),
+    Step("projects rm", ("{new_project}", "--yes"), teardown=True),
+    Step("projects rm", ("{project}", "--yes"), teardown=True),
     Step("logout", teardown=True),
 )
 
@@ -421,8 +388,8 @@ def validate_plan() -> list[str]:
                 f"needs {_positional_count_required(command)}"
             )
 
-    if not any(step.teardown and step.path == "projects delete" for step in PLAN):
-        problems.append("plan has no `projects delete` teardown step; a failed run would leak the canary")
+    if not any(step.teardown and step.path == "projects rm" for step in PLAN):
+        problems.append("plan has no `projects rm` teardown step; a failed run would leak the canary")
 
     captured: set[str] = set()
     for step in PLAN:
@@ -452,7 +419,8 @@ def _split_opts_of(command: dict) -> set[str]:
 
 def _split_opts(param: dict) -> set[str]:
     names: set[str] = set()
-    for opt in param["opts"]:
+    # A boolean pair's negative flag ("--no-password") lives in secondary_opts.
+    for opt in [*param["opts"], *param.get("secondary_opts", [])]:
         if not opt.startswith("-"):
             continue
         names.add(opt)
@@ -542,7 +510,7 @@ class Runner:
                 capture_output=True,
                 text=True,
                 timeout=600,
-                # Hidden prompts (secrets set, share set-password) call
+                # Hidden prompts (secrets set, share update --password) call
                 # getpass.getpass(), which opens /dev/tty *directly* and only
                 # falls back to stdin if that open fails. Without this, the
                 # child inherits our controlling terminal, getpass reads from
@@ -610,14 +578,14 @@ class Runner:
                 result = self.execute(step)
                 self.results.append(result)
                 print(_format(result), flush=True)
-                # A failed `projects create` means nothing downstream can work;
+                # A failed canary creation means nothing downstream can work;
                 # stop early rather than emitting forty confusing skips.
-                if result.status == "fail" and step.path == "projects create":
+                if result.status == "fail" and step.capture == "project":
                     print("  canary project was not created — skipping to teardown", flush=True)
                     break
         finally:
             # Teardown must run even on Ctrl-C or an unexpected exception —
-            # not just the checked `projects create` failure above — or the
+            # not just the checked canary-creation failure above — or the
             # canary project leaks on the real backend.
             for step in teardown:
                 result = self.execute(step)
@@ -633,7 +601,7 @@ class Runner:
         return path
 
     def _seed_push_folder(self) -> Path:
-        """A plain folder for `harumi push` to turn into a new project.
+        """A plain folder for `harumi import` to turn into a new project.
 
         `push` accepts any directory — there is no export manifest or
         schema to satisfy — and `push_folder()` (git.py) `git init`s its own
@@ -732,7 +700,7 @@ def _seed_credentials(home: Path, env_name: str) -> str:
         )
     shutil.copy2(existing, target)
     target.chmod(0o600)
-    # Carry the saved org across too, so `org members` and `config set-org` have
+    # Carry the saved org across too, so `org members` and `org use` have
     # something real to point at.
     env_config = source / "environments" / env_name / "config.json"
     if env_config.exists():

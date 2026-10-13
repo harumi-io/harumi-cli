@@ -51,6 +51,9 @@ from harumi.models import (
     RepoInfo,
     Schedule,
     Secret,
+    SkillLibraryDetail,
+    SkillLibraryList,
+    SkillLibrarySummary,
     UserProfile,
 )
 
@@ -271,6 +274,18 @@ class Client:
         response = self.api.request("GET", "/blueprints")
         return [BlueprintSummary.model_validate(b) for b in response.json().get("blueprints", [])]
 
+    # -- Skill library -----------------------------------------------------
+    # Read-only presets served by harumi-api; installing one is a file write
+    # into the project's repo (see `harumi skills add`).
+
+    def list_skill_library(self) -> list[SkillLibrarySummary]:
+        response = self.api.request("GET", "/skill-library")
+        return SkillLibraryList.model_validate(response.json()).skills
+
+    def get_skill_library(self, slug: str) -> SkillLibraryDetail:
+        response = self.api.request("GET", f"/skill-library/{_q(slug)}")
+        return SkillLibraryDetail.model_validate(response.json())
+
     # -- Project creation -------------------------------------------------
     # POST /projects creates the project row AND (best-effort, synchronously)
     # provisions its Gitea repo server-side — but the response body is a bare
@@ -286,7 +301,7 @@ class Client:
         """Create a new Harumi project and fetch its (auto-provisioned) repo.
 
         The owning workspace comes from `customer_id`, defaulting to the
-        configured org (`harumi config set-org` / `--org` / `HARUMI_ORG`).
+        configured org (`harumi org use` / `--org` / `HARUMI_ORG`).
         POST /projects reads the workspace from the body only — it ignores the
         `X-Organization` header that scopes the read endpoints — so without
         this default a configured org would still create the project in the

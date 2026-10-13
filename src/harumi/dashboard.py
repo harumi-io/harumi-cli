@@ -168,6 +168,56 @@ def schema_version() -> int:
     return version
 
 
+@lru_cache(maxsize=1)
+def widget_aliases() -> Dict[str, Dict[str, Any]]:
+    """The artifact's optional ``aliases`` map: a retired widget ``type`` -> the
+    ``type`` it now means, plus the keys the old name implied
+    (``{"line-chart": {"type": "chart", "set": {"variant": "line"}}}``).
+
+    The platform rewrites an aliased entry before validating it, so a spec
+    written before a type was folded into another keeps rendering. An artifact
+    with no ``aliases`` (every one before the chart fold) means none, not an
+    error. Lazy for the same reason as `widget_schemas()`.
+    """
+    raw = _artifact().get("aliases")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name}: aliases must be an object")
+    aliases: Dict[str, Dict[str, Any]] = {}
+    for legacy, target in raw.items():
+        if not isinstance(target, dict) or not isinstance(target.get("type"), str):
+            raise DashboardSchemaError(f'{SCHEMA_ARTIFACT_PATH.name}: alias "{legacy}" has no string target type')
+        implied = target.get("set", {})
+        if not isinstance(implied, dict):
+            raise DashboardSchemaError(f'{SCHEMA_ARTIFACT_PATH.name}: alias "{legacy}" has a non-object "set"')
+        aliases[legacy] = {"type": target["type"], "set": implied}
+    return aliases
+
+
+def resolve_alias(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """``entry`` with a retired ``type`` rewritten to its target. Keys the entry
+    sets itself win over the ones the old name implied, mirroring the platform's
+    ``parseWidgetEntry``."""
+    type_ = entry.get("type")
+    alias = widget_aliases().get(type_) if isinstance(type_, str) else None
+    if alias is None:
+        return entry
+    return {**alias["set"], **entry, "type": alias["type"]}
+
+
+@lru_cache(maxsize=1)
+def series_marks() -> Optional[Tuple[str, ...]]:
+    """Allowed values for a ``series[].mark``, or None when the artifact
+    predates the key (a mark is then neither kept nor reported)."""
+    raw = _artifact().get("seriesMarks")
+    if raw is None:
+        return None
+    if not isinstance(raw, list) or not all(isinstance(m, str) for m in raw):
+        raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name}: seriesMarks must be a list of strings")
+    return tuple(raw)
+
+
 def _coerce_columns(value: Any) -> Optional[List[Dict[str, str]]]:
     if not isinstance(value, list):
         return None
@@ -191,6 +241,11 @@ def _coerce_series(value: Any) -> Optional[List[Dict[str, str]]]:
         # so the series renders in the default gray, rather than dropping the series.
         if _is_valid_color(s.get("color")):
             entry["color"] = s["color"]
+        # Mirrors `coerceSeries`: a `mark` outside the artifact's list is dropped
+        # (the series falls back to the chart's variant), not the whole series.
+        marks = series_marks()
+        if marks is not None and s.get("mark") in marks:
+            entry["mark"] = s["mark"]
         series.append(entry)
     return series or None
 
@@ -335,7 +390,18 @@ def widget_warnings(entry: Dict[str, Any], widget: Dict[str, Any]) -> List[Widge
     for field in widget_schemas()[type_]:
         raw = entry.get(field.toml_key)
         if field.kind == "series" and isinstance(raw, list):
+            marks = series_marks()
             for index, item in enumerate(raw, start=1):
+                if marks is not None and isinstance(item, dict) and "mark" in item and item["mark"] not in marks:
+                    issues.append(
+                        WidgetIssue(
+                            id_,
+                            f'{head} "{field.toml_key}[{index}].mark": {item["mark"]!r} is not one of '
+                            f'{", ".join(marks)}; the chart\'s variant is used for this series instead',
+                            dropped=False,
+                            label="ignored",
+                        )
+                    )
                 if isinstance(item, dict) and item.get("color") is not None and not _is_valid_color(item["color"]):
                     issues.append(
                         WidgetIssue(
@@ -388,6 +454,7 @@ def parse_widget_entry(entry: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]],
     """Validate one raw `[[widgets]]` table entry. Mirrors `parseWidgetEntry`
     in schema.ts: returns either a coerced widget dict, or the (single,
     first-found) reason it was dropped."""
+    entry = resolve_alias(entry)
     type_ = entry.get("type")
     id_ = entry.get("id")
     title = entry.get("title")
@@ -685,7 +752,8 @@ def validate_dashboard_toml(
         widget, issue = parse_widget_entry(entry)
         if widget is not None:
             widgets.append(widget)
-            issues.extend(widget_warnings(entry, widget))
+            # The resolved entry, so a key an alias implies is seen here too.
+            issues.extend(widget_warnings(resolve_alias(entry), widget))
         else:
             assert issue is not None
             issues.append(issue)
