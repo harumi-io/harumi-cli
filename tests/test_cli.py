@@ -781,6 +781,63 @@ def test_usage_shows_the_harumi_io_tier_as_unlimited(api):
     assert "unlimited" in result.output
 
 
+def test_import_stops_before_touching_the_folder_when_personal_has_no_plan(api, git_ops, tmp_path):
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(personal_active=False))
+    folder = tmp_path / "code"
+    folder.mkdir()
+    (folder / "solve.py").write_text("print(1)\n")
+
+    result = runner.invoke(cli.app, ["import", str(folder), "--personal"])
+
+    assert result.exit_code == 1
+    assert "personal workspace doesn't have an active plan" in result.output
+    assert not any(r.method == "POST" for r in api.requests)
+    # No harumi.toml scaffolded: the folder is left exactly as it was.
+    assert sorted(p.name for p in folder.iterdir()) == ["solve.py"]
+
+
+def test_start_checks_the_configured_workspace_not_just_any(api, monkeypatch):
+    """An entitled org elsewhere doesn't let `start` past when the project
+    would land in an unentitled Personal; the hint names the org instead."""
+    org = {"customer_id": "org-1", "name": "Acme", "active": True, "tier": "enterprise", "reason": None}
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(personal_active=False, orgs=[org]))
+
+    result = runner.invoke(cli.app, ["start"], input="1\nWidget\n")
+
+    assert result.exit_code == 1
+    assert "Project name" not in result.output
+    assert "harumi org use org-1" in result.output
+
+
+def test_usage_with_no_limits_on_a_new_server_derives_nothing(api):
+    """A new server sends the pct fields as null for a plan with no limits;
+    that is not an older server, so no percentage is made up from credits."""
+    api.route(
+        "GET",
+        "/api/billing/usage",
+        {
+            "billing_account_id": "acct-1",
+            "plan_code": "enterprise",
+            "tier": "enterprise",
+            "balance_credits": 500,
+            "included_credits": 2000,
+            "period_start": "2026-09-01T00:00:00Z",
+            "period_end": "2026-10-01T00:00:00Z",
+            "weekly_used_pct": None,
+            "monthly_used_pct": None,
+            "overage_enabled": False,
+            "overage_cap_credits": 0,
+            "entries": [],
+        },
+    )
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "75%" not in result.output
+    assert "Monthly: no limit" in result.output
+
+
 def test_usage_for_an_unentitled_personal_workspace_points_at_subscribing(api):
     api.route("GET", "/api/billing/entitlement/me", _entitlement_body(personal_active=False))
 

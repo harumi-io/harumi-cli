@@ -813,7 +813,8 @@ def usage(
     console.print(f"Plan: [bold]{_tier_label(tier)}[/bold]{status_note}")
 
     weekly_pct, monthly_pct = usage_data.weekly_used_pct, usage_data.monthly_used_pct
-    if weekly_pct is None and monthly_pct is None and usage_data.included_credits:
+    server_has_pcts = bool({"weekly_used_pct", "monthly_used_pct"} & usage_data.model_fields_set)
+    if not server_has_pcts and usage_data.included_credits:
         # An older server without the percentage fields: derive the month's.
         used = max(0, usage_data.included_credits - usage_data.balance_credits)
         monthly_pct = 100.0 * used / usage_data.included_credits
@@ -1454,6 +1455,8 @@ def _push_impl(
         _fail(f"Not a directory: {folder}")
 
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
+    # Before the merge and scaffold below change the user's folder.
+    _require_entitled_workspace(client, None if personal else client.config.org_id)
 
     if from_git:
         _merge_git_repo_flat(from_git, folder)
@@ -1568,14 +1571,13 @@ def new(
     )
 
 
-def _require_entitled_workspace(client, customer_id: Optional[str], *, any_workspace: bool = False) -> None:
+def _require_entitled_workspace(client, customer_id: Optional[str]) -> None:
     """Stop before creating anything when the target workspace has no plan.
 
-    `customer_id=None` is the personal workspace. With `any_workspace`, any
-    entitled workspace will do (`harumi start`, before it knows which one).
-    Advisory only: skipped when the paywall is off or the lookup fails (an
-    older server without `GET /billing/entitlement/me`, an outage) —
-    `POST /projects` still answers 402 then.
+    `customer_id=None` is the personal workspace. Advisory only: skipped when
+    the paywall is off or the lookup fails (an older server without
+    `GET /billing/entitlement/me`, an outage) — `POST /projects` still answers
+    402 then.
     """
     try:
         ent = client.get_entitlement()
@@ -1583,17 +1585,19 @@ def _require_entitled_workspace(client, customer_id: Optional[str], *, any_works
         return
     if not ent.paywall_enabled:
         return
-    if any_workspace:
-        if ent.any_active:
-            return
-        _fail(f"You don't have a workspace with an active plan yet.\n{_paywall_hint('no_subscription')}")
     if customer_id is None:
-        if not ent.personal.active:
-            _fail(
-                "Your personal workspace doesn't have an active plan.\n"
-                + _paywall_hint(ent.personal.reason or "no_subscription")
+        if ent.personal.active:
+            return
+        message = "Your personal workspace doesn't have an active plan.\n" + _paywall_hint(
+            ent.personal.reason or "no_subscription"
+        )
+        entitled_org = next((o for o in ent.organizations if o.active), None)
+        if entitled_org is not None:
+            message += (
+                f"\nOr create it in {escape(entitled_org.name or entitled_org.customer_id)}: "
+                f"[bold]harumi org use {escape(entitled_org.customer_id)}[/bold]"
             )
-        return
+        _fail(message)
     org = next((o for o in ent.organizations if o.customer_id == customer_id), None)
     if org is not None and not org.active:
         _fail(
@@ -1757,9 +1761,11 @@ def start() -> None:
     while choice not in {"1", "2", "3"}:
         choice = typer.prompt("Choice (1/2/3)")
     if choice in {"1", "2"}:
-        # Both create a project; stop before asking for a name or path.
-        # Cloning (3) stays open: a read-only project can still be fetched.
-        _require_entitled_workspace(_get_client(), None, any_workspace=True)
+        # Both create a project in the configured org (or Personal): check
+        # that workspace before asking for a name or path. Cloning (3) stays
+        # open: a read-only project can still be fetched.
+        client = _get_client()
+        _require_entitled_workspace(client, client.config.org_id)
 
     if choice == "1":
         name = typer.prompt("Project name")

@@ -703,4 +703,3 @@ class MyEntitlement(BaseModel):
     personal: WorkspaceEntitlement
     organizations: list[WorkspaceEntitlement] = Field(default_factory=list)
     any_active: bool = True
-
