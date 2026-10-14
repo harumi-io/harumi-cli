@@ -147,6 +147,7 @@ import mimetypes
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -416,15 +417,52 @@ def _resolve_project(project: Optional[str]) -> str:
     raise AssertionError("unreachable")  # _fail always raises
 
 
+def _billing_url() -> str:
+    return f"{active_platform_url()}/settings?tab=billing"
+
+
+# What to do next for each 402 reason harumi-api sends as `code`
+# (`src/api/billing/admission.py` `_REASONS_402`). Its `detail` already says
+# what happened; this only adds where to go.
+_LIMIT_HINT = "Run [bold]harumi usage[/bold] to see your limits, or visit {billing} to upgrade or turn on overage."
+_UPGRADE_HINT = "Upgrade at {billing}."
+_ORG_ADMIN_HINT = "Ask your organization admin to raise your limit."
+_PAYWALL_HINTS = {
+    "no_subscription": "Subscribe at {billing}, or work in an organization that has a plan (`harumi org use`).",
+    "org_not_subscribed": (
+        "Ask your organization admin to contact sales at https://harumi.io/contact, "
+        "or switch workspace with `harumi org use` / `--personal`."
+    ),
+    "weekly_limit_reached": _LIMIT_HINT,
+    "monthly_limit_reached": _LIMIT_HINT,
+    "insufficient_credits": _LIMIT_HINT,
+    "member_weekly_limit_reached": _ORG_ADMIN_HINT,
+    "member_monthly_limit_reached": _ORG_ADMIN_HINT,
+    "free_kernel_time_exhausted": _UPGRADE_HINT,
+    "free_concurrent_runs": "Wait for your current run to finish, or upgrade at {billing}.",
+    "kernel_size_not_in_plan": "Pick a smaller kernel, or upgrade at {billing}.",
+    "kernel_requires_higher_plan": "Pick a smaller kernel, or upgrade at {billing}.",
+    "gurobi_requires_higher_plan": "Contact sales at https://harumi.io/contact for an Enterprise plan.",
+    # A share link's visitor neither pays nor can act on the owner's plan.
+    "share_link_cap_reached": "",
+    "share_link_owner_out_of_credits": "",
+    "share_link_owner_not_subscribed": "",
+}
+
+
+def _paywall_hint(code: Optional[str]) -> str:
+    """The next step for a 402 `code`; the limit hint for an unknown or missing one."""
+    template = _PAYWALL_HINTS.get(code or "", _LIMIT_HINT)
+    return template.format(billing=_billing_url())
+
+
 def _format_api_error(exc: ApiError) -> str:
     """`str(exc)` for every `ApiError` except a 402, which gets a message that
     actually tells the user what to do — "harumi-api returned HTTP 402: ..."
-    is accurate but doesn't point anywhere. 402 here always means one thing:
-    the credit-billing entitlement check in harumi-api's `billing/admission.py`
-    denied the run/chat turn that was about to start (see the credit-billing
-    plan's "hard block (402) enforcement" decision) — never an HTTP-layer
-    payment problem, so there's exactly one message to show regardless of
-    which command triggered it.
+    is accurate but doesn't point anywhere. 402 here always means billing:
+    the workspace has no plan, is over a weekly/monthly limit, or the plan
+    doesn't cover the kernel. harumi-api sends the reason as `code`, which
+    picks the hint; its `detail` is shown as is.
     """
     if isinstance(exc, ApiUnreachableError) or exc.status_code >= 500:
         # harumi-api gave no answer, or a server-side failure: likely an outage, not user error.
@@ -436,11 +474,8 @@ def _format_api_error(exc: ApiError) -> str:
     if exc.status_code != 402:
         # `_fail` prints through Rich markup, and server text can hold `[/x]`-style brackets.
         return escape(str(exc))
-    return (
-        f"{escape(exc.detail)}\nRun [bold]harumi usage[/bold] to see your current allowance, "
-        f"or visit {active_platform_url()}/settings?tab=billing to upgrade, enable "
-        "overage, or buy a top-up."
-    )
+    hint = _paywall_hint(exc.code)
+    return f"{escape(exc.detail)}\n{hint}" if hint else escape(exc.detail)
 
 
 def _handle_errors(fn):
@@ -682,6 +717,57 @@ def whats_new(
         console.print("[dim]Older releases: harumi whats-new --all[/dim]")
 
 
+_TIER_LABELS = {
+    "free": "Free",
+    "personal": "Personal",
+    "pro": "Pro",
+    "enterprise": "Enterprise",
+    "harumi_io": "harumi-io",
+}
+
+
+def _tier_label(tier: Optional[str]) -> str:
+    return _TIER_LABELS.get(tier or "", tier or "none")
+
+
+def _fmt_reset(iso: Optional[str], *, with_time: bool) -> str:
+    """`2026-10-20T15:00:00+00:00` as local "Tue Oct 20 15:00" (or just the date)."""
+    if not iso:
+        return "?"
+    try:
+        when = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
+    except ValueError:
+        return iso.split("T", 1)[0]
+    return when.strftime("%a %b %d %H:%M" if with_time else "%b %d")
+
+
+def _fmt_dollars(cents: int) -> str:
+    return f"${cents / 100:,.2f}"
+
+
+def _meter_line(label: str, pct: Optional[float], resets_at: Optional[str], *, with_time: bool) -> str:
+    if pct is None:
+        return f"{label}: [dim]no limit[/dim]"
+    color = "red" if pct >= 100 else "yellow" if pct >= 80 else "green"
+    return (
+        f"{label}: [bold {color}]{pct:.0f}%[/bold {color}] used"
+        f"  [dim](resets {_fmt_reset(resets_at, with_time=with_time)})[/dim]"
+    )
+
+
+def _workspace_entitlement(client, org_id: Optional[str]):
+    """The entitlement of the workspace `harumi usage` is showing, or `None`
+    when it can't be read (an older server, an outage) — the usage itself
+    still prints."""
+    try:
+        ent = client.get_entitlement()
+    except ApiError:
+        return None, None
+    if not org_id:
+        return ent, ent.personal
+    return ent, next((o for o in ent.organizations if o.customer_id == org_id), None)
+
+
 @app.command()
 @_handle_errors
 def usage(
@@ -690,34 +776,77 @@ def usage(
         None, "--org", help="Show an organization's pooled allowance instead of your personal one."
     ),
 ) -> None:
-    """Show your (or --org's) current credit allowance.
+    """Show your (or --org's) plan, weekly and monthly usage, and overage.
 
-    Credits are the abstract unit AI chat tokens and compute run-seconds are
-    metered in — see `harumi run`'s 402 errors, which are this same
-    allowance running out.
+    Usage is shown as a percentage of each limit; overage in dollars. These
+    are the same limits `harumi run` and chat hit with a 402.
     """
     client = _get_client(api_url=api_url, org=org)
-    usage_data = client.get_credit_usage()
+    org_id = client.config.org_id
+    ent, workspace = _workspace_entitlement(client, org_id)
+    if org_id:
+        org_name = (workspace.name if workspace else None) or org_id
+        where = f"organization [bold]{escape(org_name)}[/bold]"
+    else:
+        where = "your [bold]personal[/bold] workspace"
 
-    period_end = usage_data.period_end.split("T", 1)[0]
-    remaining = max(0, usage_data.balance_credits)
-    console.print(
-        f"Plan: [bold]{usage_data.plan_code}[/bold]  "
-        f"Balance: [bold]{remaining:,}[/bold] / {usage_data.included_credits:,} credits  "
-        f"(resets {period_end})"
-    )
-    if usage_data.overage_enabled:
+    if ent is not None and ent.paywall_enabled and workspace is not None and not workspace.active:
+        console.print(f"Workspace: {where} — [bold red]no active plan[/bold red]")
+        reason = workspace.reason or ("org_not_subscribed" if org_id else "no_subscription")
+        console.print(f"[yellow]{_paywall_hint(reason)}[/yellow]")
+        return
+
+    usage_data = client.get_credit_usage()
+    tier = usage_data.tier or (workspace.tier if workspace else None) or usage_data.plan_code
+    console.print(f"Workspace: {where}")
+    if usage_data.unlimited or tier == "harumi_io":
+        console.print(f"Plan: [bold]{_tier_label(tier)}[/bold] — Harumi team, unlimited.")
+        return
+
+    status = usage_data.subscription_status
+    status_note = ""
+    if status == "past_due" and usage_data.grace_ends_at:
+        status_note = (
+            f"  [yellow](payment failed — read-only after "
+            f"{_fmt_reset(usage_data.grace_ends_at, with_time=False)})[/yellow]"
+        )
+    console.print(f"Plan: [bold]{_tier_label(tier)}[/bold]{status_note}")
+
+    weekly_pct, monthly_pct = usage_data.weekly_used_pct, usage_data.monthly_used_pct
+    server_has_pcts = bool({"weekly_used_pct", "monthly_used_pct"} & usage_data.model_fields_set)
+    if not server_has_pcts and usage_data.included_credits:
+        # An older server without the percentage fields: derive the month's.
+        used = max(0, usage_data.included_credits - usage_data.balance_credits)
+        monthly_pct = 100.0 * used / usage_data.included_credits
+        console.print(_meter_line("Monthly", monthly_pct, usage_data.period_end, with_time=False))
+    else:
+        console.print(_meter_line("Weekly", weekly_pct, usage_data.weekly_resets_at, with_time=True))
+        console.print(_meter_line("Monthly", monthly_pct, usage_data.monthly_resets_at, with_time=False))
+
+    member = usage_data.member
+    if member is not None and (member.weekly_used_pct is not None or member.monthly_used_pct is not None):
+        parts = []
+        if member.weekly_used_pct is not None:
+            parts.append(f"{member.weekly_used_pct:.0f}% of your weekly limit")
+        if member.monthly_used_pct is not None:
+            parts.append(f"{member.monthly_used_pct:.0f}% of your monthly limit")
+        console.print(f"Your share: {' · '.join(parts)} used (set by your organization).")
+
+    if tier == "free" or (not usage_data.overage_allowed and not usage_data.overage_enabled):
+        console.print("Overage: [dim]not available on this plan[/dim].")
+    elif usage_data.overage_paused:
+        console.print("Overage: [bold red]paused[/bold red] — an overage invoice is unpaid.")
+    elif usage_data.overage_enabled:
         console.print(
-            f"Overage: [bold green]enabled[/bold green], capped at {usage_data.overage_cap_credits:,} credits."
+            f"Overage: [bold green]on[/bold green] — {_fmt_dollars(usage_data.overage_spent_cents)} "
+            f"of {_fmt_dollars(usage_data.overage_cap_cents)} used this period."
         )
     else:
-        console.print("Overage: [dim]disabled[/dim] — hits a hard stop (402) once the balance runs out.")
+        console.print("Overage: [dim]off[/dim] — work stops (402) once a limit is reached.")
 
-    if usage_data.balance_credits <= 0 and not usage_data.overage_enabled:
-        console.print(
-            "[yellow]Your allowance is exhausted. Enable overage or buy a top-up "
-            f"at {active_platform_url()}/settings?tab=billing.[/yellow]"
-        )
+    over = any(p is not None and p >= 100 for p in (weekly_pct, monthly_pct))
+    if over and not usage_data.overage_enabled:
+        console.print(f"[yellow]You've reached a limit. {_paywall_hint('weekly_limit_reached')}[/yellow]")
 
 
 # ---------------------------------------------------------------------------
@@ -1326,6 +1455,8 @@ def _push_impl(
         _fail(f"Not a directory: {folder}")
 
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
+    # Before the merge and scaffold below change the user's folder.
+    _require_entitled_workspace(client, None if personal else client.config.org_id)
 
     if from_git:
         _merge_git_repo_flat(from_git, folder)
@@ -1440,6 +1571,41 @@ def new(
     )
 
 
+def _require_entitled_workspace(client, customer_id: Optional[str]) -> None:
+    """Stop before creating anything when the target workspace has no plan.
+
+    `customer_id=None` is the personal workspace. Advisory only: skipped when
+    the paywall is off or the lookup fails (an older server without
+    `GET /billing/entitlement/me`, an outage) — `POST /projects` still answers
+    402 then.
+    """
+    try:
+        ent = client.get_entitlement()
+    except ApiError:
+        return
+    if not ent.paywall_enabled:
+        return
+    if customer_id is None:
+        if ent.personal.active:
+            return
+        message = "Your personal workspace doesn't have an active plan.\n" + _paywall_hint(
+            ent.personal.reason or "no_subscription"
+        )
+        entitled_org = next((o for o in ent.organizations if o.active), None)
+        if entitled_org is not None:
+            message += (
+                f"\nOr create it in {escape(entitled_org.name or entitled_org.customer_id)}: "
+                f"[bold]harumi org use {escape(entitled_org.customer_id)}[/bold]"
+            )
+        _fail(message)
+    org = next((o for o in ent.organizations if o.customer_id == customer_id), None)
+    if org is not None and not org.active:
+        _fail(
+            f"Organization {escape(org.name or customer_id)} doesn't have an active plan yet.\n"
+            + _paywall_hint(org.reason or "org_not_subscribed")
+        )
+
+
 def _new_impl(
     *,
     name: str,
@@ -1459,6 +1625,7 @@ def _new_impl(
         _fail("--dir only applies when cloning. Drop --no-clone, or drop --dir.")
 
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
+    _require_entitled_workspace(client, None if personal else (customer_id or client.config.org_id))
 
     console.print(f"Creating project [bold]{name}[/bold]...")
     project = client.create_project(
@@ -1593,6 +1760,12 @@ def start() -> None:
     choice = ""
     while choice not in {"1", "2", "3"}:
         choice = typer.prompt("Choice (1/2/3)")
+    if choice in {"1", "2"}:
+        # Both create a project in the configured org (or Personal): check
+        # that workspace before asking for a name or path. Cloning (3) stays
+        # open: a read-only project can still be fetched.
+        client = _get_client()
+        _require_entitled_workspace(client, client.config.org_id)
 
     if choice == "1":
         name = typer.prompt("Project name")

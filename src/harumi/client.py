@@ -32,6 +32,7 @@ from harumi.models import (
     KernelSpec,
     Memory,
     MemoryList,
+    MyEntitlement,
     Organization,
     OrganizationMember,
     Project,
@@ -178,12 +179,18 @@ class ApiClient:
 def _raise_for_status(response: httpx.Response, streamed: bool = False) -> None:
     if response.status_code >= 400:
         detail = "" if streamed else response.text
+        code = None
         if not streamed:
             try:
-                detail = response.json().get("detail", detail)
+                body = response.json()
+                detail = body.get("detail", detail)
+                # harumi-api sends a machine-readable reason beside every 402
+                # (`no_subscription`, `weekly_limit_reached`, ...).
+                if isinstance(body.get("code"), str):
+                    code = body["code"]
             except Exception:
                 pass
-        raise ApiError(response.status_code, str(detail) or response.reason_phrase)
+        raise ApiError(response.status_code, str(detail) or response.reason_phrase, code=code)
 
 
 class Client:
@@ -235,6 +242,12 @@ class Client:
     def get_credit_usage(self) -> CreditUsage:
         response = self.api.request("GET", "/billing/usage")
         return CreditUsage.model_validate(response.json())
+
+    def get_entitlement(self) -> MyEntitlement:
+        """GET /billing/entitlement/me — which workspaces (personal, each org)
+        the caller can work in. Not scoped by `X-Organization`: it lists all."""
+        response = self.api.request("GET", "/billing/entitlement/me")
+        return MyEntitlement.model_validate(response.json())
 
     # -- Git credentials ------------------------------------------------
     # POST /git/credentials — provisions (idempotently) the current user's

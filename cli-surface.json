@@ -4334,7 +4334,7 @@
     },
     {
       "path": "usage",
-      "help": "Show your (or --org's) current credit allowance.",
+      "help": "Show your (or --org's) plan, weekly and monthly usage, and overage.",
       "params": [
         {
           "opts": [
