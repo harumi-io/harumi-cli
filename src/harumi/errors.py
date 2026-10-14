@@ -22,9 +22,11 @@ class NotAuthenticatedError(HarumiError):
 class ApiError(HarumiError):
     """Raised when harumi-api returns a non-2xx response."""
 
-    def __init__(self, status_code: int, detail: str) -> None:
+    def __init__(self, status_code: int, detail: str, code: str | None = None) -> None:
         self.status_code = status_code
         self.detail = detail
+        # harumi-api's denial reason when it sent one (402s carry it).
+        self.code = code
         super().__init__(f"harumi-api returned HTTP {status_code}: {detail}")
 
 

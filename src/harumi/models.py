@@ -634,21 +634,73 @@ class CreditLedgerEntry(BaseModel):
     created_at: str
 
 
+class MemberUsage(BaseModel):
+    """The caller's own share of an org account, when the org caps them."""
+
+    model_config = ConfigDict(extra="allow")
+
+    weekly_used_pct: Optional[float] = None
+    monthly_used_pct: Optional[float] = None
+
+
 class CreditUsage(BaseModel):
     """Response from `GET /billing/usage` — the caller's (or, with
-    `--org`/`X-Organization`, an org's) current credit allowance. Mirrors
-    harumi-api's `UsageSummary` (`src/api/billing/models.py`); `balance_credits`
-    is what's left of `included_credits` for the current period."""
+    `--org`/`X-Organization`, an org's) current allowance. Mirrors
+    harumi-api's `UsageSummary` (`src/api/billing/models.py`).
+
+    Users are shown the `*_used_pct` meters and dollar overage; the raw credit
+    fields are kept for `--json`-style scripting and older servers. A `None`
+    percentage means that window has no limit (`unlimited`, or no weekly cap).
+    """
 
     model_config = ConfigDict(extra="allow")
 
     billing_account_id: str
     plan_code: str
+    tier: Optional[str] = None
+    unlimited: bool = False
     balance_credits: int
     included_credits: int
     period_start: str
     period_end: str
+    weekly_used_pct: Optional[float] = None
+    monthly_used_pct: Optional[float] = None
+    weekly_resets_at: Optional[str] = None
+    monthly_resets_at: Optional[str] = None
+    overage_allowed: bool = False
     overage_enabled: bool
-    overage_cap_credits: int
+    overage_paused: bool = False
+    overage_cap_cents: int = 0
+    overage_spent_cents: int = 0
+    overage_cap_credits: int = 0
+    subscription_status: Optional[str] = None
+    grace_ends_at: Optional[str] = None
+    member: Optional[MemberUsage] = None
     entries: list[CreditLedgerEntry] = Field(default_factory=list)
+
+
+class WorkspaceEntitlement(BaseModel):
+    """One workspace in `GET /billing/entitlement/me` — personal (no
+    `customer_id`) or an organization — and whether it can be worked in."""
+
+    model_config = ConfigDict(extra="allow")
+
+    customer_id: Optional[str] = None
+    name: Optional[str] = None
+    active: bool
+    tier: str
+    reason: Optional[str] = None
+
+
+class MyEntitlement(BaseModel):
+    """Response from `GET /billing/entitlement/me`. Mirrors harumi-api's
+    `MyEntitlement`."""
+
+    model_config = ConfigDict(extra="allow")
+
+    paywall_enabled: bool = False
+    is_harumi: bool = False
+    personal: WorkspaceEntitlement
+    organizations: list[WorkspaceEntitlement] = Field(default_factory=list)
+    any_active: bool = True
 

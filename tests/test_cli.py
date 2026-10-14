@@ -369,6 +369,77 @@ def test_a_402_from_a_run_points_at_usage_and_the_billing_settings_page(api, bou
     assert "settings?tab=billing" in result.output
 
 
+@pytest.mark.parametrize(
+    ("code", "hint"),
+    [
+        ("no_subscription", "Subscribe at"),
+        ("org_not_subscribed", "harumi.io/contact"),
+        ("weekly_limit_reached", "turn on overage"),
+        ("member_monthly_limit_reached", "Ask your organization admin"),
+        ("kernel_size_not_in_plan", "smaller kernel"),
+    ],
+)
+def test_a_coded_402_gets_the_hint_for_its_reason(api, bound_dir, code, hint):
+    api.route(
+        "POST",
+        "/api/projects/proj-bound/execute",
+        {"detail": "Denied by billing.", "code": code},
+        status=402,
+    )
+
+    result = runner.invoke(cli.app, ["run", "--branch", "main"])
+
+    assert result.exit_code == 1
+    assert "Denied by billing." in result.output
+    assert hint in result.output
+
+
+def test_new_stops_before_creating_when_personal_has_no_plan(api, git_ops, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(personal_active=False))
+    api.route("POST", "/api/projects", {"id": "proj-9", "name": "Widget", "notebook_ids": []})
+
+    result = runner.invoke(cli.app, ["new", "Widget", "--personal", "--no-clone"])
+
+    assert result.exit_code == 1
+    assert "personal workspace doesn't have an active plan" in result.output
+    assert "Subscribe at" in result.output
+    assert not any(r.method == "POST" for r in api.requests)
+
+
+def test_new_stops_when_the_target_org_has_no_plan(api, git_ops, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    org = {"customer_id": "org-1", "name": "Acme", "active": False, "tier": "none", "reason": "org_not_subscribed"}
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(orgs=[org]))
+
+    result = runner.invoke(cli.app, ["new", "Widget", "--customer-id", "org-1", "--no-clone"])
+
+    assert result.exit_code == 1
+    assert "Acme" in result.output
+    assert "harumi.io/contact" in result.output
+
+
+def test_new_proceeds_when_the_paywall_is_off(api, git_ops, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(personal_active=False, paywall=False))
+    api.route("POST", "/api/projects", {"id": "proj-9", "name": "Widget", "notebook_ids": []})
+    _route_project_repo(api, "proj-9", "widget")
+
+    result = runner.invoke(cli.app, ["new", "Widget", "--personal", "--no-clone"])
+
+    assert result.exit_code == 0, result.output
+
+
+def test_start_stops_before_asking_for_a_name_with_no_entitled_workspace(api):
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(personal_active=False))
+
+    result = runner.invoke(cli.app, ["start"], input="1\nWidget\n")
+
+    assert result.exit_code == 1
+    assert "Project name" not in result.output
+    assert "Subscribe at" in result.output
+
+
 def test_a_5xx_points_at_the_status_page(api, bound_dir):
     api.route("POST", "/api/projects/proj-bound/execute", {"detail": "boom"}, status=503)
 
@@ -605,70 +676,134 @@ def test_status_targets_the_staging_page_for_the_staging_env(monkeypatch):
     assert seen == ["https://status.dev.harumi.io/api/v1/endpoints/statuses"]
 
 
-def test_usage_shows_the_balance_and_plan(api):
+def _usage_body(**overrides):
+    body = {
+        "billing_account_id": "acct-1",
+        "plan_code": "pro",
+        "tier": "pro",
+        "balance_credits": 200_000,
+        "included_credits": 396_000,
+        "period_start": "2026-10-01T00:00:00+00:00",
+        "period_end": "2026-11-01T00:00:00+00:00",
+        "weekly_used_pct": 48.2,
+        "monthly_used_pct": 16.0,
+        "weekly_resets_at": "2026-10-20T15:00:00+00:00",
+        "monthly_resets_at": "2026-11-01T00:00:00+00:00",
+        "overage_allowed": True,
+        "overage_enabled": False,
+        "overage_cap_cents": 0,
+        "overage_spent_cents": 0,
+        "overage_cap_credits": 0,
+        "entries": [],
+    }
+    body.update(overrides)
+    return body
+
+
+def _entitlement_body(personal_active=True, orgs=(), paywall=True):
+    return {
+        "paywall_enabled": paywall,
+        "is_harumi": False,
+        "personal": {
+            "customer_id": None,
+            "active": personal_active,
+            "tier": "pro" if personal_active else "free",
+            "reason": None if personal_active else "no_subscription",
+        },
+        "organizations": list(orgs),
+        "any_active": personal_active or any(o["active"] for o in orgs),
+    }
+
+
+def test_usage_shows_the_plan_and_both_meters_as_percentages(api):
+    api.route("GET", "/api/billing/usage", _usage_body())
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body())
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "Pro" in result.output
+    assert "Weekly: 48% used" in result.output
+    assert "Monthly: 16% used" in result.output
+    # Percentages only: no raw credit counts.
+    assert "396,000" not in result.output
+    assert "credits" not in result.output
+    assert "Overage: off" in result.output
+
+
+def test_usage_reports_overage_in_dollars(api):
     api.route(
         "GET",
         "/api/billing/usage",
-        {
-            "billing_account_id": "acct-1",
-            "plan_code": "free",
-            "balance_credits": 1500,
-            "included_credits": 2000,
-            "period_start": "2026-09-01T00:00:00Z",
-            "period_end": "2026-10-01T00:00:00Z",
-            "overage_enabled": False,
-            "overage_cap_credits": 0,
-            "entries": [],
-        },
+        _usage_body(overage_enabled=True, overage_cap_cents=1000, overage_spent_cents=320, weekly_used_pct=104.0),
     )
 
     result = runner.invoke(cli.app, ["usage"])
 
     assert result.exit_code == 0, result.output
-    assert "free" in result.output
-    assert "1,500" in result.output
-    assert "2,000" in result.output
-    assert "2026-10-01" in result.output
-    assert "disabled" in result.output
+    assert "$3.20 of $10.00 used" in result.output
+    # Overage is on, so reaching the weekly limit isn't a stop.
+    assert "reached a limit" not in result.output
 
 
-def test_usage_flags_an_exhausted_balance_with_no_overage(api):
-    api.route(
-        "GET",
-        "/api/billing/usage",
-        {
-            "billing_account_id": "acct-1",
-            "plan_code": "free",
-            "balance_credits": 0,
-            "included_credits": 2000,
-            "period_start": "2026-09-01T00:00:00Z",
-            "period_end": "2026-10-01T00:00:00Z",
-            "overage_enabled": False,
-            "overage_cap_credits": 0,
-            "entries": [],
-        },
-    )
+def test_usage_flags_a_reached_limit_with_no_overage(api):
+    api.route("GET", "/api/billing/usage", _usage_body(weekly_used_pct=100.0))
 
     result = runner.invoke(cli.app, ["usage"])
 
     assert result.exit_code == 0, result.output
-    assert "exhausted" in result.output
+    assert "reached a limit" in result.output
     assert "settings?tab=billing" in result.output
 
 
-def test_usage_reports_the_overage_cap_when_enabled(api):
+def test_usage_says_overage_is_not_available_on_free(api):
+    api.route(
+        "GET", "/api/billing/usage", _usage_body(plan_code="free", tier="free", overage_allowed=False)
+    )
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert "Free" in result.output
+    assert "not available on this plan" in result.output
+
+
+def test_usage_shows_the_harumi_io_tier_as_unlimited(api):
+    api.route(
+        "GET",
+        "/api/billing/usage",
+        _usage_body(plan_code="harumi_io", tier="harumi_io", unlimited=True, weekly_used_pct=None, monthly_used_pct=None),
+    )
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "harumi-io" in result.output
+    assert "unlimited" in result.output
+
+
+def test_usage_for_an_unentitled_personal_workspace_points_at_subscribing(api):
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(personal_active=False))
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "no active plan" in result.output
+    assert "Subscribe at" in result.output
+
+
+def test_usage_falls_back_to_a_monthly_percentage_on_an_older_server(api):
     api.route(
         "GET",
         "/api/billing/usage",
         {
             "billing_account_id": "acct-1",
             "plan_code": "individual",
-            "balance_credits": -50,
+            "balance_credits": 500,
             "included_credits": 2000,
             "period_start": "2026-09-01T00:00:00Z",
             "period_end": "2026-10-01T00:00:00Z",
-            "overage_enabled": True,
-            "overage_cap_credits": 500,
+            "overage_enabled": False,
+            "overage_cap_credits": 0,
             "entries": [],
         },
     )
@@ -676,13 +811,7 @@ def test_usage_reports_the_overage_cap_when_enabled(api):
     result = runner.invoke(cli.app, ["usage"])
 
     assert result.exit_code == 0, result.output
-    assert "enabled" in result.output
-    assert "500" in result.output
-    # A negative balance renders as 0, not a confusing negative count.
-    assert "0 / 2,000" in result.output
-    # Overage is on, so the exhausted-allowance warning must not fire even
-    # though the balance itself is negative.
-    assert "exhausted" not in result.output
+    assert "Monthly: 75% used" in result.output
 
 
 def test_secrets_list_prints_names_but_never_values(api):
