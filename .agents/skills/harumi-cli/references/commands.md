@@ -228,7 +228,7 @@ Requires the directory (or a parent) to be bound — via `harumi new`, `harumi i
 | `--kernel, -k` | Override the kernel spec (e.g. `or_python_small`, `gurobi_python_medium`). |
 | `--watch, -w` | Block until the run reaches a terminal status. |
 
-With `--watch`, a successful run ends by printing `harumi runs download <run-id>`. (`--output-dir` is deprecated: it still downloads, with a warning.)
+`run` prints `Running project <id> on branch <ref>` and then `Queued run <run-id>` (the run id is the UUID on that line; the internal execution-log id is no longer printed). With `--watch`: at a terminal one live line shows the status and the elapsed time; piped or logged it prints one line each time the status *changes*. Ctrl-C stops watching, never the run: it exits 130 and prints how to follow or cancel it. A succeeded run ends with `Run completed in 1m 12s.` and `harumi runs download <run-id>`; a failed, cancelled or timed-out run exits 1 and prints the cause first (error, exit code, the last 20 lines of stderr and how many were left out) and `harumi runs get <run-id>` for everything. If the server refuses the run for a reason about the project (HTTP 400, 404, 409 or 422), the message ends with `Run harumi check`. With `--watch`, a successful run ends by printing `harumi runs download <run-id>`. (`--output-dir` is deprecated: it still downloads, with a warning.)
 
 **Scratch-branch flow (default when tree is dirty or has unpushed commits):**
 
@@ -240,15 +240,15 @@ The CLI detects local changes, creates a temporary branch `harumi-scratch/<user>
 
 ```
 harumi runs list [--project ID] [--limit N | --all] [--api-url URL] [--org ORG]
-harumi runs get RUN_ID [--project ID] [--api-url URL] [--org ORG]
-harumi runs cancel RUN_ID [--project ID] [--api-url URL] [--org ORG]
+harumi runs get [RUN_ID] [--project ID] [--api-url URL] [--org ORG]
+harumi runs cancel [RUN_ID] [--project ID] [--api-url URL] [--org ORG]
 harumi runs download [RUN_ID] [--output-dir DIR] [--project ID] [--api-url URL] [--org ORG]
 ```
 
-- **`list`**: `GET /projects/{id}/runs` → table of `id`, `status`, `source`, `git_branch`, `started`, `ended`, newest first. Shows the latest 25 by default and says "Showing the latest 25 of N runs" when there are more; `--limit N` changes the count and `--all` shows every run.
-- **`get`**: `GET /projects/{id}/runs/{run_id}` → detail view plus `stdout`/`stderr`/`error` if present.
-- **`cancel`**: `POST /projects/{id}/runs/{run_id}/cancel` on an in-flight run.
-- **`download`**: downloads the run's output artifacts as a zip via `GET /projects/{id}/runs/{run_id}/output/archive` (proxied by the API from S3 for current runs, or Gitea for pre-migration runs). With no `RUN_ID` it takes the latest run (`GET /projects/{id}/runs`, newest first); errors if the project has no runs. `--output-dir` defaults to the current directory. Replaces `outputs --download` and `run --output-dir`.
+- **`list`**: `GET /projects/{id}/runs` → table of `id`, `status` (coloured), `source`, `branch`, `started` ("3 hours ago") and `took` ("1m 12s"), newest first. Shows the latest 25 by default and says "Showing the latest 25 of N runs" when there are more; `--limit N` changes the count and `--all` shows every run.
+- **`get`**: `GET /projects/{id}/runs/{run_id}` (no `RUN_ID`: the latest run) → a short summary (status and exit code, how long, code ref, command, kernel), then `stdout`, `stderr` and `error` if present, then the next step (`runs cancel` if it is still going, `runs download` if it left output). Output is printed literally, never read as markup.
+- **`cancel`**: `POST /projects/{id}/runs/{run_id}/cancel` on an in-flight run. With no `RUN_ID`, at a terminal, a picker offers only the runs still going (picking one is the confirmation); with no terminal it fails listing them and naming the `RUN_ID` argument. Cancelling a run that already finished says so instead of claiming a cancellation.
+- **`download`**: refuses a run that has not finished ("still running") and one that finished without output, each pointing at `runs get`; otherwise prints the zip's path and size. Downloads the run's output artifacts as a zip via `GET /projects/{id}/runs/{run_id}/output/archive` (proxied by the API from S3 for current runs, or Gitea for pre-migration runs). With no `RUN_ID` it takes the latest run (`GET /projects/{id}/runs`, newest first); errors if the project has no runs. `--output-dir` defaults to the current directory. Replaces `outputs --download` and `run --output-dir`.
 
 `--project` on every subcommand overrides the `.harumi` binding.
 
@@ -290,7 +290,7 @@ Commit once per change and push once; the old file-by-file commands made one ser
 harumi check [--ref REF] [--project ID] [--api-url URL] [--org ORG]
 ```
 
-`GET /projects/{id}/readiness?ref=` → everything blocking this project from running (repo exists, `harumi.toml` present and valid, kernel allowed), answered up front instead of surfacing as a 4xx from `run`/`schedules add`. Replaces `repo readiness`.
+`GET /projects/{id}/readiness?ref=` → everything blocking this project from running (repo exists, `harumi.toml` present and valid, kernel allowed), answered up front instead of surfacing as a 4xx from `run`/`schedules add`. Each check is shown by a readable name ("harumi.toml is valid"), then `Ready to run` with the next step, or `Not ready ...: N problems` and **exit code 1**, so a script can stop before `harumi run`. Replaces `repo readiness`.
 
 ## `dashboard`
 
