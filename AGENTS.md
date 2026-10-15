@@ -14,6 +14,7 @@ This section replaces any older "do not edit issues or PRs" rule.
 ### What you may do
 
 Without asking:
+
 - create issues in any harumi-io repo for the work you are about to do;
 - edit, label, assign, comment on and link issues and PRs that **I authored or am assigned to**;
 - put an item on the board and set the Status of an item I am working on.
@@ -68,15 +69,20 @@ gh project item-add 4 --owner harumi-io --url <issue-url>   # skip if already on
 
 item_id() { gh project item-list 4 --owner harumi-io --limit 500 --format json \
   | jq -r --arg r "$1" --argjson n "$2" '.items[] | select(.content.number==$n and (.repository|endswith("/"+$r))) | .id'; }
-set_status() { gh project item-edit --project-id PVT_kwDOCpjL3c4BZpZI --id "$(item_id "$1" "$2")" \
-  --field-id PVTSSF_lADOCpjL3c4BZpZIzhUmm0Q --single-select-option-id "$3"; }
+set_status() {  # set_status <repo> <issue-number> "<Status name>"; ids are looked up by name
+  local f; f=$(gh project field-list 4 --owner harumi-io --format json)
+  gh project item-edit --project-id "$(gh project view 4 --owner harumi-io --format json --jq .id)" \
+    --id "$(item_id "$1" "$2")" \
+    --field-id "$(jq -r '.fields[]|select(.name=="Status").id' <<<"$f")" \
+    --single-select-option-id "$(jq -r --arg s "$3" '.fields[]|select(.name=="Status").options[]|select(.name==$s).id' <<<"$f")"
+}
 
-set_status <repo> <issue-number> b4aa00e3   # In progress
+set_status <repo> <issue-number> "In progress"
 ```
 
-Status ids: To Do `ea9597ea`, In progress `b4aa00e3`, In review `e19a2055`, Done `f1ccd3da`. If one is
-rejected the board was reconfigured: re-read it with `gh project field-list 4 --owner harumi-io`.
-If `item_id` is empty right after `item-add`, retry once.
+Status names: `To Do`, `In progress`, `In review`, `Done`. If one is rejected the board was reconfigured: read
+the current options with `gh project field-list 4 --owner harumi-io`. If `item_id` is empty right after
+`item-add`, retry once.
 
 ### Link the PR and keep Status true
 
