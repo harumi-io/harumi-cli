@@ -92,7 +92,7 @@ harumi runs download -o ./out            # the finished run's output (the latest
 ### 2. Inspect and manage runs
 
 ```bash
-harumi runs list                          # table of runs for the bound project, newest first
+harumi runs list                          # the latest 25 runs for the bound project, newest first (--limit N, --all)
 harumi runs get <RUN_ID>                  # status, git ref, exit code, stdout/stderr/error
 harumi runs cancel <RUN_ID>               # cancel an in-flight run
 harumi runs download [RUN_ID] [-o DIR]    # download a run's committed output as a zip (latest run by default)
@@ -242,6 +242,7 @@ harumi org invite <ORG_ID> --email a@b.com --role member
 harumi org role <ORG_ID> <USER_ID> --role admin
 harumi org rm-member <ORG_ID> <USER_ID>
 harumi org use <ORG_ID>                # persist the org sent as X-Organization
+harumi org use --personal              # back to the personal workspace (no argument at a terminal: a menu)
 
 harumi whoami                          # profile, environment and active org
 harumi profile set --first-name Ana --bio "..."
@@ -258,16 +259,11 @@ There are two built-in environments, selectable in the CLI:
 
 Auth flows through harumi-api (`/users/otp`, `/users/refresh`), and each environment has its own Supabase — so **each environment has its own stored session**. You must `harumi login` once per environment; switching does not log you out of the other.
 
-```bash
-harumi env list            # production only (staging is hidden by default)
-harumi env list --all      # include internal/VPN-only envs (or set HARUMI_INTERNAL=1)
-harumi env use staging     # persist the default (internal devs, VPN required)
-harumi --env staging run   # override for a single command
-```
+Harumi staff (`@harumi.io`) choose the environment inside `harumi login`, right after typing their email; the choice is remembered. To switch, run `harumi login` again and pick the other one (no new code is sent if that environment already has a session for the same email). For a single command, or whenever there is no terminal (agents, scripts), use `harumi --env staging run` or `HARUMI_ENV=staging`. There is no `harumi env` command.
 
-Staging is **internal-only**: it's hidden from `env list`/help for regular users, but the real gate is needing a staging Supabase account and the VPN — anyone internal can `harumi env use staging` (or pass `--env staging`).
+Staging is **internal-only**: the real gate is needing a staging Supabase account and the VPN.
 
-Environment selection precedence: `--env` > `HARUMI_ENV` > `harumi env use` (saved default) > `production`.
+Environment selection precedence: `--env` > `HARUMI_ENV` > the choice made at `harumi login` > `production`.
 
 - Per-command URL overrides: `--api-url` / `HARUMI_API_URL`, `--git-url` / `HARUMI_GIT_URL` (e.g. for a local harumi-api). These override the active environment's endpoints without changing which env you're on.
 - Org: `harumi org use <ORG_ID>` / `--org` / `HARUMI_ORG` (scoped per environment). Sent as `X-Organization` to scope reads, and used as the owning workspace when creating a project — `--personal` on `new`/`import` opts out.
@@ -279,4 +275,4 @@ Environment selection precedence: `--env` > `HARUMI_ENV` > `harumi env use` (sav
 
 ## Renamed in 0.11
 
-The old names still run in 0.11.x (hidden, with a `deprecated:` line naming the replacement) and are removed in 0.12.0. Prefer the new ones: `push` -> `import`, `projects create` -> `new --no-clone`, `outputs` / `run --output-dir` -> `runs download`, `config set-org` -> `org use`, `profile show` / `env current` -> `whoami` / `env list`, `skill install` / `skill path` -> `agent-skills install [--dry-run]`, `repo readiness` -> `check`, `share set-password` / `rm-password` -> `share update --password` / `--no-password`, every `remove` / `delete` -> `rm` (`org remove` -> `org rm-member`), and every `harumi repo ...` -> git (above).
+The old names still run in 0.11.x (hidden, with a `deprecated:` line naming the replacement) and are removed in 0.12.0. Prefer the new ones: `push` -> `import`, `projects create` -> `new --no-clone`, `outputs` / `run --output-dir` -> `runs download`, `config set-org` -> `org use`, `profile show` -> `whoami`, `skill install` / `skill path` -> `agent-skills install [--dry-run]`, `repo readiness` -> `check`, `share set-password` / `rm-password` -> `share update --password` / `--no-password`, every `remove` / `delete` -> `rm` (`org remove` -> `org rm-member`), and every `harumi repo ...` -> git (above).

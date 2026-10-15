@@ -63,11 +63,20 @@ def verify_otp(
 def refresh_session(
     config: Config, refresh_token: str, transport: Optional[httpx.BaseTransport] = None
 ) -> LoggedUser:
-    """Exchange a refresh token for a new access token, and persist it."""
+    """Exchange a refresh token for a new access token, and persist it.
+
+    A 4xx here means harumi-api looked at the token and refused it (harumi-api
+    answers 422 "Refresh token is not valid"): the session is over, and the user
+    needs to log in again. That is reported as `NotAuthenticatedError`, not as
+    the raw HTTP error. A server error or a timeout says nothing about the
+    session, so those stay `ApiError`.
+    """
     with transport_errors_as_api_error(), httpx.Client(transport=transport, timeout=30.0) as client:
         response = client.post(
             f"{config.api_url}/users/refresh", json={"refresh_token": refresh_token}
         )
+    if _session_refused(response.status_code):
+        raise NotAuthenticatedError(expired=True, environment=config.environment)
     _raise_for_status(response)
     user = LoggedUser.model_validate(response.json())
     _persist(user)
@@ -86,7 +95,7 @@ def get_valid_access_token(config: Config, *, allow_refresh: bool = True) -> str
     """
     creds = load_credentials()
     if not creds or not creds.get("access_token"):
-        raise NotAuthenticatedError()
+        raise NotAuthenticatedError(environment=config.environment)
 
     expires_at = creds.get("expires_at")
     is_near_expiry = expires_at is not None and expires_at <= time.time() + _EXPIRY_SKEW_SECONDS
@@ -95,6 +104,13 @@ def get_valid_access_token(config: Config, *, allow_refresh: bool = True) -> str
         try:
             user = refresh_session(config, creds["refresh_token"])
             return user.access_token or creds["access_token"]
+        except NotAuthenticatedError:
+            # The refresh token was refused. If the access token is already past
+            # its expiry nothing can work, so say so now; if it has a few seconds
+            # left, let the request try and report the 401 itself.
+            if expires_at <= time.time():
+                raise
+            return creds["access_token"]
         except ApiError:
             # Fall back to the (possibly still valid) stored token; a 401
             # from the real request will trigger ApiClient's retry path.
@@ -117,6 +133,21 @@ def _persist(user: LoggedUser) -> None:
         email=user.email,
         expires_at=user.expires_at,
     )
+
+
+def _session_refused(status_code: int) -> bool:
+    """Whether a refresh response means "this session is finished".
+
+    Any 4xx except the two that describe the request's timing rather than the
+    token: 408 (timed out) and 429 (slow down).
+    """
+    return 400 <= status_code < 500 and status_code not in (408, 429)
+
+
+def has_session() -> bool:
+    """Whether a login is on file at all. Says nothing about it still working."""
+    creds = load_credentials()
+    return bool(creds and creds.get("access_token"))
 
 
 def _raise_for_status(response: httpx.Response) -> None:

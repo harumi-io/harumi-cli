@@ -5,7 +5,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 ## Contents
 
 - [Auth commands](#auth-commands)
-- [env](#env)
+- [Environments](#environments)
 - [profile](#profile)
 - [specs](#specs)
 - [blueprints](#blueprints)
@@ -39,12 +39,16 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 harumi login [--email EMAIL] [--signup] [--api-url URL] [--git-url URL]
 ```
 
-Logs into the **active environment** (see [env](#env)) — pass `harumi --env staging login` to log into staging. Each environment has its own Supabase and its own stored session.
+Logs into the **active environment** (see [Environments](#environments)). Each environment has its own Supabase and its own stored session.
+
+- **Harumi staff** (a `@harumi.io` email) at a terminal are asked, after typing their email, whether to log in to `production` or `staging`; the choice is saved as their default once the login succeeds. Everyone else is never asked. `harumi --env staging login` (or `HARUMI_ENV`) skips the question and is not saved.
+- Already logged in to that environment with the same email? No code is sent: `login` just switches (and re-provisions the Gitea token). Run `harumi logout` first to force a fresh code.
 
 - Prompts for email if `--email` omitted, then prompts for the OTP code emailed by Supabase.
 - `--signup`: creates the Supabase account first. Required the *first* time a new email logs in.
 - On success, stores `access_token`/`refresh_token` at `~/.harumi/credentials.json` (mode `0600`), then calls `POST /git/credentials` to provision a per-user Gitea personal access token (`git_token` + `git_url`), used by `harumi new`/`import`/`clone`/`link` and `harumi run` for git-over-HTTPS.
-- Best-effort org resolution: if exactly one org, stored automatically; if multiple, prints a table and instructs `harumi org use`.
+- Best-effort workspace resolution (skipped when `HARUMI_ORG` is set). No organizations: the personal workspace, automatically. A saved org you still belong to: kept. Otherwise, at a terminal, a menu of your organizations plus "Personal workspace" (the choice is saved). With no terminal it never prompts: exactly one org is stored, several mean the personal workspace plus a printed table and the `harumi org use` hint.
+- At a terminal, a successful login ends with the quick-start menu (new project / import / clone, or run inside a project folder); scripts and agents get no menu.
 
 ### `harumi logout`
 
@@ -68,28 +72,23 @@ Prints the bundled release notes for the installed version (`--all`: every relea
 
 Separately, real invocations may print a one-line notice on **stderr** after the command: a newer version exists on PyPI (with the upgrade command for pipx / uv / pip), or "harumi updated X -> Y, see `harumi whats-new`" once after an upgrade. PyPI is asked at most once a day, in the background with a 2 s timeout, and the same notice repeats at most once a day (a newer release is announced immediately). Nothing is printed unless stderr is a terminal, under `CI`, with `HARUMI_NO_UPDATE_CHECK=1`, or for `--version`. State: `~/.harumi/update-check.json`.
 
-## `env`
+## Environments
 
-```
-harumi env list [--all]
-harumi env use NAME
-```
-
-Selects the backend environment. Two are built in:
+There is no `env` command (a hidden stub points at `harumi login`). Two environments are built in:
 
 | Env | API | Gitea | Access |
 |---|---|---|---|
 | `production` (default) | `https://api.harumi.io/api` | `https://git.harumi.io` | public |
 | `staging` | `https://api.dev.harumi.io/api` | `https://git.dev.harumi.io` | internal, VPN-only |
 
-- **`list`**: shows selectable environments with the active one flagged `*`, and each one's API and git endpoints. Internal (VPN-only) environments are hidden unless `--all` is passed or `HARUMI_INTERNAL=1` is set. (`env current` is deprecated; `list` shows the same information.)
-- **`use NAME`**: persists the default environment in `~/.harumi/config.json`. Warns if the target is internal (VPN required) and if you're not yet logged in on it.
+- **Choosing one:** Harumi staff pick at `harumi login` (see above); the choice is saved in `~/.harumi/config.json`. To switch, run `harumi login` and pick the other one.
+- **One command elsewhere:** `harumi --env staging <command>` (hidden flag) or `HARUMI_ENV=staging`. Not saved. This is what agents and scripts should use, since they are never shown a menu.
 
-Selection precedence: `--env` (top-level flag) > `HARUMI_ENV` > saved default from `env use` > `production`.
+Selection precedence: `--env` (top-level flag) > `HARUMI_ENV` > the choice made at `harumi login` > `production`.
 
-**Each environment has its own Supabase, so each has its own stored session** (`~/.harumi/environments/<env>/credentials.json`). Switching environments never logs you out of the other — but you must `harumi login` at least once per environment. `--api-url`/`--git-url` (and `HARUMI_API_URL`/`HARUMI_GIT_URL`) still override the active environment's endpoints for local development without changing which environment you're on.
+**Each environment has its own Supabase, so each has its own stored session** (`~/.harumi/environments/<env>/credentials.json`). Switching never logs you out of the other. `--api-url`/`--git-url` (and `HARUMI_API_URL`/`HARUMI_GIT_URL`) still override the active environment's endpoints for local development without changing which environment you're on.
 
-Staging is hidden from regular users as a UX convenience only — the real access gate is needing an account in staging's Supabase plus the VPN. Any internal dev can `harumi env use staging` or pass `--env staging`.
+Staging is only offered to `@harumi.io` emails as a convenience; the real access gate is an account in staging's Supabase plus the VPN.
 
 ## `profile`
 
@@ -118,7 +117,7 @@ Lists project blueprints (`slug`, `name`, `description`) from `GET /blueprints`.
 ## `projects`
 
 ```
-harumi projects list [--api-url URL] [--org ORG]
+harumi projects list [--limit N] [--api-url URL] [--org ORG]
 harumi projects get PROJECT_ID [--api-url URL] [--org ORG]
 harumi projects rename PROJECT_ID NAME [--api-url URL] [--org ORG]
 harumi projects rm PROJECT_ID [--yes] [--api-url URL] [--org ORG]
@@ -126,7 +125,7 @@ harumi projects rm PROJECT_ID [--yes] [--api-url URL] [--org ORG]
 
 Creating a project is `harumi new` (`--no-clone` to only create it; see [new](#new)).
 
-- **`list`**: `GET /projects` → table of `id`, `name`, `kernel_spec`, `role`.
+- **`list`**: `GET /projects`, following pages (200 at a time) until the server's `total_count` is reached, so accounts with hundreds of projects see all of them. Sorted **most recently updated first** (the server's own order is creation date; the CLI re-sorts). Table of `id`, `name`, `updated` ("3 days ago"), `workspace` (only when the projects span more than one workspace), `kernel_spec`, `role`. `--limit N` shows only the first N; any time rows are left out it says "Showing N of M projects". The project pickers (`clone` and others) use the same order and show age and workspace beside each name.
 - **`get`**: `GET /projects/{id}` → detail view.
 - **`rename`**: `PUT /projects/{id}` with `{name}`.
 - **`rm`**: `DELETE /projects/{id}`. Prompts you to type the exact project name to confirm unless `--yes`.
@@ -240,13 +239,13 @@ The CLI detects local changes, creates a temporary branch `harumi-scratch/<user>
 ## `runs`
 
 ```
-harumi runs list [--project ID] [--api-url URL] [--org ORG]
+harumi runs list [--project ID] [--limit N | --all] [--api-url URL] [--org ORG]
 harumi runs get RUN_ID [--project ID] [--api-url URL] [--org ORG]
 harumi runs cancel RUN_ID [--project ID] [--api-url URL] [--org ORG]
 harumi runs download [RUN_ID] [--output-dir DIR] [--project ID] [--api-url URL] [--org ORG]
 ```
 
-- **`list`**: `GET /projects/{id}/runs` → table of `id`, `status`, `source`, `git_branch`, `started`, `ended`, newest first.
+- **`list`**: `GET /projects/{id}/runs` → table of `id`, `status`, `source`, `git_branch`, `started`, `ended`, newest first. Shows the latest 25 by default and says "Showing the latest 25 of N runs" when there are more; `--limit N` changes the count and `--all` shows every run.
 - **`get`**: `GET /projects/{id}/runs/{run_id}` → detail view plus `stdout`/`stderr`/`error` if present.
 - **`cancel`**: `POST /projects/{id}/runs/{run_id}/cancel` on an in-flight run.
 - **`download`**: downloads the run's output artifacts as a zip via `GET /projects/{id}/runs/{run_id}/output/archive` (proxied by the API from S3 for current runs, or Gitea for pre-migration runs). With no `RUN_ID` it takes the latest run (`GET /projects/{id}/runs`, newest first); errors if the project has no runs. `--output-dir` defaults to the current directory. Replaces `outputs --download` and `run --output-dir`.
@@ -475,7 +474,7 @@ harumi org members ORG_ID [--api-url URL]
 harumi org invite ORG_ID --email EMAIL [--role ROLE] [--api-url URL]
 harumi org role ORG_ID USER_ID --role ROLE [--api-url URL]
 harumi org rm-member ORG_ID USER_ID [--yes] [--api-url URL]
-harumi org use ORG_ID
+harumi org use [ORG_ID | --personal]
 ```
 
 `--role` is one of `owner | admin | member | viewer`.
@@ -488,11 +487,11 @@ harumi org use ORG_ID
 - **`invite`**: `POST /users/organizations/{id}/users` with `{email, role}`.
 - **`role`**: `PUT /users/organizations/{id}/users/{user_id}` with `{role}`.
 - **`rm-member`**: `DELETE /users/organizations/{id}/users/{user_id}`, prompting for confirmation unless `--yes`.
-- **`use`**: persists `org_id` in `~/.harumi/config.json` (per environment); every later request sends it as `X-Organization`. The header scopes the *read* endpoints (`projects list`); creation reads the workspace from the request body, so `new` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway. No network call. Replaces `config set-org`.
+- **`use`**: with no argument opens a menu of your organizations plus "Personal workspace" (at a terminal; otherwise it lists the choices and fails). `--personal` clears the saved org. Persists `org_id` in `~/.harumi/config.json` (per environment); every later request sends it as `X-Organization`. The header scopes the *read* endpoints (`projects list`); creation reads the workspace from the request body, so `new` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway. No network call. Replaces `config set-org`.
 
 ## Config & credential files
 
-Environment selection precedence (highest first): **`--env` > `HARUMI_ENV` > saved default (`harumi env use`) > `production`**. See [env](#env) for the environment table.
+Environment selection precedence (highest first): **`--env` > `HARUMI_ENV` > the choice made at `harumi login` > `production`**. See [Environments](#environments) for the environment table.
 
 Within the active environment, URL/org overrides (highest first): **CLI flags > env vars > per-env `config.json` > the environment's built-in endpoints**.
 

@@ -38,7 +38,12 @@ from harumi import __version__
 #
 # Only the labels that actually differ are listed: "boolean", "path", "float"
 # and "uuid" are already identical across both click flavours.
-_TYPE_ALIASES = {"text": "str", "integer": "int"}
+#
+# Ranges (`typer.Option(..., min=1)`) carry the same difference in their label:
+# "int range" vs real click's "integer range" (and "float range" is the same on
+# both). Without this, adding a `min=`/`max=` to any option breaks only the
+# Python 3.9 job.
+_TYPE_ALIASES = {"text": "str", "integer": "int", "integer range": "int range"}
 
 
 def _leaves(command: Any, path: list[str]):

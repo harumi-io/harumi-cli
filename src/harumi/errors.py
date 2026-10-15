@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Iterator, Optional
 
 import httpx
 
@@ -13,10 +13,35 @@ class HarumiError(Exception):
 
 
 class NotAuthenticatedError(HarumiError):
-    """Raised when an operation requires login but no valid session exists."""
+    """There is no usable login: none on file, or the one on file has expired.
 
-    def __init__(self, message: str = "Not logged in. Run `harumi login` first.") -> None:
-        super().__init__(message)
+    The message is the whole point: it says what happened and the one command
+    that fixes it, because this is what a person sees the first time they run
+    anything, and again whenever a session lapses.
+    """
+
+    def __init__(
+        self,
+        message: Optional[str] = None,
+        *,
+        expired: bool = False,
+        environment: Optional[str] = None,
+    ) -> None:
+        self.expired = expired
+        self.environment = environment
+        super().__init__(message or self.default_message(expired=expired, environment=environment))
+
+    @staticmethod
+    def default_message(*, expired: bool, environment: Optional[str]) -> str:
+        # Production is what nearly everyone uses, so only name an environment
+        # when it is not that one.
+        where = f" on {environment}" if environment and environment != "production" else ""
+        if expired:
+            return f"Your Harumi session{where} has expired. Run `harumi login` to sign in again."
+        return (
+            f"You're not logged in{where}. Run `harumi login` to sign in "
+            "(new to Harumi? `harumi login --signup` creates your account)."
+        )
 
 
 class ApiError(HarumiError):

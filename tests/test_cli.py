@@ -93,9 +93,27 @@ def test_banner_shown_for_bare_and_help(argv, monkeypatch, capsys):
     import harumi.skills as skills_mod
 
     monkeypatch.setattr(skills_mod, "agents_missing_skill", lambda: [])
+    monkeypatch.setattr(cli, "_stdout_is_terminal", lambda: True)
     monkeypatch.setattr("sys.argv", ["harumi"] + argv)
     cli._print_banner_if_bare_entrypoint()
     assert capsys.readouterr().out.strip() != ""
+
+
+@pytest.mark.parametrize("argv", [[], ["--help"]])
+def test_banner_and_agent_nudge_hidden_when_output_is_not_a_terminal(argv, monkeypatch, capsys):
+    """Piped or logged output (and a coding agent reading stdout) gets no art
+    and no 'install the skill' nudge: both are decoration for a person."""
+    import harumi.skills as skills_mod
+
+    monkeypatch.setattr(
+        skills_mod,
+        "agents_missing_skill",
+        lambda: [skills_mod.Agent("cursor", "Cursor", Path("/tmp/does-not-matter"))],
+    )
+    monkeypatch.setattr(cli, "_stdout_is_terminal", lambda: False)
+    monkeypatch.setattr("sys.argv", ["harumi"] + argv)
+    cli._print_banner_if_bare_entrypoint()
+    assert capsys.readouterr().out == ""
 
 
 @pytest.mark.parametrize(
@@ -123,6 +141,7 @@ def test_skill_install_hint_shown_when_agent_missing_skill(monkeypatch, capsys):
         "agents_missing_skill",
         lambda: [skills_mod.Agent("cursor", "Cursor", Path("/tmp/does-not-matter"))],
     )
+    monkeypatch.setattr(cli, "_stdout_is_terminal", lambda: True)
     monkeypatch.setattr("sys.argv", ["harumi"])
     cli._print_banner_if_bare_entrypoint()
     out = capsys.readouterr().out
@@ -134,6 +153,7 @@ def test_skill_install_hint_hidden_when_nothing_missing(monkeypatch, capsys):
     import harumi.skills as skills_mod
 
     monkeypatch.setattr(skills_mod, "agents_missing_skill", lambda: [])
+    monkeypatch.setattr(cli, "_stdout_is_terminal", lambda: True)
     monkeypatch.setattr("sys.argv", ["harumi"])
     cli._print_banner_if_bare_entrypoint()
     assert "harumi agent-skills install" not in capsys.readouterr().out
@@ -149,6 +169,7 @@ def test_skill_install_hint_swallows_filesystem_errors(monkeypatch, capsys):
         raise PermissionError("nope")
 
     monkeypatch.setattr(skills_mod, "agents_missing_skill", _boom)
+    monkeypatch.setattr(cli, "_stdout_is_terminal", lambda: True)
     monkeypatch.setattr("sys.argv", ["harumi"])
     cli._print_banner_if_bare_entrypoint()  # must not raise
     out = capsys.readouterr().out
@@ -190,6 +211,10 @@ def test_cli_surface_normalizes_click_builtin_type_names():
     # ...the vendored spellings pass through unchanged (idempotent)...
     assert type_of("str") == "str"
     assert type_of("int") == "int"
+    # ...and so do ranges (`min=1`), which broke 3.9 CI for `--limit`.
+    assert type_of("integer range") == "int range"
+    assert type_of("int range") == "int range"
+    assert type_of("float range") == "float range"
     # ...and labels that agree across both flavours are left alone.
     for shared in ("boolean", "path", "float", "uuid"):
         assert type_of(shared) == shared
@@ -3197,10 +3222,9 @@ def test_org_use_persists_the_org_and_the_old_config_name_still_works():
     assert Config.load().org_id == "org-10"
 
 
-def test_env_current_and_skill_path_and_profile_show_are_deprecated_not_gone(api):
+def test_skill_path_and_profile_show_are_deprecated_not_gone(api):
     api.route("GET", "/api/users/profile", {"id": "u1", "email": "dev@harumi.test"})
 
-    assert "harumi env list" in runner.invoke(cli.app, ["env", "current"]).output
     assert "agent-skills install --dry-run" in runner.invoke(cli.app, ["skill", "path"]).output
     shown = runner.invoke(cli.app, ["profile", "show"])
     assert "harumi whoami" in shown.output
@@ -3398,3 +3422,83 @@ def test_skills_library_category_filter_ignores_case_on_both_sides(api):
     result = runner.invoke(cli.app, ["skills", "library", "--category", "MODELING"])
 
     assert "a-skill" in result.output
+
+
+# --- project picker: `harumi clone` with no id -------------------------------
+
+_TWO_PROJECTS = {
+    "projects": [
+        {"id": "proj-1", "name": "Solver", "notebook_ids": []},
+        {"id": "proj-2", "name": "Routing [beta]", "notebook_ids": []},
+    ],
+    "total_count": 2,
+}
+
+
+def test_clone_without_an_id_lets_you_pick_the_project(api, git_ops, tmp_path, monkeypatch):
+    from harumi import interactive
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    api.route("GET", "/api/projects", _TWO_PROJECTS)
+    api.route("GET", "/api/projects/proj-2", {"id": "proj-2", "name": "Routing", "notebook_ids": []})
+    _route_project_repo(api, "proj-2", "routing")
+    offered = {}
+
+    def pick(message, options, flag=None):
+        offered["labels"] = [o.label for o in options]
+        offered["flag"] = flag
+        return "proj-2"
+
+    monkeypatch.setattr(interactive, "select", pick)
+
+    result = runner.invoke(cli.app, ["clone"])
+
+    assert result.exit_code == 0, result.output
+    assert offered["labels"] == ["Solver", "Routing [beta]"]
+    assert offered["flag"] == "the PROJECT_ID argument"
+    assert git_ops["clone"][0]["clone_url"] == "https://git.harumi.test/acme/routing.git"
+
+
+def test_clone_without_an_id_and_without_a_terminal_lists_projects_and_never_prompts(
+    api, git_ops, tmp_path, monkeypatch
+):
+    """The agent/CI path: fail fast, naming the projects and the argument to pass."""
+    from harumi import interactive
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(interactive, "is_interactive", lambda *a, **k: False)
+    api.route("GET", "/api/projects", _TWO_PROJECTS)
+
+    result = runner.invoke(cli.app, ["clone"])
+
+    assert result.exit_code == 1
+    assert "Solver" in result.output and "proj-1" in result.output
+    # Server-supplied text with brackets must survive Rich markup intact.
+    assert "Routing [beta]" in result.output
+    assert "PROJECT_ID" in result.output
+    assert git_ops["clone"] == []
+
+
+def test_clone_picker_quit_clones_nothing_and_exits_zero(api, git_ops, tmp_path, monkeypatch):
+    from harumi import interactive
+
+    monkeypatch.chdir(tmp_path)
+    api.route("GET", "/api/projects", _TWO_PROJECTS)
+    monkeypatch.setattr(interactive, "select", lambda *a, **k: None)
+
+    result = runner.invoke(cli.app, ["clone"])
+
+    assert result.exit_code == 0, result.output
+    assert git_ops["clone"] == []
+
+
+def test_clone_with_no_projects_points_at_new(api, git_ops, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    api.route("GET", "/api/projects", {"projects": [], "total_count": 0})
+
+    result = runner.invoke(cli.app, ["clone"])
+
+    assert result.exit_code == 1
+    assert "harumi new" in result.output
