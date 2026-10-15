@@ -211,6 +211,10 @@ def test_cli_surface_normalizes_click_builtin_type_names():
     # ...the vendored spellings pass through unchanged (idempotent)...
     assert type_of("str") == "str"
     assert type_of("int") == "int"
+    # ...and so do ranges (`min=1`), which broke 3.9 CI for `--limit`.
+    assert type_of("integer range") == "int range"
+    assert type_of("int range") == "int range"
+    assert type_of("float range") == "float range"
     # ...and labels that agree across both flavours are left alone.
     for shared in ("boolean", "path", "float", "uuid"):
         assert type_of(shared) == shared
