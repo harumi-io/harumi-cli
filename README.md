@@ -79,21 +79,22 @@ The CLI targets one of two environments (each with its own Supabase, so each has
 | `production` (default) | `https://api.harumi.io/api` | `https://git.harumi.io` | public |
 | `staging` | `https://api.dev.harumi.io/api` | `https://git.dev.harumi.io` | internal, VPN-only |
 
+Clients only ever use `production`, and are never asked about it. Harumi staff (a `@harumi.io` address) are asked which environment to use when they run `harumi login`, and that choice becomes their default. Run `harumi login` again and pick the other one to switch: if you are already logged in there with the same email, no new code is sent.
+
 ```bash
-harumi env list          # production only (staging hidden unless --all / HARUMI_INTERNAL=1)
-harumi env use staging   # internal devs; requires VPN + a staging account
-harumi --env staging run # override for a single command
+harumi login               # staff: pick production or staging; remembered
+harumi --env staging run   # run one command against another environment (not saved)
 ```
 
-Selection precedence: `--env` > `HARUMI_ENV` > `harumi env use` (saved default) > `production`. Within an environment you can still override endpoints for local development:
+Selection precedence: `--env` > `HARUMI_ENV` > the choice made at `harumi login` > `production`. Within an environment you can still override endpoints for local development:
 
 | Env var | Purpose |
 |---|---|
 | `HARUMI_API_URL` | Override `harumi-api` base URL (e.g. `http://localhost:8000/api`) |
 | `HARUMI_GIT_URL` | Override the Harumi Git (Gitea) base URL |
 | `HARUMI_ORG` | Organization ID sent as `X-Organization`, and the workspace new projects are created in (`--personal` on `new`/`import` opts out) |
-| `HARUMI_INTERNAL` | Set to `1` to reveal internal environments in `harumi env list` |
 | `HARUMI_PLATFORM_URL` | Override the web-app URL used in printed project links |
+| `HARUMI_NO_INTERACTIVE` | Set to `1` to never show an arrow-key menu (menus are also off under `CI`, with `TERM=dumb`, and whenever stdin or stdout isn't a terminal) |
 | `HARUMI_NO_UPDATE_CHECK` | Set to `1` to turn off the "a newer version is available" notice (it is also off under `CI` and whenever stderr isn't a terminal) |
 | `HARUMI_STATUS_URL` | Override the status page used by `harumi status` and the unreachable-API hint (the hint is skipped when the API URL is overridden, unless this is set) |
 

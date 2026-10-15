@@ -33,9 +33,10 @@ class Environment:
     # Public status page (Gatus) for this environment, linked from network-error
     # hints and read by `harumi status`.
     status_url: str
-    # Internal envs are VPN-only and hidden from `harumi env list` unless the
-    # user opts in (HARUMI_INTERNAL=1 or `--all`). This is UX only — real access
-    # is gated by needing an account in that environment's Supabase + the VPN.
+    # Internal envs are VPN-only, and `harumi login` only offers the choice to
+    # people with a Harumi email (see `is_internal_email`). This is UX only —
+    # real access is gated by needing an account in that environment's Supabase
+    # plus the VPN.
     internal: bool = False
     description: str = ""
 
@@ -64,6 +65,16 @@ ENVIRONMENTS: dict[str, Environment] = {
     ),
 }
 DEFAULT_ENVIRONMENT = "production"
+
+# Staff sign in with a Harumi address; clients never see an environment choice.
+# A convenience for whom to ask, not a security boundary.
+INTERNAL_EMAIL_DOMAIN = "harumi.io"
+
+
+def is_internal_email(email: str) -> bool:
+    """Whether `email` is a Harumi staff address (exactly `@harumi.io`)."""
+    local, at, domain = email.strip().rpartition("@")
+    return bool(local) and bool(at) and domain.lower() == INTERNAL_EMAIL_DOMAIN
 
 HARUMI_HOME = Path(os.environ.get("HARUMI_HOME", Path.home() / ".harumi"))
 # Global (cross-environment) config: only stores the selected environment name.
@@ -385,6 +396,15 @@ class Config:
         env_config["org_id"] = org_id
         _write_json(path, env_config)
         self.org_id = org_id
+
+    def clear_org_id(self) -> None:
+        """Forget the saved organization, so requests go to the personal workspace."""
+        path = env_config_path(self.environment)
+        env_config = _read_json(path)
+        if "org_id" in env_config:
+            del env_config["org_id"]
+            _write_json(path, env_config)
+        self.org_id = None
 
 
 def load_credentials() -> Optional[dict[str, Any]]:

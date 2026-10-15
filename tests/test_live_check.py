@@ -378,7 +378,7 @@ class TestTierSanity:
     def test_canary_steps_all_scope_themselves_to_a_project(self):
         """A canary-tier command with no project scope would act on the account
         at large."""
-        exempt = {"import", "new", "clone", "org use", "env use", "run"}
+        exempt = {"import", "new", "clone", "org use", "run"}
         for step in PLAN:
             if TIERS[step.path][0] != CANARY or step.path in exempt:
                 continue
