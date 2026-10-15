@@ -2834,7 +2834,7 @@
     },
     {
       "path": "runs cancel",
-      "help": "Cancel an in-flight run.",
+      "help": "Cancel a run that is still going (pick one from a list when no id is given).",
       "params": [
         {
           "opts": [
@@ -2843,10 +2843,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Run id."
+          "help": "Run id. Pick from the runs still going if omitted."
         },
         {
           "opts": [
@@ -2957,7 +2957,7 @@
     },
     {
       "path": "runs get",
-      "help": "Show details (including captured stdout/stderr) for one run.",
+      "help": "Show one run: how it went, then everything it printed (the latest run when no id is given).",
       "params": [
         {
           "opts": [
@@ -2966,10 +2966,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Run id."
+          "help": "Run id. Defaults to the project's latest run."
         },
         {
           "opts": [

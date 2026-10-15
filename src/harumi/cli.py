@@ -1010,6 +1010,67 @@ def _ago(when: Optional[datetime]) -> str:
     return f"{n} year{'' if n == 1 else 's'} ago"
 
 
+def _duration(seconds: Optional[float]) -> str:
+    """"45s", "1m 12s", "2h 03m": how long something took."""
+    if seconds is None or seconds < 0:
+        return ""
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, secs = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {secs:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m"
+
+
+def _run_duration(run) -> Optional[float]:
+    """Seconds between a run's start and end, when the server recorded both."""
+    if run.started is None or run.ended is None:
+        return None
+    started, ended = run.started, run.ended
+    if (started.tzinfo is None) != (ended.tzinfo is None):
+        started, ended = started.replace(tzinfo=None), ended.replace(tzinfo=None)
+    return (ended - started).total_seconds()
+
+
+def _tail_lines(text: str, keep: int) -> tuple[str, int]:
+    """The last `keep` non-empty-trailing lines of `text`, and how many were left out."""
+    lines = text.rstrip().splitlines()
+    return "\n".join(lines[-keep:]), max(0, len(lines) - keep)
+
+
+def _status_markup(status: str) -> str:
+    """A run status, coloured by what it means. Plain words, so it still reads without colour."""
+    colour = {
+        "completed": "green",
+        "finished": "green",
+        "failed": "bold red",
+        "timeout": "bold red",
+        "cancelled": "yellow",
+        "queued": "cyan",
+        "running": "cyan",
+    }.get(status)
+    return f"[{colour}]{escape(status)}[/{colour}]" if colour else escape(status)
+
+
+def _run_started(run) -> str:
+    return _ago(run.started or run.created_at)
+
+
+def _pick_run(client: Client, project_id: str, runs, *, action: str, flag: str) -> Optional[str]:
+    """Choose one of `runs`; its id, or None if the user backed out."""
+    options = [
+        interactive.Option(
+            f"{r.id[:8]}  {r.status}",
+            r.id,
+            hint="  ".join(p for p in (r.git_branch or "", f"started {_run_started(r)}" if _run_started(r) else "") if p),
+        )
+        for r in runs
+    ]
+    return interactive.select(f"Which run do you want to {action}?", options, flag=flag)  # type: ignore[return-value]
+
+
 def _recent_first(projects):
     """Most recently updated first, so the project you are working on leads.
 
@@ -2302,11 +2363,7 @@ def run(
         # Explicit ref — run it directly, no scratch needed.
         run_branch = branch
         run_commit = commit
-        console.print(
-            f"[bold]Running[/bold] project [bold]{project_id}[/bold] "
-            + (f"@ branch [bold]{run_branch}[/bold]" if run_branch else "")
-            + (f" commit [bold]{run_commit[:8]}[/bold]" if run_commit else "")
-        )
+        console.print(_running_line(project_id, run_branch, run_commit))
     else:
         # No explicit ref — inspect the working tree.
         dirty = is_dirty()
@@ -2316,10 +2373,7 @@ def run(
             # Clean and pushed: run the current branch directly.
             run_branch = current_branch() or repo.default_branch
             run_commit = None
-            console.print(
-                f"[bold]Running[/bold] project [bold]{project_id}[/bold] "
-                f"@ branch [bold]{run_branch}[/bold]"
-            )
+            console.print(_running_line(project_id, run_branch, None))
         else:
             # Dirty or unpushed: push a scratch branch.
             git_token = load_git_token()
@@ -2335,80 +2389,173 @@ def run(
                     "re-provision your Gitea credentials."
                 )
 
-            status_parts = []
-            if dirty:
-                status_parts.append("uncommitted changes")
-            if unpushed:
-                status_parts.append("unpushed commits")
+            what = " and ".join(
+                part
+                for part, present in (("uncommitted changes", dirty), ("unpushed commits", unpushed))
+                if present
+            )
             console.print(
-                f"[dim]Working tree has {' and '.join(status_parts)}. "
-                f"Pushing scratch branch...[/dim]"
+                f"Running project [bold]{project_id}[/bold] with your {what} "
+                "[dim](sent on a temporary branch; your branches are not touched)[/dim]"
             )
 
             scratch_branch, _ = push_scratch(username=username, token=git_token)  # type: ignore[arg-type]
             run_branch = scratch_branch
             run_commit = None
-            console.print(f"[dim]Scratch branch: [bold]{scratch_branch}[/bold][/dim]")
 
     try:
-        response = client.execute_project(
-            project_id,
-            branch=run_branch,
-            commit=run_commit,
-            command=command,
-            kernel_spec=kernel,
-        )
-        console.print(
-            f"Queued (execution_log_id={response.execution_log_id}, "
-            f"run_id={response.project_run_id}). status={response.status}"
-        )
+        try:
+            response = client.execute_project(
+                project_id,
+                branch=run_branch,
+                commit=run_commit,
+                command=command,
+                kernel_spec=kernel,
+            )
+        except ApiError as exc:
+            if exc.status_code in _RUN_REJECTED:
+                _fail(
+                    f"{_format_api_error(exc)}\n"
+                    "Run [bold]harumi check[/bold] to see what is blocking this project."
+                )
+            raise
+        run_id = response.project_run_id
+        console.print(f"Queued run [bold]{run_id}[/bold]" if run_id else "Queued.")
 
         if not watch:
-            if response.project_run_id:
+            if run_id:
                 console.print(
-                    f"Run [bold]harumi runs get {response.project_run_id} "
-                    f"--project {project_id}[/bold] to check on it later."
+                    f"[dim]Check on it with [bold]harumi runs get {run_id}[/bold], "
+                    "or add --watch to wait for it here.[/dim]"
                 )
             return
 
-        if not response.project_run_id:
+        if not run_id:
             console.print("[yellow]No run id returned; cannot watch this run.[/yellow]")
             return
 
-        from harumi.execution import download_run_output, wait_for_run
-
-        console.print("Waiting for the run to finish...")
-        result = wait_for_run(
-            client.api,
-            project_id,
-            response.project_run_id,
-            on_poll=lambda r: console.print(f"  status: {r.status}"),
-        )
-
+        result = _watch_run(client, project_id, run_id)
         if result.succeeded:
-            console.print(f"[bold green]Run finished[/bold green]: {result.status}")
-            if not output_dir:
-                console.print(
-                    f"Download its output with [bold]harumi runs download {result.id}[/bold]."
-                )
+            took = _duration(_run_duration(result))
+            console.print(
+                f"[bold green]Run {result.status}[/bold green]" + (f" in {took}." if took else ".")
+            )
             if output_dir:
+                from harumi.execution import download_run_output
+
                 try:
                     zip_path = download_run_output(client.api, project_id, result, output_dir)
                     console.print(f"Downloaded output to {zip_path}")
                 except HarumiError as exc:
                     console.print(f"[yellow]{exc}[/yellow]")
+            else:
+                console.print(
+                    f"[dim]Download its output with [bold]harumi runs download {result.id}[/bold].[/dim]"
+                )
         else:
-            console.print(f"[bold red]Run ended with status[/bold red]: {result.status}")
-            if result.error:
-                console.print(f"Error: {result.error}")
-            if result.stderr:
-                console.print(f"[dim]stderr:[/dim]\n{result.stderr}")
+            _print_failed_run(result)
             raise typer.Exit(code=1)
 
     finally:
         if scratch_branch:
             delete_remote_scratch(scratch_branch)
-            console.print(f"[dim]Scratch branch {scratch_branch} cleaned up.[/dim]")
+
+
+# A server that refuses to start the run for a reason about the project (a bad
+# manifest, a missing repo, a conflict) rather than about you: `harumi check` says why.
+_RUN_REJECTED = {400, 404, 409, 422}
+_STDERR_SHOWN = 20  # lines of a failed run's stderr shown before pointing at `runs get`
+
+
+def _running_line(project_id: str, branch: Optional[str], commit: Optional[str]) -> str:
+    where = " ".join(
+        part
+        for part in (
+            f"branch [bold]{branch}[/bold]" if branch else "",
+            f"commit [bold]{commit[:8]}[/bold]" if commit else "",
+        )
+        if part
+    )
+    return f"Running project [bold]{project_id}[/bold]" + (f" on {where}" if where else "")
+
+
+def _live_display_ok() -> bool:
+    """Whether to animate (spinner, a line that rewrites itself).
+
+    Needs a real TTY, not just rich's opinion: rich treats any FORCE_COLOR as
+    "this is a terminal", and CI systems set it to get colour. An animation there
+    would fill the build log with control codes.
+    """
+    try:
+        return bool(console.is_terminal and console.file.isatty())
+    except (AttributeError, ValueError):
+        return False
+
+
+def _watch_run(client: Client, project_id: str, run_id: str):
+    """Wait for a run to finish, showing progress, and return it.
+
+    At a terminal: one live line (spinner, status, time elapsed). Otherwise: one
+    line each time the status changes, so a log or a pipe is not flooded.
+    Ctrl-C stops the *watching*, never the run, and says how to cancel it.
+    """
+    import time
+
+    from rich.live import Live
+    from rich.spinner import Spinner
+
+    from harumi.execution import wait_for_run
+
+    started = time.monotonic()
+    state = {"status": "queued"}
+    live = _live_display_ok()
+
+    def on_poll(run) -> None:
+        if run.status != state["status"] and not live:
+            console.print(f"[dim]{_duration(time.monotonic() - started):>7}[/dim]  {run.status}")
+        state["status"] = run.status
+
+    spinner = Spinner("dots")
+
+    def frame():
+        spinner.update(
+            text=f" Run {state['status']} · {_duration(time.monotonic() - started)}  [dim](ctrl-c stops watching, not the run)[/dim]"
+        )
+        return spinner
+
+    try:
+        if live:
+            with Live(get_renderable=frame, console=console, refresh_per_second=8, transient=True):
+                return wait_for_run(client.api, project_id, run_id, on_poll=on_poll)
+        console.print(f"Waiting for run {run_id} to finish...")
+        return wait_for_run(client.api, project_id, run_id, on_poll=on_poll)
+    except KeyboardInterrupt:
+        console.print(
+            f"\nStopped watching. [bold]The run is still going.[/bold]\n"
+            f"  Follow it:  [bold]harumi runs get {run_id}[/bold]\n"
+            f"  Cancel it:  [bold]harumi runs cancel {run_id}[/bold]"
+        )
+        raise typer.Exit(code=130)
+
+
+def _print_failed_run(run) -> None:
+    """The cause of a run that did not succeed, without a wall of output."""
+    took = _duration(_run_duration(run))
+    headline = f"Run {run.status}" + (f" after {took}" if took else "")
+    if run.exit_code is not None:
+        headline += f" (exit code {run.exit_code})"
+    console.print(f"[bold red]{escape(headline)}.[/bold red]")
+    if run.error:
+        console.print(f"[bold]Error:[/bold] {escape(run.error)}")
+    if run.stderr and run.stderr.strip():
+        tail, hidden = _tail_lines(run.stderr, _STDERR_SHOWN)
+        console.print("[dim]Last lines of stderr:[/dim]")
+        console.print(escape(tail), soft_wrap=True, highlight=False)
+        if hidden:
+            console.print(f"[dim]({hidden} earlier lines not shown.)[/dim]")
+    elif not run.error:
+        console.print("[dim]No error output was captured.[/dim]")
+    console.print(f"[dim]Everything it printed: [bold]harumi runs get {run.id}[/bold][/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -2440,15 +2587,15 @@ def runs_list(
         return
 
     shown = runs if all_ else runs[:limit]
-    table = Table("id", "status", "source", "git_branch", "started", "ended")
+    table = Table("id", "status", "source", "branch", "started", "took")
     for r in shown:
         table.add_row(
             r.id,
-            r.status,
+            _status_markup(r.status),
             r.source or "",
             r.git_branch or "",
-            str(r.started or ""),
-            str(r.ended or ""),
+            _run_started(r),
+            _duration(_run_duration(r)),
         )
     console.print(table)
     if len(shown) < len(runs):
@@ -2461,42 +2608,54 @@ def runs_list(
 @runs_app.command("get")
 @_handle_errors
 def runs_get(
-    run_id: str = typer.Argument(..., help="Run id."),
+    run_id: Optional[str] = typer.Argument(None, help="Run id. Defaults to the project's latest run."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Show details (including captured stdout/stderr) for one run."""
+    """Show one run: how it went, then everything it printed (the latest run when no id is given)."""
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
-    r = client.get_run(project_id, run_id)
-    table = Table("field", "value")
-    for field in (
-        "id",
-        "status",
-        "source",
-        "git_branch",
-        "git_commit",
-        "command",
-        "kernel_spec",
-        "exit_code",
-        "output_url",
-        "triggered_by",
-        "started",
-        "ended",
-    ):
-        table.add_row(field, str(getattr(r, field, "") or ""))
-    console.print(table)
+    r = client.get_run(project_id, run_id) if run_id else client.get_latest_run(project_id)
+    if r is None:
+        _fail("This project has no runs yet. Start one with [bold]harumi run --watch[/bold].")
+        return
 
-    if r.stdout:
-        console.print("\n[bold]stdout:[/bold]")
-        console.print(r.stdout)
-    if r.stderr:
-        console.print("\n[bold]stderr:[/bold]")
-        console.print(r.stderr)
+    status = _status_markup(r.status) + (f" (exit code {r.exit_code})" if r.exit_code is not None else "")
+    took = _duration(_run_duration(r))
+    started = _run_started(r)
+    facts = Table.grid(padding=(0, 2))
+    facts.add_column(style="dim")
+    facts.add_column()
+    for label, value in (
+        ("Run", escape(r.id)),
+        ("Status", status),
+        ("Took", took + (f"  [dim](started {started})[/dim]" if started else "") if took else (f"started {started}" if started else "")),
+        (
+            "Code",
+            " @ ".join(p for p in (escape(r.git_branch or ""), escape((r.git_commit or "")[:8])) if p),
+        ),
+        ("Command", escape(r.command or "")),
+        ("Kernel", escape(r.kernel_spec or "")),
+        ("Started by", escape(" ".join(p for p in (r.source or "", r.triggered_by or "") if p))),
+    ):
+        if value:
+            facts.add_row(label, value)
+    console.print(facts)
+
+    for title, text in (("stdout", r.stdout), ("stderr", r.stderr)):
+        if text and text.strip():
+            console.print(f"\n[bold]{title}:[/bold]")
+            console.print(escape(text.rstrip()), soft_wrap=True, highlight=False)
     if r.error:
-        console.print(f"\n[bold red]error:[/bold red] {r.error}")
+        console.print(f"\n[bold red]error:[/bold red] {escape(r.error)}")
+
+    console.print()
+    if not r.finished:
+        console.print(f"[dim]Still going. Cancel it with [bold]harumi runs cancel {r.id}[/bold].[/dim]")
+    elif r.output_url:
+        console.print(f"[dim]It left output: [bold]harumi runs download {r.id}[/bold][/dim]")
 
 
 @runs_app.command("download")
@@ -2520,24 +2679,50 @@ def runs_download(
     if run is None:
         _fail("Project has no runs yet.")
         return
+    if not run.finished:
+        _fail(
+            f"Run {run.id} is still {run.status}; its output is ready once it finishes. "
+            f"Watch it with [bold]harumi runs get {run.id}[/bold]."
+        )
+    if not run.output_url:
+        _fail(
+            f"Run {run.id} ended {run.status} without leaving any output. "
+            f"See what it printed with [bold]harumi runs get {run.id}[/bold]."
+        )
     zip_path = download_run_output(client.api, project_id, run, output_dir)
-    console.print(f"Downloaded to {zip_path}")
+    try:
+        size = f" ({_format_bytes(zip_path.stat().st_size)})"
+    except OSError:
+        size = ""
+    console.print(f"Downloaded [bold]{escape(str(zip_path))}[/bold]{size}")
 
 
 @runs_app.command("cancel")
 @_handle_errors
 def runs_cancel(
-    run_id: str = typer.Argument(..., help="Run id."),
+    run_id: Optional[str] = typer.Argument(None, help="Run id. Pick from the runs still going if omitted."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Cancel an in-flight run."""
+    """Cancel a run that is still going (pick one from a list when no id is given)."""
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
+    if run_id is None:
+        going = [r for r in client.list_runs(project_id) if not r.finished]
+        if not going:
+            console.print("Nothing to cancel: no run is going right now.")
+            return
+        run_id = _pick_run(client, project_id, going, action="cancel", flag="the RUN_ID argument")
+        if run_id is None:
+            return  # backed out of the menu; choosing a run was the confirmation
+
     r = client.cancel_run(project_id, run_id)
-    console.print(f"[bold]Run {r.id}[/bold] status is now [bold]{r.status}[/bold].")
+    if r.finished and r.status != "cancelled":
+        console.print(f"Run {escape(r.id)} had already {_status_markup(r.status)}; there was nothing to cancel.")
+        return
+    console.print(f"Run [bold]{escape(r.id)}[/bold] is now {_status_markup(r.status)}.")
 
 
 # ---------------------------------------------------------------------------
@@ -3051,20 +3236,43 @@ def check(
     """Report everything blocking this project from running, before you run it.
 
     Server-side checks on the repo: it exists, `harumi.toml` is present and valid,
-    and the kernel is one the project may use.
+    and the kernel is one the project may use. Exits 1 when something blocks the
+    project, so a script can stop before `harumi run`.
     """
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
     readiness = client.get_project_readiness(project_id, ref=ref)
-    state = "[bold green]ready[/bold green]" if readiness.ready else "[bold red]not ready[/bold red]"
-    console.print(f"Project {readiness.project_id!r} on {readiness.ref!r} is {state}.")
+    failing = [c for c in readiness.checks if not c.ok]
 
-    table = Table("check", "ok", "detail")
+    table = Table("check", "result", "detail")
     for c in readiness.checks:
-        mark = "[green]yes[/green]" if c.ok else "[red]no[/red]"
-        table.add_row(c.id, mark, c.detail or "")
+        mark = "[green]ok[/green]" if c.ok else "[bold red]problem[/bold red]"
+        table.add_row(_CHECK_LABELS.get(c.id, c.id), mark, escape(c.detail or ""))
     console.print(table)
+
+    if readiness.ready and not failing:
+        console.print(
+            f"[bold green]Ready to run[/bold green] on {escape(readiness.ref)}. "
+            "[dim]Next: [bold]harumi run --watch[/bold][/dim]"
+        )
+        return
+    count = len(failing)
+    console.print(
+        f"[bold red]Not ready[/bold red] on {escape(readiness.ref)}: "
+        f"{count} problem{'' if count == 1 else 's'}. "
+        "[dim]Fix them, then run [bold]harumi check[/bold] again.[/dim]"
+    )
+    raise typer.Exit(code=1)
+
+
+# What each server-side readiness check is called when shown to a person.
+_CHECK_LABELS = {
+    "repo": "Repository exists",
+    "manifest": "harumi.toml is present",
+    "manifest_valid": "harumi.toml is valid",
+    "kernel": "Kernel is allowed",
+}
 
 
 repo_app.command("readiness")(_deprecated("harumi repo readiness", "harumi check")(check))
