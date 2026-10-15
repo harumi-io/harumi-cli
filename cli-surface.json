@@ -1564,6 +1564,19 @@
         },
         {
           "opts": [
+            "--yes",
+            "-y"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Don't ask for a name or confirmation: use the folder name and go."
+        },
+        {
+          "opts": [
             "--api-url"
           ],
           "secondary_opts": [],

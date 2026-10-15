@@ -193,8 +193,11 @@ from harumi.git import (
     current_branch,
     delete_remote_scratch,
     ensure_remote,
+    ImportPlan,
     has_unpushed_commits,
+    import_excludes,
     is_dirty,
+    plan_import,
     push_folder,
     push_scratch,
     repo_root,
@@ -1779,6 +1782,9 @@ def import_project(
         "--personal",
         help="Create in your personal workspace, ignoring the configured org.",
     ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Don't ask for a name or confirmation: use the folder name and go."
+    ),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -1792,6 +1798,10 @@ def import_project(
     intentionally overwrites the server-seeded scaffold, so if the folder
     has no `harumi.toml` one is written for you before pushing.
 
+    First it shows what would be uploaded. Virtual environments, `node_modules`
+    and files that look like secrets (`.env`, `*.pem`, `*.key`) are left out,
+    and at a terminal you are asked for a name and to confirm.
+
     Starting with nothing at all? Use `harumi new <NAME>` instead — it
     clones the seeded scaffold rather than overwriting it.
     """
@@ -1801,10 +1811,51 @@ def import_project(
         from_git=from_git,
         bind=bind,
         personal=personal,
+        assume_yes=yes,
         api_url=api_url,
         git_url=git_url,
         org=org,
     )
+
+
+def _print_import_plan(folder: Path, plan: ImportPlan) -> None:
+    """What an import is about to upload and what it leaves out, in a few lines."""
+    from harumi.git import LARGE_FILE_BYTES
+
+    history = (
+        f", plus {plan.history_commits} commit{'' if plan.history_commits == 1 else 's'} of git history"
+        if plan.history_commits
+        else ""
+    )
+    console.print(
+        f"Importing [bold]{escape(str(folder))}[/bold]: [bold]{plan.files}[/bold] "
+        f"file{'' if plan.files == 1 else 's'}, {_format_bytes(plan.total_bytes)}{history}."
+    )
+    left_out = [f"{escape(d)}/ ({n} file{'' if n == 1 else 's'})" for d, n in plan.skipped_dirs]
+    if plan.skipped_secrets:
+        left_out.append("files that look like secrets: " + ", ".join(escape(f) for f in plan.skipped_secrets[:5]))
+        if len(plan.skipped_secrets) > 5:
+            left_out[-1] += f" and {len(plan.skipped_secrets) - 5} more"
+    if left_out:
+        console.print("[dim]Left out: " + "; ".join(left_out) + ".[/dim]")
+    if plan.skipped_secrets:
+        console.print("[dim]API keys belong in [bold]harumi secrets set NAME[/bold], not in the code.[/dim]")
+    big = [(f, n) for f, n in plan.largest if n >= LARGE_FILE_BYTES]
+    if big:
+        console.print(
+            "[yellow]Large files make the upload slow:[/yellow] "
+            + ", ".join(f"{escape(f)} ({_format_bytes(n)})" for f, n in big)
+            + ". Data files usually belong in [bold]harumi files put[/bold]."
+        )
+    if plan.included_secrets:
+        console.print(
+            "[bold yellow]Heads-up:[/bold yellow] "
+            + ", ".join(escape(f) for f in plan.included_secrets[:5])
+            + " looks like a secret, but git already tracks it, so it [bold]will be uploaded[/bold]"
+            + (" with its history" if plan.history_commits else "")
+            + ". Stop here if that is not what you want, and remove it from git first "
+            "([bold]git rm --cached <file>[/bold])."
+        )
 
 
 def _push_impl(
@@ -1817,6 +1868,7 @@ def _push_impl(
     api_url: Optional[str],
     git_url: Optional[str],
     org: Optional[str],
+    assume_yes: bool = False,
 ) -> None:
     """Body of `harumi import`, factored out so `harumi start` can call it
     directly without going through Typer's CLI-parsing machinery (whose
@@ -1827,6 +1879,18 @@ def _push_impl(
     if not folder.is_dir():
         _fail(f"Not a directory: {folder}")
 
+    linked = folder / ".harumi" / "config.json"
+    if linked.exists():
+        binding = ProjectBinding.load(folder)
+        which = f" ({binding.project_id})" if binding else ""
+        _fail(
+            f"{folder} is already a Harumi project{which}, and `harumi import` always creates a "
+            "[bold]new[/bold] one.\n"
+            "To send your changes to this project, commit and run [bold]git push harumi <branch>[/bold]; "
+            "to just run them, use [bold]harumi run[/bold].\n"
+            "If you really want a second project from this folder, delete its .harumi folder first."
+        )
+
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
     # Before the merge and scaffold below change the user's folder.
     _require_entitled_workspace(client, None if personal else client.config.org_id)
@@ -1834,10 +1898,29 @@ def _push_impl(
     if from_git:
         _merge_git_repo_flat(from_git, folder)
 
+    # The summary has to count what will really be pushed, which includes the
+    # harumi.toml written below. So preview with the file counted in, and only
+    # write it once the user has agreed.
+    plan = plan_import(folder)
+    needs_manifest = not (folder / "harumi.toml").exists()
+    if needs_manifest:
+        plan.files += 1
+        plan.total_bytes += len(_DEFAULT_HARUMI_TOML.encode())
+    _print_import_plan(folder, plan)
+    can_ask = interactive.is_interactive() and not assume_yes
+    name = project_name or folder.name
+    if can_ask:
+        if project_name is None:
+            name = typer.prompt("Project name", default=folder.name)
+        if not typer.confirm(
+            "Create the project and upload these files?", default=not plan.included_secrets
+        ):
+            console.print("Nothing was created.")
+            return
+
     _ensure_scaffold(folder)
 
-    name = project_name or folder.name
-    console.print(f"Creating project [bold]{name}[/bold]...")
+    console.print(f"Creating project [bold]{escape(name)}[/bold]...")
     project = client.create_project(name, personal=personal)
     console.print(
         f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id})."
@@ -1875,6 +1958,7 @@ def _push_impl(
         token=git_token,
         branch=repo.default_branch,
         message="Push local project",
+        exclude=import_excludes(),
     )
     console.print(f"[bold green]Pushed[/bold green] to Harumi ({repo.default_branch}).")
 
