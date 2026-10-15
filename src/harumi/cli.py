@@ -1480,7 +1480,9 @@ def skills_add(
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(content, encoding="utf-8")
     rel = f"{skills_mod.SKILLS_DIR}/{slug}"
-    console.print(f"[bold green]Installed[/bold green] [bold]{preset.name}[/bold] (v{preset.version}) at {dest}.")
+    console.print(
+        f"[bold green]Installed[/bold green] [bold]{preset.name}[/bold] (v{preset.version}) at {dest}.", soft_wrap=True
+    )
     console.print(
         "Commit and push it so the project's assistant can use it:\n"
         f"  [bold]git add {rel} && git commit -m \"Install {slug} skill\" && git push harumi[/bold]"
@@ -2056,7 +2058,7 @@ def _clone_and_bind(project_id: str, repo, dest: Path) -> None:
         )
         return
 
-    console.print(f"Cloning into [bold]{dest}[/bold]...")
+    console.print(f"Cloning into [bold]{dest}[/bold]...", soft_wrap=True)
     clone_repo(
         clone_url=repo.clone_url,
         username=username,
@@ -2445,7 +2447,7 @@ def run(
 
                 try:
                     zip_path = download_run_output(client.api, project_id, result, output_dir)
-                    console.print(f"Downloaded output to {zip_path}")
+                    console.print(f"Downloaded output to {zip_path}", soft_wrap=True)
                 except HarumiError as exc:
                     console.print(f"[yellow]{exc}[/yellow]")
             else:
@@ -2694,7 +2696,7 @@ def runs_download(
         size = f" ({_format_bytes(zip_path.stat().st_size)})"
     except OSError:
         size = ""
-    console.print(f"Downloaded [bold]{escape(str(zip_path))}[/bold]{size}")
+    console.print(f"Downloaded [bold]{escape(str(zip_path))}[/bold]{size}", soft_wrap=True)
 
 
 @runs_app.command("cancel")
@@ -2875,7 +2877,7 @@ def outputs(
 
         run = client.get_run(resolved_project, download)
         zip_path = download_run_output(client.api, resolved_project, run, output_dir)
-        console.print(f"Downloaded to {zip_path}")
+        console.print(f"Downloaded to {zip_path}", soft_wrap=True)
         return
 
     if latest:
@@ -3080,7 +3082,7 @@ def repo_download(
     client = _get_client(api_url=api_url, org=org)
 
     zip_path = client.download_repo_archive(project_id, output, path=path, ref=ref)
-    console.print(f"Downloaded to {zip_path}")
+    console.print(f"Downloaded to {zip_path}", soft_wrap=True)
 
 
 @repo_app.command("branches")
@@ -3361,7 +3363,9 @@ def files_put(
     content_type = mimetypes.guess_type(str(local_path))[0] or "application/octet-stream"
     upload_url = client.create_file_upload_url(project_id, dest_path, content_type)
     client.upload_file_to_presigned_url(upload_url, local_path, content_type)
-    console.print(f"[bold green]Uploaded[/bold green] {local_path} -> {dest_path} ({_format_bytes(file_size)}).")
+    console.print(
+        f"[bold green]Uploaded[/bold green] {local_path} -> {dest_path} ({_format_bytes(file_size)}).", soft_wrap=True
+    )
 
 
 @files_app.command("get")
@@ -3387,7 +3391,7 @@ def files_get(
     dest_path = output or Path(default_name)
     download_url = client.create_file_download_url(project_id, remote_path)
     client.download_file_from_presigned_url(download_url, dest_path)
-    console.print(f"Downloaded {remote_path} -> {dest_path}")
+    console.print(f"Downloaded {remote_path} -> {dest_path}", soft_wrap=True)
 
 
 @files_app.command("rm")

@@ -313,3 +313,23 @@ def test_a_check_the_cli_has_no_name_for_still_shows_its_id(server):
     result = runner.invoke(cli.app, ["check", "--project", P])
 
     assert "quota" in result.output and "over quota" in result.output
+
+
+def test_a_long_download_path_is_never_broken_across_lines(server, tmp_path, monkeypatch):
+    """A path someone will copy must come out whole whatever the terminal width.
+    CI's long temp directory split it mid-filename."""
+    server(runs=[run_row("run-1", output_url="s3://x")])
+    deep = tmp_path / ("nested-directory-with-a-long-name-" * 3)
+    deep.mkdir()
+
+    def fake_download(_api, _project, run, dest):
+        path = dest / f"run_{run.id}_output.zip"
+        path.write_bytes(b"x")
+        return path
+
+    monkeypatch.setattr("harumi.execution.download_run_output", fake_download)
+
+    result = invoke("runs", "download", "run-1", "-o", str(deep))
+
+    assert result.exit_code == 0, result.output
+    assert str(deep / "run_run-1_output.zip") in result.output
