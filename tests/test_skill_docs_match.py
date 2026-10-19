@@ -9,6 +9,7 @@ errors. This pins each message the skills quote to what the CLI really prints.
 from __future__ import annotations
 
 import pathlib
+import re
 
 import pytest
 
@@ -27,8 +28,38 @@ def skills_text() -> str:
 
 
 def test_the_old_login_message_is_gone_from_every_skill():
-    assert "Not logged in. Run harumi login first." not in skills_text()
-    assert "Not logged in. Run `harumi login` first." not in skills_text()
+    """The whole sentence, in any spelling of its second half. ("Not logged in" alone is still
+    a phrase a person might type, so the setup skill lists it as a trigger.)"""
+    assert not re.search(r"Not logged in\. ?Run", skills_text())
+    assert "login first" not in skills_text()
+
+
+def code_spans_outside_fences(text: str):
+    """Inline code spans in the body: not the front matter (a description there wraps across
+    lines, so a span can legitimately start on one and end on the next) and not fenced blocks."""
+    lines = text.splitlines()
+    start = 0
+    if lines and lines[0] == "---":
+        start = lines.index("---", 1) + 1
+    in_fence = False
+    for n, line in enumerate(lines[start:], start + 1):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            for span in re.findall(r"(?<!`)`([^`\n]+)`(?!`)", line):
+                yield n, span
+
+
+def test_no_inline_code_span_has_stray_spaces_at_its_edges():
+    """Nesting a backtick pair inside one, as in `Error: ... Run `harumi login` ...`, renders
+    as three pieces: a span ending in a space, loose text, and a span starting with one."""
+    broken = []
+    for path in SKILL_FILES:
+        for n, span in code_spans_outside_fences(path.read_text(encoding="utf-8")):
+            if span != span.strip():
+                broken.append(f"{path.name}:{n}: `{span}`")
+    assert broken == []
 
 
 @pytest.mark.parametrize(

@@ -514,7 +514,7 @@ Within the active environment, URL/org overrides (highest first): **CLI flags > 
 
 | Symptom / error | Cause | Fix |
 |---|---|---|
-| `Error: You're not logged in. Run `harumi login` ...` or `Error: Your Harumi session has expired. Run `harumi login` ...` | No session, or it ended | Ask user to run `harumi login` (an agent must never automate the emailed code) |
+| `Error: You're not logged in.` or `Error: Your Harumi session has expired.` (both go on to say to run harumi login) | No session, or it ended | Ask user to run `harumi login` (an agent must never automate the emailed code) |
 | `Error: Could not renew your login: harumi-api returned HTTP 403 ...` | A firewall, proxy or outage blocked the token refresh; the session may be fine | Check network/VPN and retry; logging in again will not help |
 | `harumi-api returned HTTP 422: ... Signups not allowed for otp` | New email, no account | Re-run `harumi login --signup` |
 | `Provide --project or run from a directory with a .harumi binding` | No `--project` and `.harumi/config.json` missing in cwd + parents | `harumi new`/`harumi clone <ID>` (nothing/existing project) or `harumi import` (existing folder) or `harumi link --project <ID>` (already checked out), or pass `--project` |
