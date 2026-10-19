@@ -72,6 +72,8 @@ Every run is git-ref based: code lives in the project's Harumi Git (Gitea) repo.
 
 ## Configuration & environments
 
+*Most people can skip this section: `harumi` uses production, and you are never asked to choose. It is for Harumi staff and for developers pointing the CLI at their own API.*
+
 The CLI targets one of two environments (each with its own Supabase, so each has its own login):
 
 | Env | API | Gitea | Access |
