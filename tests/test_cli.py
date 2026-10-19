@@ -651,7 +651,7 @@ def test_a_non_string_status_or_api_url_in_config_json_does_not_crash_the_error_
     config = Config.load()
     assert config.api_url == "https://api.harumi.io/api"
     assert config.org_id is None
-    assert active_platform_url() == "https://platform.harumi.io"
+    assert active_platform_url() == "https://app.harumi.io"
 
 
 @pytest.mark.parametrize("value", [["staging"], {"a": 1}, 5, True])
