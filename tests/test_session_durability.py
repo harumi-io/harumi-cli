@@ -353,3 +353,40 @@ def test_a_401_on_a_download_stream_is_renewed_the_same_way(monkeypatch):
     with api.stream("GET", "/files/x") as response:
         assert response.read() == b"data"
     assert seen == ["Bearer looks-valid", "Bearer rival"]
+
+
+# -- the lock and the error labelling working together ----------------------------------------------------
+
+
+def test_a_blocked_refresh_inside_the_lock_is_reported_as_a_refresh_problem_not_a_logout(monkeypatch):
+    """A firewall answering 403 while several commands queue for the lock: each one must
+    say its login could not be renewed, and none may be told the session ended."""
+    from harumi.errors import SessionRefreshError
+
+    log_in(refresh="r1")
+    transport = httpx.MockTransport(lambda r: httpx.Response(403, json={"detail": "blocked by firewall"}))
+
+    with pytest.raises(SessionRefreshError) as exc:
+        auth.renew_session(Config.load(), "r1", transport=transport)
+
+    assert exc.value.status_code == 403
+    assert on_disk()["refresh_token"] == "r1", "a failed refresh must leave the session as it was"
+    assert GIT_KEYS <= set(on_disk())
+
+
+def test_the_proactive_refresh_goes_through_the_lock_and_the_clients_transport(monkeypatch):
+    """Both of the previous fixes in one path: get_valid_access_token -> renew_session (lock,
+    adopt a rival) -> the transport the client was given."""
+    log_in(expires_in=-100, refresh="r1", access="old")
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(
+            200, json={"id": "u1", "email": "ana@example.com", "access_token": "fresh", "refresh_token": "r2", "expires_at": int(time.time()) + 3600}
+        )
+
+    token = auth.get_valid_access_token(Config.load(), transport=httpx.MockTransport(handler))
+
+    assert token == "fresh" and seen == ["/api/users/refresh"]
+    assert on_disk()["refresh_token"] == "r2" and GIT_KEYS <= set(on_disk())

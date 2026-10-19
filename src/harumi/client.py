@@ -98,7 +98,7 @@ class ApiClient:
         return (auth.current_credentials() or {}).get("refresh_token") or None
 
     def _headers(self) -> dict[str, str]:
-        token = auth.get_valid_access_token(self.config, allow_refresh=True)
+        token = auth.get_valid_access_token(self.config, allow_refresh=True, transport=self.transport)
         headers = {"Authorization": f"Bearer {token}"}
         if self.config.org_id:
             headers["X-Organization"] = self.config.org_id
