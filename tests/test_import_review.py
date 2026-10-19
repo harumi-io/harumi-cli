@@ -16,7 +16,7 @@ from typer.testing import CliRunner
 from harumi import cli, git as hgit, interactive
 from harumi.git import looks_like_secret, plan_import
 
-from test_import_safety import FakeClient, Repo, at_terminal, sh, world  # noqa: F401  (fixtures)
+from test_import_safety import FakeClient, Repo, at_terminal, home, sh, world  # noqa: F401  (fixtures; `home` is autouse and isolates ~/.harumi)
 
 runner = CliRunner()
 
@@ -268,3 +268,25 @@ def test_start_option_two_will_not_import_a_tracked_secret_just_because_the_flow
     result = runner.invoke(cli.app, ["start"], input=f"2\n{folder}\nRouting\n\n")  # Enter at the confirmation = no
 
     assert world.client.created == []
+
+
+def test_a_windows_folder_with_a_space_is_double_quoted_not_single_quoted():
+    """cmd.exe and PowerShell do not treat single quotes as quoting."""
+    assert cli._quote_for_shell("My Project", windows=True) == '"My Project"'
+    assert cli._quote_for_shell("My Project", windows=False) == "'My Project'"
+    assert cli._quote_for_shell("plain", windows=True) == "plain" == cli._quote_for_shell("plain", windows=False)
+
+
+def test_every_option_of_import_is_in_the_skill_reference():
+    """The reference is what an AI agent reads to know what the CLI can do. A new flag that
+    is missing from it is a flag the agent will not use, or will mis-use."""
+    from typer.main import get_command
+
+    reference = (Path(__file__).resolve().parents[1] / ".agents/skills/harumi-cli/references/commands.md").read_text(encoding="utf-8")
+    start = reference.index("### `import`")
+    section = reference[start : reference.index("### `clone`", start)]
+    options = [o for p in get_command(cli.app).commands["import"].params for o in p.opts if o.startswith("--") and not p.hidden]
+
+    assert "--include-tracked-secrets" in options  # the parse found the real options
+    missing = [o for o in options if o not in section]
+    assert missing == [], f"documented in the skill reference? missing: {missing}"

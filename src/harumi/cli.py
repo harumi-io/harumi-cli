@@ -147,6 +147,7 @@ import mimetypes
 import os
 import re
 import shlex
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1119,12 +1120,23 @@ def _shown_path(path: Path) -> str:
     return str(rel)
 
 
+def _quote_for_shell(text: str, *, windows: Optional[bool] = None) -> str:
+    """`text` as one argument that pastes into the user's shell.
+
+    POSIX shells want single quotes; cmd.exe and PowerShell want double quotes, and
+    single quotes would be taken literally by cmd.exe.
+    """
+    if os.name == "nt" if windows is None else windows:
+        return subprocess.list2cmdline([text])
+    return shlex.quote(text)
+
+
 def _next_steps(folder: Path) -> None:
     """What to type after a project has been set up locally."""
     where = _shown_path(folder)
     # Quoted for the shell (a folder called "My Project" must paste), then escaped for
     # Rich (a "[" in a path is markup otherwise and silently vanishes).
-    cd = f"cd {shlex.quote(where)}" if where != "." else ""
+    cd = f"cd {_quote_for_shell(where)}" if where != "." else ""
     steps = " then ".join(f"[bold]{escape(c)}[/bold]" for c in (cd, "harumi run --watch") if c)
     # soft_wrap: this is a command line someone will copy, so a long path must
     # not be broken across lines at the terminal width.

@@ -128,7 +128,7 @@ With the id omitted, `get`, `rename` and `rm` open the project picker (most rece
 - **`list`**: `GET /projects`, following pages (200 at a time) until the server's `total_count` is reached, so accounts with hundreds of projects see all of them. Sorted **most recently updated first** (the server's own order is creation date; the CLI re-sorts). Table of `id`, `name`, `updated` ("3 days ago"), `workspace` (only when the projects span more than one workspace), `kernel_spec`, `role`. `--limit N` shows only the first N; any time rows are left out it says "Showing N of M projects". The project pickers (`clone` and others) use the same order and show age and workspace beside each name.
 - **`get`**: `GET /projects/{id}` → detail view.
 - **`rename`**: `PUT /projects/{id}` with `{name}`.
-- **`rm`**: `DELETE /projects/{id}`. Prompts you to type the exact project name to confirm unless `--yes`.
+- **`rm`**: `DELETE /projects/{id}`. Prompts you to type the exact project name to confirm unless `--yes`. With `--yes` the project id is required (no picker), so a slip in a list cannot delete a project.
 
 ## Onboarding: `new` / `import` / `clone` / `link` / `start`
 
@@ -153,7 +153,7 @@ Use when there's nothing yet. With `NAME` omitted it asks for one at a terminal;
 ### `import`
 
 ```
-harumi import [PATH] [--project-name NAME] [--from-git URL] [--bind/--no-bind] [--personal] [--yes]
+harumi import [PATH] [--project-name NAME] [--from-git URL] [--bind/--no-bind] [--personal] [--yes] [--include-tracked-secrets]
            [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
@@ -166,9 +166,10 @@ Use when you already have code on your machine — from anywhere: an old GitHub 
 | `--from-git` | Also clone this git URL (e.g. an old GitHub repo) flat into the folder — `.git` stripped, files copied alongside the existing ones — before pushing. On a filename collision the existing (folder's own) file wins; the CLI warns and lists the first few colliding paths. |
 | `--bind / --no-bind` | Bind the folder to the new project afterward. Default: `--bind`. |
 | `--personal` | Create the project in your personal workspace, ignoring the configured org. |
-| `--yes, -y` | Don't ask for a name or confirmation (use the folder name and go). |
+| `--yes, -y` | Don't ask for a name or confirmation (use the folder name and go). Does **not** override the secret check below. |
+| `--include-tracked-secrets` | Upload secret-looking files that git already tracks or has in its history. Without it, a non-interactive import (no terminal, or `--yes`) stops with exit 1 instead. |
 
-**Before anything is created** `import` prints what it will upload (`Importing <folder>: 5 files, 2.9 MB`), then what it leaves out: virtual environments (`.venv`, `venv`), `node_modules`, `__pycache__` and similar, and files that look like secrets (`.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `id_rsa*` ...), with a pointer to `harumi secrets set`. Templates such as `.env.example` are uploaded. The exclusions are written to the repo's local `.git/info/exclude`; the user's own `.gitignore` is never edited, and `.gitignore` rules are honoured. A secret-looking file that git **already tracks** cannot be skipped (it uploads, with the folder's history); that case gets a loud warning and the confirmation defaults to No. Large files (50 MB and up) are called out. At a terminal it then asks for the project name (Enter accepts the folder name) and `Create the project and upload these files?`; without a terminal, or with `--yes`, it asks nothing. A folder that already has a `.harumi` binding is refused, because `import` always makes a *new* project: use `git push harumi <branch>` instead.
+**Before anything is created** `import` prints what it will upload (`Importing <folder>: 5 files, 2.9 MB`), then what it leaves out: virtual environments (`.venv`, `.env/`, `venv`), `node_modules`, `__pycache__` and similar, and files that look like secrets (`.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `id_rsa*` ... in any letter case), with a pointer to `harumi secrets set`. Templates such as `.env.example` are uploaded. The exclusions are written to the repo's local `.git/info/exclude` and stay there after the import (they are not removed if a later step fails, and an older block is not updated); the user's own `.gitignore` is never edited, and `.gitignore` rules are honoured. A secret-looking file that git **already tracks**, or that exists anywhere in the folder's **history** (even if deleted since), is uploaded, because the whole history is pushed as it is. At a terminal that gets a loud warning and the confirmation defaults to No; **without a terminal, or with `--yes`, the import refuses (exit 1) unless `--include-tracked-secrets` is given.** Detection is by file name only. Large files (50 MB and up) are called out. At a terminal it then asks for the project name (Enter accepts the folder name) and `Create the project and upload these files?`; without a terminal, or with `--yes`, it asks nothing (but see the secret refusal above). A folder that already has a `.harumi` binding is refused, because `import` always makes a *new* project: use `git push harumi <branch>` instead.
 
 Sequence:
 
