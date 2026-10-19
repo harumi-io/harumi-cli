@@ -162,6 +162,7 @@ from harumi import skills as skills_mod
 from harumi.client import Client
 from harumi.file_sync_cap import check_project_sync_cap
 from harumi.config import (
+    DEFAULT_ENVIRONMENT,
     ENVIRONMENTS,
     Config,
     ProjectBinding,
@@ -657,23 +658,22 @@ def login(
     New to Harumi? Add --signup to create your account first. Without it, an
     email address that has no account yet is turned away.
 
-    Harumi staff (a @harumi.io address) are asked which environment to use, and
-    that choice becomes their default. Already logged in there with the same
-    email? No new code is needed: this just switches.
     """
     config = Config.load(api_url=api_url, git_url=git_url)
     email = email or typer.prompt("Email", default=_stored_email())
 
     config, picked = _choose_login_environment(email, config, api_url=api_url, git_url=git_url)
     env = ENVIRONMENTS[config.environment]
-    console.print(
-        f"Environment: [bold]{config.environment}[/bold] "
-        f"([dim]{config.api_url}[/dim])"
-        + (" [yellow](internal — VPN required)[/yellow]" if env.internal else "")
-    )
+    if config.environment != DEFAULT_ENVIRONMENT or config.api_url != env.api_url:
+        # Not the ordinary setup (staff on staging, or a developer's own API): say where.
+        console.print(
+            f"Environment: [bold]{config.environment}[/bold] "
+            f"([dim]{config.api_url}[/dim])"
+            + (" [yellow](internal — VPN required)[/yellow]" if env.internal else "")
+        )
 
     if _session_still_works(config, email):
-        console.print(f"Already logged in as [bold]{email}[/bold] on [bold]{config.environment}[/bold].")
+        console.print(f"Already logged in as [bold]{email}[/bold]{_on(config.environment)}.")
     else:
         try:
             auth.request_otp(config, email, sign_up=signup)
@@ -687,8 +687,7 @@ def login(
         console.print(f"A login code was sent to [bold]{escape(email)}[/bold].")
         user = _verify_code(config, email)
         console.print(
-            f"[bold green]Logged in[/bold green] as {user.email or email} "
-            f"on [bold]{config.environment}[/bold]."
+            f"[bold green]Logged in[/bold green] as {user.email or email}{_on(config.environment)}."
         )
 
     if picked:
@@ -709,6 +708,15 @@ def login(
     # leaving the person at a bare prompt. Scripts and agents just finish.
     if interactive.is_interactive():
         _quickstart(show_status=False)
+
+
+def _on(environment: str) -> str:
+    """" on staging" for any environment but production; nothing for production.
+
+    Nearly everyone only ever uses production, and for them the word is noise that
+    suggests a choice they do not have. Anyone somewhere else is told where.
+    """
+    return "" if environment == DEFAULT_ENVIRONMENT else f" on [bold]{environment}[/bold]"
 
 
 _CODE_ATTEMPTS = 3
@@ -929,16 +937,16 @@ def _provision_git_token(config: Config) -> None:
 
 @app.command()
 def logout() -> None:
-    """Clear the stored local session for the active environment."""
+    """Log out: forget the login stored on this machine."""
     # Resolve the active env (honors --env / HARUMI_ENV / saved default).
     Config.load()
     was_logged_in = auth.has_session()
     auth.logout()
-    env = active_environment()
+    where = _on(active_environment())
     if was_logged_in:
-        console.print(f"Logged out of [bold]{env}[/bold]. [dim]Sign in again with harumi login.[/dim]")
+        console.print(f"Logged out{where}. [dim]Sign in again with harumi login.[/dim]")
     else:
-        console.print(f"You were not logged in on [bold]{env}[/bold]; there was nothing to clear.")
+        console.print(f"You were not logged in{where}; there was nothing to clear.")
 
 
 @app.command()
@@ -980,12 +988,12 @@ def whoami(
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Show the logged-in user: profile, active environment and organization."""
+    """Show the logged-in user: email, name and organization."""
     client = _get_client(api_url=api_url, org=org)
     profile = client.get_profile()
     console.print(
         f"[bold]{profile.email or '?'}[/bold]  (id: {profile.id or '?'})  "
-        f"[dim]env: {client.config.environment}[/dim]"
+        + (f"[dim]env: {client.config.environment}[/dim]" if client.config.environment != DEFAULT_ENVIRONMENT else "")
     )
     name = " ".join(part for part in (profile.first_name, profile.last_name) if part)
     for label, value in (
@@ -1298,8 +1306,8 @@ def org_use(
 ) -> None:
     """Choose the workspace (an organization, or your personal one) for every request.
 
-    Leave the id out to pick from your organizations. The choice is saved per
-    environment and sent as X-Organization.
+    Leave the id out to pick from your organizations. The choice is remembered
+    and sent with every request.
     """
     if personal and org_id:
         _fail("--personal and an organization id are mutually exclusive. Pass only one.")

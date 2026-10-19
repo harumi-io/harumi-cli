@@ -53,7 +53,8 @@ def status_line(state: State) -> str:
     # "Using", not "logged in as": all we know offline is which account is on
     # file. Whether its session still works is only found out by asking the server.
     who = state.email or "your account"
-    line = f"Using [bold]{who}[/bold] on [bold]{state.environment}[/bold]."
+    where = "" if state.environment == "production" else f" on [bold]{state.environment}[/bold]"
+    line = f"Using [bold]{who}[/bold]{where}."
     if state.project_id:
         line += f" This folder is project [bold]{state.project_id}[/bold]."
     return line
