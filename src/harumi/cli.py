@@ -345,6 +345,16 @@ def _main(
         _quickstart()
 
 
+@app.command(
+    "help",
+    hidden=True,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def help_command(ctx: typer.Context) -> None:
+    """`harumi help` is `harumi --help`; `harumi help run` is `harumi run --help`."""
+    _run_cli([*ctx.args, "--help"])
+
+
 def _run_cli(argv: list[str]) -> None:
     """Run another harumi command as if the user had typed it, then exit.
 
@@ -644,9 +654,8 @@ def login(
 ) -> None:
     """Log in via one-time email code and store the session locally.
 
-    First time logging in with a given email? Pass --signup to create the
-    account first — otherwise harumi-api rejects the OTP request with
-    'Signups not allowed for otp'.
+    New to Harumi? Add --signup to create your account first. Without it, an
+    email address that has no account yet is turned away.
 
     Harumi staff (a @harumi.io address) are asked which environment to use, and
     that choice becomes their default. Already logged in there with the same
@@ -669,16 +678,14 @@ def login(
         try:
             auth.request_otp(config, email, sign_up=signup)
         except ApiError as exc:
-            if not signup and exc.status_code == 422:
+            if not signup and exc.status_code == 422 and "signups not allowed" in str(exc).lower():
                 _fail(
-                    f"{exc} — this looks like a new account. Retry with "
-                    f"[bold]harumi login --signup[/bold]."
+                    f"There is no Harumi account for {escape(email)} yet. New here? "
+                    "Run [bold]harumi login --signup[/bold] to create one."
                 )
             raise
-        console.print(f"A login code was sent to [bold]{email}[/bold].")
-        code = typer.prompt("Enter the code")
-
-        user = auth.verify_otp(config, email, code)
+        console.print(f"A login code was sent to [bold]{escape(email)}[/bold].")
+        user = _verify_code(config, email)
         console.print(
             f"[bold green]Logged in[/bold green] as {user.email or email} "
             f"on [bold]{config.environment}[/bold]."
@@ -702,6 +709,33 @@ def login(
     # leaving the person at a bare prompt. Scripts and agents just finish.
     if interactive.is_interactive():
         _quickstart(show_status=False)
+
+
+_CODE_ATTEMPTS = 3
+
+
+def _verify_code(config: Config, email: str):
+    """Ask for the emailed code and check it.
+
+    At a terminal a wrong code can be retyped (three tries); anywhere else there is
+    nobody to retype it, so it fails once. Either way the person is told what
+    happened in words, not as an HTTP status.
+    """
+    attempts = _CODE_ATTEMPTS if interactive.is_interactive() else 1
+    for attempt in range(1, attempts + 1):
+        # People paste "123 456" from an email; the spaces are not part of the code.
+        code = "".join(typer.prompt("Enter the code").split())
+        try:
+            return auth.verify_otp(config, email, code)
+        except ApiError as exc:
+            if exc.status_code == 429:
+                _fail("Too many attempts. Wait a minute, then run [bold]harumi login[/bold] again.")
+            if exc.status_code not in (400, 401, 403, 422):
+                raise  # an outage or something unexpected: the normal error path explains it
+            if attempt < attempts:
+                console.print("[yellow]That code was not accepted.[/yellow] Check it and try again.")
+                continue
+            _fail("That code was not accepted. Run [bold]harumi login[/bold] to get a new one.")
 
 
 def _stored_email() -> Optional[str]:
@@ -876,8 +910,13 @@ def logout() -> None:
     """Clear the stored local session for the active environment."""
     # Resolve the active env (honors --env / HARUMI_ENV / saved default).
     Config.load()
+    was_logged_in = auth.has_session()
     auth.logout()
-    console.print(f"Logged out of [bold]{active_environment()}[/bold].")
+    env = active_environment()
+    if was_logged_in:
+        console.print(f"Logged out of [bold]{env}[/bold]. [dim]Sign in again with harumi login.[/dim]")
+    else:
+        console.print(f"You were not logged in on [bold]{env}[/bold]; there was nothing to clear.")
 
 
 @app.command()
@@ -2071,6 +2110,9 @@ def start() -> None:
     Equivalent to picking one of `harumi new`, `harumi import`, or
     `harumi clone` yourself — this just asks the question first.
     """
+    if not auth.has_session():
+        # Before the questions: answering three of them only to be told to log in is a waste.
+        _fail(str(NotAuthenticatedError(environment=active_environment())))
     console.print("[bold]What do you have?[/bold]\n")
     console.print("  1. Nothing yet — start a brand-new project")
     console.print("  2. A folder of code on this machine — bring it into Harumi")

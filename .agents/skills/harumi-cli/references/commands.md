@@ -44,7 +44,7 @@ Logs into the **active environment** (see [Environments](#environments)). Each e
 - **Harumi staff** (a `@harumi.io` email) at a terminal are asked, after typing their email, whether to log in to `production` or `staging`; the choice is saved as their default once the login succeeds. Everyone else is never asked. `harumi --env staging login` (or `HARUMI_ENV`) skips the question and is not saved.
 - Already logged in to that environment with the same email? No code is sent: `login` just switches (and re-provisions the Gitea token). Run `harumi logout` first to force a fresh code.
 
-- Prompts for email if `--email` omitted, then prompts for the OTP code emailed by Supabase.
+- Prompts for email if `--email` omitted, then prompts for the OTP code emailed by Supabase. Spaces in a pasted code are ignored. At a terminal a code the server refuses can be retyped (three tries); with no terminal it fails once, so piped input is never consumed by retries. A refused code is reported as "That code was not accepted" (never as an HTTP status); a 429 says to wait a minute and stops asking. An email with no account says so and offers `--signup`.
 - `--signup`: creates the Supabase account first. Required the *first* time a new email logs in.
 - On success, stores `access_token`/`refresh_token` at `~/.harumi/credentials.json` (mode `0600`, written atomically; a new login replaces the whole file, so another account's git token never survives), then calls `POST /git/credentials` to provision a per-user Gitea personal access token (`git_token` + `git_url`), used by `harumi new`/`import`/`clone`/`link` and `harumi run` for git-over-HTTPS.
 - Best-effort workspace resolution (skipped when `HARUMI_ORG` is set). No organizations: the personal workspace, automatically. A saved org you still belong to: kept. Otherwise, at a terminal, a menu of your organizations plus "Personal workspace" (the choice is saved). With no terminal it never prompts: exactly one org is stored, several mean the personal workspace plus a printed table and the `harumi org use` hint.
@@ -52,7 +52,9 @@ Logs into the **active environment** (see [Environments](#environments)). Each e
 
 ### `harumi logout`
 
-Clears `~/.harumi/credentials.json`. No flags.
+Clears `~/.harumi/credentials.json`. No flags. Says whether anything was cleared (`You were not logged in on production; there was nothing to clear.` otherwise).
+
+`harumi help` is `harumi --help`, and `harumi help <command>` is `harumi <command> --help` (it is not listed in the command list). `harumi start` checks that you are logged in before it asks its first question.
 
 ### `harumi whoami`
 
