@@ -42,6 +42,10 @@ dependencies = [
     "typer>=0.16",
     "rich>=13.7",
     "pydantic>=2.6",
+    # Arrow-key menus (see harumi/interactive.py). Built on prompt_toolkit, which
+    # works on macOS, Linux and Windows. 2.1 is the version this was developed and
+    # tested against, and it supports the Python 3.9 floor above.
+    "questionary>=2.1",
 ]
 
 [project.urls]

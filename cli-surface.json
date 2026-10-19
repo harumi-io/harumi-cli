@@ -152,10 +152,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Harumi project id to clone (see `harumi projects list`)."
+          "help": "Harumi project id to clone (see `harumi projects list`). Pick from a list if omitted."
         },
         {
           "opts": [
@@ -1251,43 +1251,6 @@
       ]
     },
     {
-      "path": "env list",
-      "help": "List selectable environments (the active one is flagged).",
-      "params": [
-        {
-          "opts": [
-            "--all",
-            "-a"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": false,
-          "help": "Include internal (VPN-only) environments."
-        }
-      ]
-    },
-    {
-      "path": "env use",
-      "help": "Persist the default environment for future commands.",
-      "params": [
-        {
-          "opts": [
-            "name"
-          ],
-          "secondary_opts": [],
-          "kind": "argument",
-          "type": "str",
-          "required": true,
-          "multiple": false,
-          "default": null,
-          "help": "Environment to make the default (e.g. production, staging)."
-        }
-      ]
-    },
-    {
       "path": "files get",
       "help": "Download a file to a local path.",
       "params": [
@@ -1748,7 +1711,7 @@
     },
     {
       "path": "logout",
-      "help": "Clear the stored local session for the active environment.",
+      "help": "Log out: forget the login stored on this machine.",
       "params": []
     },
     {
@@ -2475,7 +2438,7 @@
     },
     {
       "path": "org use",
-      "help": "Persist the organization id sent as X-Organization on every request.",
+      "help": "Choose the workspace (an organization, or your personal one) for every request.",
       "params": [
         {
           "opts": [
@@ -2484,10 +2447,22 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Organization id to persist as X-Organization."
+          "help": "Organization id to work in. Pick from a list if omitted."
+        },
+        {
+          "opts": [
+            "--personal"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Work in your personal workspace instead of an organization."
         }
       ]
     },
@@ -2601,7 +2576,7 @@
     },
     {
       "path": "projects list",
-      "help": "List your projects.",
+      "help": "List your projects, most recently updated first.",
       "params": [
         {
           "opts": [
@@ -2626,6 +2601,19 @@
           "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
+        },
+        {
+          "opts": [
+            "--limit",
+            "-n"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "int range",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Show only the most recently updated N projects."
         }
       ]
     },
@@ -3024,7 +3012,7 @@
     },
     {
       "path": "runs list",
-      "help": "List runs for a project, newest first.",
+      "help": "List runs for a project, newest first (the latest 25 unless you ask for more).",
       "params": [
         {
           "opts": [
@@ -3062,6 +3050,31 @@
           "multiple": false,
           "default": null,
           "help": "Override the organization sent as X-Organization."
+        },
+        {
+          "opts": [
+            "--limit",
+            "-n"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "int range",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "How many of the latest runs to show (default 25). Use --all for every run."
+        },
+        {
+          "opts": [
+            "--all"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Show every run, however many there are."
         }
       ]
     },
@@ -4383,7 +4396,7 @@
     },
     {
       "path": "whoami",
-      "help": "Show the logged-in user: profile, active environment and organization.",
+      "help": "Show the logged-in user: email, name and organization.",
       "params": [
         {
           "opts": [

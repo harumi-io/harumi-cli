@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Iterator, Optional
 
 import httpx
 
@@ -13,10 +13,35 @@ class HarumiError(Exception):
 
 
 class NotAuthenticatedError(HarumiError):
-    """Raised when an operation requires login but no valid session exists."""
+    """There is no usable login: none on file, or the one on file has expired.
 
-    def __init__(self, message: str = "Not logged in. Run `harumi login` first.") -> None:
-        super().__init__(message)
+    The message is the whole point: it says what happened and the one command
+    that fixes it, because this is what a person sees the first time they run
+    anything, and again whenever a session lapses.
+    """
+
+    def __init__(
+        self,
+        message: Optional[str] = None,
+        *,
+        expired: bool = False,
+        environment: Optional[str] = None,
+    ) -> None:
+        self.expired = expired
+        self.environment = environment
+        super().__init__(message or self.default_message(expired=expired, environment=environment))
+
+    @staticmethod
+    def default_message(*, expired: bool, environment: Optional[str]) -> str:
+        # Production is what nearly everyone uses, so only name an environment
+        # when it is not that one.
+        where = f" on {environment}" if environment and environment != "production" else ""
+        if expired:
+            return f"Your Harumi session{where} has expired. Run `harumi login` to sign in again."
+        return (
+            f"You're not logged in{where}. Run `harumi login` to sign in "
+            "(new to Harumi? `harumi login --signup` creates your account)."
+        )
 
 
 class ApiError(HarumiError):
@@ -28,6 +53,22 @@ class ApiError(HarumiError):
         # harumi-api's denial reason when it sent one (402s carry it).
         self.code = code
         super().__init__(f"harumi-api returned HTTP {status_code}: {detail}")
+
+
+class SessionRefreshError(ApiError):
+    """Renewing the login failed for a reason that does not mean "the session is over"
+    (a firewall's 403, a server error, a rate limit).
+
+    A separate type so callers can tell it from the error of whatever command was
+    running: a refresh that fails while `harumi run` executes is not the project's fault.
+    """
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(status_code, detail)
+        self.args = (f"Could not renew your login: harumi-api returned HTTP {status_code}: {detail}",)
+
+    def __str__(self) -> str:
+        return self.args[0]
 
 
 class ApiUnreachableError(ApiError):

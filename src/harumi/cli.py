@@ -30,7 +30,7 @@
     harumi org list|create|rename|use|rm|members|invite|role|rm-member
 
 Deprecated names (`push`, `repo`, `outputs`, `projects create`, `config
-set-org`, `skill`, `env current`, `profile show`, `... remove`/`delete`,
+set-org`, `skill`, `profile show`, `... remove`/`delete`,
 `share set-password`/`rm-password`, `run --output-dir`) still work in 0.11.x
 as hidden commands that print what to use instead, and are removed in 0.12.0.
 
@@ -147,7 +147,7 @@ import mimetypes
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -157,17 +157,20 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from harumi import __version__, auth
+from harumi import __version__, auth, interactive, quickstart
 from harumi import skills as skills_mod
 from harumi.client import Client
 from harumi.file_sync_cap import check_project_sync_cap
 from harumi.config import (
+    DEFAULT_ENVIRONMENT,
     ENVIRONMENTS,
     Config,
     ProjectBinding,
     active_environment,
     active_platform_url,
     active_status_url,
+    is_internal_email,
+    load_credentials,
     load_git_token,
     load_git_username,
     resolve_environment,
@@ -202,7 +205,9 @@ from harumi.models import ProjectShareLink
 app = typer.Typer(
     name="harumi",
     help="Run local optimization code on Harumi's infrastructure via Harumi Git.",
-    no_args_is_help=True,
+    # Bare `harumi` is the quick start (see `_quickstart`), not a help dump.
+    no_args_is_help=False,
+    invoke_without_command=True,
 )
 console = Console()
 err_console = Console(stderr=True)
@@ -236,15 +241,28 @@ def _print_banner_if_bare_entrypoint() -> None:
     Also deliberately narrow the other way: `harumi <command> --help` (e.g.
     `harumi login --help`) does NOT match, so the banner decorates the entry
     point once rather than prepending itself to every command's help text.
+    Shown only when stdout is a terminal (`_stdout_is_terminal`): piped or logged
+    output stays free of decoration.
+
     Checked against raw argv in `main()` (the actual process entry point)
     rather than as a Typer/Click callback, so it can't interfere with
     Click's own eager `--help` handling — and `tests/test_cli.py` invokes
     `app()` directly via `CliRunner`, never `main()`, so this never touches
     test output.
     """
-    if sys.argv[1:] in ([], ["--help"]):
+    if sys.argv[1:] in ([], ["--help"]) and _stdout_is_terminal():
         console.print(f"[bold magenta]{_BANNER}[/bold magenta]")
         _print_skill_install_hint()
+
+
+def _stdout_is_terminal() -> bool:
+    """Whether output goes to a person's terminal. Art and nudges are for them;
+    `harumi --help | less`, a log file or a coding agent reading stdout get the
+    plain text only."""
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
 
 
 def _print_skill_install_hint() -> None:
@@ -305,6 +323,7 @@ def _env_callback(value: Optional[str]) -> None:
 
 @app.callback()
 def _main(
+    ctx: typer.Context,
     version: Optional[bool] = typer.Option(
         None,
         "--version",
@@ -317,11 +336,83 @@ def _main(
         "--env",
         callback=_env_callback,
         is_eager=True,
-        help="Backend environment to target for this command (e.g. production, staging). "
-        "Overrides the persisted default set by `harumi env use`.",
+        # Staff-only (staging is internal), so it stays out of everyone else's help.
+        hidden=True,
+        help="Backend environment to target for this one command (production or staging). "
+        "`harumi login` is how staff pick their default.",
     ),
 ) -> None:
-    pass
+    if ctx.invoked_subcommand is None:
+        _quickstart()
+
+
+def _run_cli(argv: list[str]) -> None:
+    """Run another harumi command as if the user had typed it, then exit.
+
+    Used by the quick start so a menu choice behaves exactly like the typed
+    command: same prompts, same error handling, same exit code.
+    """
+    from typer.main import get_command
+
+    get_command(app).main(args=argv, prog_name="harumi")
+
+
+def _quickstart_state() -> quickstart.State:
+    creds = load_credentials()
+    binding = ProjectBinding.load()
+    return quickstart.State(
+        logged_in=bool(creds and creds.get("access_token")),
+        environment=active_environment(),
+        email=(creds or {}).get("email"),
+        project_id=binding.project_id if binding else None,
+    )
+
+
+def _quickstart(*, show_status: bool = True) -> None:
+    """Bare `harumi`: say where the user stands and offer the next step.
+
+    A terminal gets an arrow-key menu; anything else (pipe, CI, a coding agent)
+    gets the same content as plain text and the command exits 0 — it must never
+    sit waiting for a key press nobody can send.
+    """
+    state = _quickstart_state()
+
+    if not interactive.is_interactive():
+        for line in quickstart.plain_text(state):
+            console.print(line, soft_wrap=True)
+        return
+
+    # Right after login the screen already says who is logged in and where.
+    console.print(f"\n{quickstart.status_line(state)}\n" if show_status else "")
+    options = [
+        interactive.Option(a.label, a.key, hint=a.command) for a in quickstart.actions_for(state)
+    ]
+    options += [
+        interactive.Option("Show all commands", quickstart.HELP, hint="harumi --help"),
+        interactive.Option("Quit", quickstart.QUIT),
+    ]
+    choice = interactive.select("What would you like to do?", options)
+
+    if choice in (None, quickstart.QUIT):
+        return
+    if choice == quickstart.HELP:
+        _run_cli(["--help"])
+    elif choice == quickstart.LOGIN:
+        _run_cli(["login"])
+    elif choice == quickstart.SIGNUP:
+        _run_cli(["login", "--signup"])
+    elif choice == quickstart.NEW:
+        _run_cli(["new", typer.prompt("Project name")])
+    elif choice == quickstart.IMPORT:
+        _run_cli(["import"])
+    elif choice == quickstart.CLONE:
+        _run_cli(["clone"])
+    elif choice == quickstart.RUN:
+        _run_cli(["run", "--watch"])
+    elif choice == quickstart.CHECK:
+        _run_cli(["check"])
+    elif choice == quickstart.RUNS:
+        _run_cli(["runs", "list"])
 
 
 def _get_client(
@@ -329,7 +420,12 @@ def _get_client(
     git_url: Optional[str] = None,
     org: Optional[str] = None,
 ) -> Client:
-    return Client(api_url=api_url, git_url=git_url, org_id=org)
+    client = Client(api_url=api_url, git_url=git_url, org_id=org)
+    if not auth.has_session():
+        # Before the command prints "Creating project..." or similar and then
+        # fails halfway: nothing here can work without a login.
+        raise NotAuthenticatedError(environment=client.config.environment)
+    return client
 
 
 def _fail(message: str) -> None:
@@ -489,6 +585,10 @@ def _handle_errors(fn):
             _fail(str(exc))
         except NotAuthenticatedError as exc:
             _fail(str(exc))
+        except interactive.NonInteractiveError as exc:
+            # Lists project names and other server text; keep Rich from reading
+            # a `[x]` in one as markup.
+            _fail(escape(str(exc)))
         except ApiError as exc:
             _fail(_format_api_error(exc))
         except HarumiError as exc:
@@ -548,39 +648,188 @@ def login(
     First time logging in with a given email? Pass --signup to create the
     account first — otherwise harumi-api rejects the OTP request with
     'Signups not allowed for otp'.
+
     """
     config = Config.load(api_url=api_url, git_url=git_url)
+    email = email or typer.prompt("Email", default=_stored_email())
+
+    config, picked = _choose_login_environment(email, config, api_url=api_url, git_url=git_url)
     env = ENVIRONMENTS[config.environment]
-    console.print(
-        f"Environment: [bold]{config.environment}[/bold] "
-        f"([dim]{config.api_url}[/dim])"
-        + (" [yellow](internal — VPN required)[/yellow]" if env.internal else "")
-    )
-    email = email or typer.prompt("Email")
+    if config.environment != DEFAULT_ENVIRONMENT or config.api_url != env.api_url:
+        # Not the ordinary setup (staff on staging, or a developer's own API): say where.
+        console.print(
+            f"Environment: [bold]{config.environment}[/bold] "
+            f"([dim]{config.api_url}[/dim])"
+            + (" [yellow](internal — VPN required)[/yellow]" if env.internal else "")
+        )
 
-    try:
-        auth.request_otp(config, email, sign_up=signup)
-    except ApiError as exc:
-        if not signup and exc.status_code == 422:
-            _fail(
-                f"{exc} — this looks like a new account. Retry with "
-                f"[bold]harumi login --signup[/bold]."
+    if _session_still_works(config, email):
+        console.print(f"Already logged in as [bold]{email}[/bold]{_on(config.environment)}.")
+    else:
+        try:
+            auth.request_otp(config, email, sign_up=signup)
+        except ApiError as exc:
+            if not signup and exc.status_code == 422:
+                _fail(
+                    f"{exc} — this looks like a new account. Retry with "
+                    f"[bold]harumi login --signup[/bold]."
+                )
+            raise
+        console.print(f"A login code was sent to [bold]{email}[/bold].")
+        code = typer.prompt("Enter the code")
+
+        user = auth.verify_otp(config, email, code)
+        console.print(
+            f"[bold green]Logged in[/bold green] as {user.email or email}{_on(config.environment)}."
+        )
+
+    if picked:
+        # Only after the login worked: a failed attempt (VPN off, wrong code)
+        # must not leave every later command pointed at an environment that
+        # can't be reached.
+        save_environment(config.environment)
+        if env.internal:
+            console.print(
+                f"[dim]{config.environment} is now your default environment. "
+                "Run harumi login and pick production to go back.[/dim]"
             )
-        raise
-    console.print(f"A login code was sent to [bold]{email}[/bold].")
-    code = typer.prompt("Enter the code")
-
-    user = auth.verify_otp(config, email, code)
-    console.print(
-        f"[bold green]Logged in[/bold green] as {user.email or email} "
-        f"on [bold]{config.environment}[/bold]."
-    )
 
     _resolve_and_store_org(config)
     _provision_git_token(config)
 
+    # Logged in and settled: at a terminal, offer what to do first rather than
+    # leaving the person at a bare prompt. Scripts and agents just finish.
+    if interactive.is_interactive():
+        _quickstart(show_status=False)
+
+
+def _on(environment: str) -> str:
+    """" on staging" for any environment but production; nothing for production.
+
+    Nearly everyone only ever uses production, and for them the word is noise that
+    suggests a choice they do not have. Anyone somewhere else is told where.
+    """
+    return "" if environment == DEFAULT_ENVIRONMENT else f" on [bold]{environment}[/bold]"
+
+
+def _stored_email() -> Optional[str]:
+    """An email to offer as the prompt's default: the active environment's session if
+    there is one, else any other environment's.
+
+    The second case matters for staff: each environment has its own session, so the
+    first login to staging would otherwise have nothing to suggest even though they
+    are signed in to production with the same address. It is only a suggestion; they
+    can type another.
+    """
+    from harumi.config import credentials_path
+
+    active = load_credentials()
+    candidates = [active] if active else []
+    for name in ENVIRONMENTS:
+        if name == active_environment():
+            continue
+        try:
+            data = json.loads(credentials_path(name).read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            candidates.append(data)
+    for creds in candidates:
+        email = creds.get("email")
+        if isinstance(email, str) and email:
+            return email
+    return None
+
+
+def _choose_login_environment(
+    email: str, config: Config, *, api_url: Optional[str], git_url: Optional[str]
+) -> tuple[Config, bool]:
+    """Let Harumi staff pick production or staging before the code is sent.
+
+    Returns the config to log in with and whether the person picked it (which is
+    what makes it their saved default). Nobody else is ever asked: clients have
+    no staging account, an explicit `--env`/`HARUMI_ENV` already answers the
+    question (and stays a one-off), and without a terminal there is nobody to ask.
+    """
+    if not is_internal_email(email) or os.environ.get("HARUMI_ENV") or not interactive.is_interactive():
+        return config, False
+
+    options = [
+        interactive.Option(
+            name,
+            name,
+            hint="internal, needs the VPN" if env.internal else "public",
+        )
+        for name, env in ENVIRONMENTS.items()
+    ]
+    picked = interactive.select(
+        "Which environment do you want to log in to?", options, default=config.environment
+    )
+    if picked is None:
+        console.print("Login cancelled.")
+        raise typer.Exit(code=1)
+
+    if picked != config.environment:
+        # Same switch `--env` makes, so every later lookup in this process agrees.
+        os.environ["HARUMI_ENV"] = str(picked)
+        config = Config.load(api_url=api_url, git_url=git_url)
+    return config, True
+
+
+def _session_still_works(config: Config, email: str) -> bool:
+    """Whether this environment already holds a live session for `email`.
+
+    Each environment keeps its own session, so with this a person who switches
+    between production and staging is not sent a new code each time. Any doubt
+    (different email, expired session, API unreachable) falls back to the normal
+    code flow, which reports the real problem.
+    """
+    creds = load_credentials()
+    if not creds or not creds.get("access_token"):
+        return False
+    if str(creds.get("email") or "").lower() != email.strip().lower():
+        return False
+    try:
+        _get_client(api_url=config.api_url, git_url=config.git_url).get_profile()
+    except HarumiError:
+        return False
+    return True
+
+
+PERSONAL_WORKSPACE = "personal"
+RUNS_SHOWN = 25
+
+
+def _workspace_options(orgs) -> list[interactive.Option]:
+    """Each organization, then the personal workspace, which is always a choice."""
+    options = []
+    for org in orgs:
+        role = org.role_name or org.role
+        options.append(
+            interactive.Option(org.business_name, org.id, hint=f"{role + '  ' if role else ''}{org.id[:8]}")
+        )
+    options.append(interactive.Option("Personal workspace", PERSONAL_WORKSPACE, hint="just you"))
+    return options
+
+
+def _apply_workspace(config: Config, choice: str) -> None:
+    if choice == PERSONAL_WORKSPACE:
+        config.clear_org_id()
+    else:
+        config.save_org_id(choice)
+
 
 def _resolve_and_store_org(config: Config) -> None:
+    """Settle which workspace this login works in, and say so.
+
+    * No organizations: the personal workspace, automatically.
+    * A saved organization you still belong to: keep it.
+    * Otherwise, at a terminal, ask (organizations plus personal). Without one,
+      keep what scripts always got: the single organization if there is exactly
+      one, else the personal workspace with the choices listed.
+    """
+    if os.environ.get("HARUMI_ORG"):
+        return  # set on purpose for this shell; not ours to change
     try:
         client = _get_client(api_url=config.api_url)
         orgs = client.list_organizations()
@@ -588,20 +837,48 @@ def _resolve_and_store_org(config: Config) -> None:
         return
 
     if not orgs:
+        config.clear_org_id()  # also drops a saved org you have since left
+        console.print("Workspace: your [bold]personal[/bold] workspace.")
         return
+
+    saved = next((o for o in orgs if o.id == config.org_id), None)
+    if saved is not None:
+        console.print(
+            f"Workspace: organization [bold]{escape(saved.business_name)}[/bold]. "
+            "[dim]Change it with harumi org use.[/dim]"
+        )
+        return
+
+    if not interactive.is_interactive():
+        _workspace_without_menu(config, orgs)
+        return
+
+    picked = interactive.select(
+        "Which workspace do you want to use?", _workspace_options(orgs), default=orgs[0].id
+    )
+    if picked is None:
+        console.print("[dim]Skipped. Choose one any time with harumi org use.[/dim]")
+        return
+    _apply_workspace(config, str(picked))
+    console.print("[dim]Change it any time with harumi org use.[/dim]")
+
+
+def _workspace_without_menu(config: Config, orgs) -> None:
+    """The no-terminal path: nobody to ask, so be predictable and say what to do."""
     if len(orgs) == 1:
         config.save_org_id(orgs[0].id)
-        console.print(f"Using organization: [bold]{orgs[0].business_name}[/bold]")
-    else:
-        console.print(
-            "You belong to multiple organizations. Set one with:\n"
-            "  [bold]harumi org use <ORG_ID>[/bold]\n"
-            "or pass [bold]--org[/bold] on each command."
-        )
-        table = Table("id", "business_name")
-        for org in orgs:
-            table.add_row(org.id, org.business_name)
-        console.print(table)
+        console.print(f"Using organization: [bold]{escape(orgs[0].business_name)}[/bold]")
+        return
+    config.clear_org_id()
+    console.print(
+        "Workspace: your [bold]personal[/bold] workspace. You also belong to these "
+        "organizations; pick one with [bold]harumi org use <ORG_ID>[/bold] or pass "
+        "[bold]--org[/bold] on a command:"
+    )
+    table = Table("id", "business_name")
+    for org in orgs:
+        table.add_row(org.id, org.business_name)
+    console.print(table)
 
 
 def _provision_git_token(config: Config) -> None:
@@ -611,9 +888,6 @@ def _provision_git_token(config: Config) -> None:
         client = _get_client(api_url=config.api_url)
         creds = client.get_git_token()
         save_git_token(creds.token, creds.git_url, creds.username)
-        console.print(
-            f"[dim]Gitea user [bold]{creds.username}[/bold] provisioned.[/dim]"
-        )
     except HarumiError as exc:
         console.print(f"[yellow]Could not provision a Gitea token: {exc}[/yellow]")
         return
@@ -629,11 +903,11 @@ def _provision_git_token(config: Config) -> None:
 
 @app.command()
 def logout() -> None:
-    """Clear the stored local session for the active environment."""
+    """Log out: forget the login stored on this machine."""
     # Resolve the active env (honors --env / HARUMI_ENV / saved default).
     Config.load()
     auth.logout()
-    console.print(f"Logged out of [bold]{active_environment()}[/bold].")
+    console.print(f"Logged out{_on(active_environment())}.")
 
 
 @app.command()
@@ -675,12 +949,12 @@ def whoami(
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Show the logged-in user: profile, active environment and organization."""
+    """Show the logged-in user: email, name and organization."""
     client = _get_client(api_url=api_url, org=org)
     profile = client.get_profile()
     console.print(
         f"[bold]{profile.email or '?'}[/bold]  (id: {profile.id or '?'})  "
-        f"[dim]env: {client.config.environment}[/dim]"
+        + (f"[dim]env: {client.config.environment}[/dim]" if client.config.environment != DEFAULT_ENVIRONMENT else "")
     )
     name = " ".join(part for part in (profile.first_name, profile.last_name) if part)
     for label, value in (
@@ -739,6 +1013,61 @@ def _fmt_reset(iso: Optional[str], *, with_time: bool) -> str:
     except ValueError:
         return iso.split("T", 1)[0]
     return when.strftime("%a %b %d %H:%M" if with_time else "%b %d")
+
+
+def _ago(when: Optional[datetime]) -> str:
+    """"3 days ago"-style age for a timestamp, or "" when there isn't one."""
+    if when is None:
+        return ""
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    seconds = (datetime.now(timezone.utc) - when).total_seconds()
+    if seconds < 60:
+        return "just now"  # also a clock a little ahead of the server's
+    for limit, unit_seconds, unit in (
+        (3600, 60, "minute"),
+        (86400, 3600, "hour"),
+        (86400 * 30, 86400, "day"),
+        (86400 * 365, 86400 * 30, "month"),
+    ):
+        if seconds < limit:
+            n = int(seconds // unit_seconds)
+            return f"{n} {unit}{'' if n == 1 else 's'} ago"
+    n = int(seconds // (86400 * 365))
+    return f"{n} year{'' if n == 1 else 's'} ago"
+
+
+def _recent_first(projects):
+    """Most recently updated first, so the project you are working on leads.
+
+    The server returns creation order. A project with no `updated_at` goes last
+    rather than first, and ties keep the server's order.
+    """
+    floor = datetime.min.replace(tzinfo=timezone.utc)
+
+    def key(p):
+        when = p.updated_at or p.created_at or floor
+        return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+    return sorted(projects, key=key, reverse=True)
+
+
+def _workspace_names(client: Client) -> dict[str, str]:
+    """Organization id -> name, for labelling projects. Empty if it can't be fetched.
+
+    Takes the caller's client rather than building one: `--api-url` and `--org` apply
+    to the whole command, so the names must come from the API the projects came from.
+    """
+    try:
+        return {o.id: o.business_name for o in client.list_organizations()}
+    except HarumiError:
+        return {}
+
+
+def _workspace_label(project, names: dict[str, str]) -> str:
+    if not project.customer_id:
+        return "Personal"
+    return names.get(project.customer_id) or project.customer_id[:8]
 
 
 def _fmt_dollars(cents: int) -> str:
@@ -853,79 +1182,20 @@ def usage(
 # harumi env
 # ---------------------------------------------------------------------------
 
-env_app = typer.Typer(help="Select and inspect the backend environment (production/staging).")
-app.add_typer(env_app, name="env")
-
-
-def _internal_visible() -> bool:
-    """Whether internal (VPN-only) environments should be listed. Off by
-    default so regular users only ever see production; internal devs opt in
-    with HARUMI_INTERNAL=1 (or `harumi env list --all`)."""
-    return os.environ.get("HARUMI_INTERNAL", "").lower() in {"1", "true", "yes"}
-
-
-@env_app.command("list")
-def env_list(
-    all_: bool = typer.Option(False, "--all", "-a", help="Include internal (VPN-only) environments."),
-) -> None:
-    """List selectable environments (the active one is flagged)."""
-    current = active_environment()
-    show_internal = all_ or _internal_visible()
-
-    table = Table("", "name", "api_url", "git_url", "access")
-    for name, env in ENVIRONMENTS.items():
-        if env.internal and not show_internal:
-            continue
-        table.add_row(
-            "*" if name == current else "",
-            name,
-            env.api_url,
-            env.git_url,
-            "internal (VPN)" if env.internal else "public",
-        )
-    console.print(table)
-
-
-@env_app.command("current", hidden=True)
-@_deprecated("harumi env current", "harumi env list (the active environment is marked *)")
-def env_current() -> None:
-    """Show the active environment and its endpoints."""
-    name = active_environment()
-    env = ENVIRONMENTS[name]
-    console.print(
-        f"[bold]{name}[/bold]\n"
-        f"  api: {env.api_url}\n"
-        f"  git: {env.git_url}\n"
-        f"  access: {'internal (VPN required)' if env.internal else 'public'}"
+@app.command(
+    "env",
+    hidden=True,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def env_removed() -> None:
+    """Removed: Harumi staff pick their environment when they log in."""
+    _fail(
+        "`harumi env` was removed. Harumi staff choose an environment when they run "
+        "[bold]harumi login[/bold] (that choice is remembered).\n"
+        "For scripts and CI, where there is no one to ask: set [bold]HARUMI_ENV=staging[/bold] "
+        "(for example in the job's environment) to use it for every command, or pass "
+        "[bold]--env staging[/bold] to a single one."
     )
-
-
-@env_app.command("use")
-def env_use(
-    name: str = typer.Argument(..., help="Environment to make the default (e.g. production, staging)."),
-) -> None:
-    """Persist the default environment for future commands.
-
-    Each environment keeps its own stored session, so switching does not log
-    you out of the other one — but you must `harumi login` at least once per
-    environment (they use separate Supabase backends).
-    """
-    try:
-        save_environment(name)
-    except ValueError as exc:
-        _fail(str(exc))
-
-    env = ENVIRONMENTS[name]
-    console.print(f"Default environment set to [bold]{name}[/bold] ([dim]{env.api_url}[/dim]).")
-    if env.internal:
-        console.print(
-            "[yellow]This is an internal environment — it requires the VPN and an "
-            "account in its Supabase.[/yellow]"
-        )
-    from harumi.config import load_credentials
-
-    if not load_credentials():
-        console.print(f"You're not logged in on [bold]{name}[/bold] yet — run [bold]harumi login[/bold].")
 
 
 # ---------------------------------------------------------------------------
@@ -986,11 +1256,52 @@ config_app = typer.Typer(help="Deprecated: use `harumi org use`.")
 app.add_typer(config_app, name="config", hidden=True)
 
 
-def org_use(org_id: str = typer.Argument(..., help="Organization id to persist as X-Organization.")) -> None:
-    """Persist the organization id sent as X-Organization on every request."""
+@_handle_errors
+def org_use(
+    org_id: Optional[str] = typer.Argument(
+        None, help="Organization id to work in. Pick from a list if omitted."
+    ),
+    personal: bool = typer.Option(
+        False, "--personal", help="Work in your personal workspace instead of an organization."
+    ),
+) -> None:
+    """Choose the workspace (an organization, or your personal one) for every request.
+
+    Leave the id out to pick from your organizations. The choice is remembered
+    and sent with every request.
+    """
+    if personal and org_id:
+        _fail("--personal and an organization id are mutually exclusive. Pass only one.")
     config = Config.load()
+
+    if personal:
+        config.clear_org_id()
+        console.print("Workspace set to your [bold]personal[/bold] workspace.")
+        return
+
+    if org_id is None:
+        orgs = _get_client().list_organizations()
+        if not orgs:
+            _fail("You don't belong to any organization, so you're already in your personal workspace.")
+        picked = interactive.select(
+            "Which workspace do you want to use?",
+            _workspace_options(orgs),
+            flag="the ORG_ID argument (or --personal)",
+            default=config.org_id,
+        )
+        if picked is None:
+            return
+        if picked == PERSONAL_WORKSPACE:
+            config.clear_org_id()
+            console.print("Workspace set to your [bold]personal[/bold] workspace.")
+            return
+        org_id = str(picked)
+        label = next((o.business_name for o in orgs if o.id == org_id), org_id)
+    else:
+        label = org_id
+
     config.save_org_id(org_id)
-    console.print(f"Organization set to [bold]{org_id}[/bold].")
+    console.print(f"Workspace set to organization [bold]{escape(label)}[/bold].")
 
 
 config_app.command("set-org")(_deprecated("harumi config set-org", "harumi org use <ORG_ID>")(org_use))
@@ -1262,6 +1573,42 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
     )
     console.print("[bold green]Remote `harumi` configured.[/bold green]")
     return True
+
+
+def _pick_project(client: Client, *, action: str) -> Optional[str]:
+    """Let the user choose one of their projects; return its id, or None if they quit.
+
+    With no terminal this raises `NonInteractiveError`, which lists the projects
+    and says to pass the id, so a script or agent learns what to type instead of
+    hanging on a prompt.
+    """
+    projects, total = client.list_projects_with_total()
+    if not projects:
+        _fail("You have no projects yet. Run [bold]harumi new <NAME>[/bold] to create one.")
+    projects = _recent_first(projects)
+    names = _workspace_names(client) if len({p.customer_id for p in projects}) > 1 else {}
+    options = [
+        interactive.Option(
+            p.name,
+            p.id,
+            hint="  ".join(
+                part
+                for part in (
+                    _workspace_label(p, names) if names else "",
+                    _ago(p.updated_at or p.created_at),
+                    p.id,
+                )
+                if part
+            ),
+        )
+        for p in projects
+    ]
+    if total > len(projects):
+        console.print(f"[dim]Showing {len(projects)} of {total} projects.[/dim]")
+    picked = interactive.select(
+        f"Which project do you want to {action}?", options, flag="the PROJECT_ID argument"
+    )
+    return picked  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -1700,7 +2047,10 @@ def _clone_and_bind(project_id: str, repo, dest: Path) -> None:
 @app.command()
 @_handle_errors
 def clone(
-    project: str = typer.Argument(..., help="Harumi project id to clone (see `harumi projects list`)."),
+    project: Optional[str] = typer.Argument(
+        None,
+        help="Harumi project id to clone (see `harumi projects list`). Pick from a list if omitted.",
+    ),
     dir: Optional[Path] = typer.Option(
         None, "--dir", help="Local directory to clone into. Defaults to ./<slugified-project-name>."
     ),
@@ -1712,15 +2062,15 @@ def clone(
 
     Use this for a project that already exists in Harumi — created via the
     web app, by a teammate, or in an earlier session — and binds the clone
-    so `harumi run` works right away. Find a project id with
-    [bold]harumi projects list[/bold].
+    so `harumi run` works right away. Leave the id out to pick from your
+    projects, or find one with [bold]harumi projects list[/bold].
     """
     _clone_impl(project=project, dir=dir, api_url=api_url, git_url=git_url, org=org)
 
 
 def _clone_impl(
     *,
-    project: str,
+    project: Optional[str],
     dir: Optional[Path],
     api_url: Optional[str],
     git_url: Optional[str],
@@ -1728,6 +2078,11 @@ def _clone_impl(
 ) -> None:
     """Body of `harumi clone` — see `_push_impl` for why this is factored out."""
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
+
+    if project is None:
+        project = _pick_project(client, action="clone")
+        if project is None:  # the user backed out of the menu
+            return
 
     console.print(f"Fetching repo for project [bold]{project}[/bold]...")
     repo = client.get_project_repo(project)
@@ -1792,8 +2147,7 @@ def start() -> None:
             org=None,
         )
     else:
-        project = typer.prompt("Project id (see `harumi projects list`)")
-        _clone_impl(project=project, dir=None, api_url=None, git_url=None, org=None)
+        _clone_impl(project=None, dir=None, api_url=None, git_url=None, org=None)
 
 
 # ---------------------------------------------------------------------------
@@ -1845,18 +2199,37 @@ def projects_create(
 def projects_list(
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+    limit: Optional[int] = typer.Option(
+        None, "--limit", "-n", min=1, help="Show only the most recently updated N projects."
+    ),
 ) -> None:
-    """List your projects."""
+    """List your projects, most recently updated first."""
     client = _get_client(api_url=api_url, org=org)
-    projects = client.list_projects()
+    projects, total = client.list_projects_with_total()
     if not projects:
         console.print("No projects found.")
         return
 
-    table = Table("id", "name", "kernel_spec", "role")
-    for p in projects:
-        table.add_row(p.id, p.name, p.kernel_spec or "", p.role_name or "")
+    projects = _recent_first(projects)
+    shown = projects[:limit] if limit else projects
+    names = _workspace_names(client) if len({p.customer_id for p in projects}) > 1 else {}
+
+    columns = ["id", "name", "updated"] + (["workspace"] if names else []) + ["kernel_spec", "role"]
+    table = Table(*columns)
+    for p in shown:
+        row = [p.id, p.name, _ago(p.updated_at or p.created_at)]
+        if names:
+            row.append(_workspace_label(p, names))
+        row += [p.kernel_spec or "", p.role_name or ""]
+        table.add_row(*row)
     console.print(table)
+    if len(shown) < total:
+        console.print(
+            f"[dim]Showing {len(shown)} of {total} projects, most recently updated first."
+            + ("" if limit else " The rest could not be fetched.")
+            + (" Drop --limit to see more." if limit and len(shown) < len(projects) else "")
+            + "[/dim]"
+        )
 
 
 @projects_app.command("get")
@@ -2089,8 +2462,15 @@ def runs_list(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+    limit: Optional[int] = typer.Option(
+        None, "--limit", "-n", min=1, help=f"How many of the latest runs to show (default {RUNS_SHOWN}). Use --all for every run."
+    ),
+    all_: bool = typer.Option(False, "--all", help="Show every run, however many there are."),
 ) -> None:
-    """List runs for a project, newest first."""
+    """List runs for a project, newest first (the latest 25 unless you ask for more)."""
+    if all_ and limit is not None:
+        # Even `--limit 25 --all`: two ways of saying how many must not quietly disagree.
+        _fail("--limit and --all are mutually exclusive. Pass only one.")
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -2099,8 +2479,9 @@ def runs_list(
         console.print("No runs found.")
         return
 
+    shown = runs if all_ else runs[: limit or RUNS_SHOWN]
     table = Table("id", "status", "source", "git_branch", "started", "ended")
-    for r in runs:
+    for r in shown:
         table.add_row(
             r.id,
             r.status,
@@ -2110,6 +2491,11 @@ def runs_list(
             str(r.ended or ""),
         )
     console.print(table)
+    if len(shown) < len(runs):
+        console.print(
+            f"[dim]Showing the latest {len(shown)} of {len(runs)} runs. "
+            "Use --limit N for more, or --all for every run.[/dim]"
+        )
 
 
 @runs_app.command("get")

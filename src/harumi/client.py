@@ -64,6 +64,13 @@ def _q(value: str) -> str:
     return quote(value, safe="")
 
 
+# Projects come back a page at a time. The server allows up to 1000 per page; a
+# smaller page keeps each request quick. The cap only guards against a server that
+# never says "no more" (10,000 projects at this size).
+PROJECTS_PAGE_SIZE = 200
+MAX_PROJECT_PAGES = 50
+
+
 class ApiClient:
     """Low-level HTTP wrapper: injects auth headers and retries once on 401
     after refreshing the session. Not usually used directly — see `Client`.
@@ -80,8 +87,18 @@ class ApiClient:
         # Injectable for tests (httpx.MockTransport); None uses the real network.
         self.transport = transport
 
+    @staticmethod
+    def _refresh_token_in_use() -> Optional[str]:
+        """The refresh token of the session a request is about to be sent with.
+
+        Recorded *before* sending. If the server then says 401, renewal is judged against
+        this, not against whatever the file holds by then: another process may already
+        have renewed, and its fresh token must be adopted, not spent as if it were stale.
+        """
+        return (auth.current_credentials() or {}).get("refresh_token") or None
+
     def _headers(self) -> dict[str, str]:
-        token = auth.get_valid_access_token(self.config, allow_refresh=True)
+        token = auth.get_valid_access_token(self.config, allow_refresh=True, transport=self.transport)
         headers = {"Authorization": f"Bearer {token}"}
         if self.config.org_id:
             headers["X-Organization"] = self.config.org_id
@@ -99,6 +116,7 @@ class ApiClient:
         **kwargs: Any,
     ) -> httpx.Response:
         url = f"{self.config.api_url}{path}"
+        sent_with = self._refresh_token_in_use()
         headers = self._headers()
         headers.update(kwargs.pop("headers", {}) or {})
 
@@ -110,9 +128,8 @@ class ApiClient:
             )
 
         if response.status_code == 401 and not _retried:
-            creds = auth.current_credentials()
-            if creds and creds.get("refresh_token"):
-                auth.refresh_session(self.config, creds["refresh_token"], transport=self.transport)
+            if sent_with:
+                auth.renew_session(self.config, sent_with, transport=self.transport)
                 return self.request(
                     method,
                     path,
@@ -122,8 +139,11 @@ class ApiClient:
                     _retried=True,
                     **kwargs,
                 )
-            raise NotAuthenticatedError()
+            raise NotAuthenticatedError(expired=True, environment=self.config.environment)
 
+        if response.status_code == 401:
+            # Refreshed and retried, and still refused: the login is no good.
+            raise NotAuthenticatedError(expired=True, environment=self.config.environment)
         _raise_for_status(response)
         return response
 
@@ -146,6 +166,7 @@ class ApiClient:
         from an unrelated request made inside the block.
         """
         url = f"{self.config.api_url}{path}"
+        sent_with = self._refresh_token_in_use()
         headers = self._headers()
 
         with httpx.Client(timeout=timeout or self.timeout, transport=self.transport) as client, ExitStack() as stack:
@@ -160,15 +181,16 @@ class ApiClient:
                 # The 401 was entered on the same stack as the retry, so without
                 # this its connection stayed open for the whole download.
                 response.close()
-                creds = auth.current_credentials()
-                if not creds or not creds.get("refresh_token"):
-                    raise NotAuthenticatedError()
-                auth.refresh_session(self.config, creds["refresh_token"], transport=self.transport)
+                if not sent_with:
+                    raise NotAuthenticatedError(expired=True, environment=self.config.environment)
+                auth.renew_session(self.config, sent_with, transport=self.transport)
                 headers = self._headers()
                 with transport_errors_as_api_error():
                     response = stack.enter_context(
                         client.stream(method, url, json=json, params=params, headers=headers)
                     )
+            if response.status_code == 401:
+                raise NotAuthenticatedError(expired=True, environment=self.config.environment)
             _raise_for_status(response, streamed=True)
             try:
                 yield response
@@ -261,10 +283,41 @@ class Client:
     # -- Discovery ------------------------------------------------------
 
     def list_projects(self) -> list[Project]:
-        response = self.api.request("GET", "/projects")
-        data = response.json()
-        projects = data.get("projects", data) if isinstance(data, dict) else data
-        return [Project.model_validate(p) for p in projects]
+        """Every project the user can see, however many there are."""
+        return self.list_projects_with_total()[0]
+
+    def list_projects_with_total(self) -> tuple[list[Project], int]:
+        """Every project the user can see, plus how many the server says exist.
+
+        `GET /projects` returns one page (100 by default) in creation order, with
+        the real count in `total_count`. Asking once and stopping silently dropped
+        every project past the first page, so this follows the pages. The two
+        numbers differ only if the safety cap was hit (or projects changed
+        mid-listing), which callers should say out loud rather than hide.
+        """
+        found: dict[str, Project] = {}
+        total: Optional[int] = None
+        offset = 0
+        for _ in range(MAX_PROJECT_PAGES):
+            response = self.api.request(
+                "GET", "/projects", params={"limit": PROJECTS_PAGE_SIZE, "offset": offset}
+            )
+            data = response.json()
+            rows = data.get("projects", data) if isinstance(data, dict) else data
+            if isinstance(data, dict) and data.get("total_count") is not None:
+                total = int(data["total_count"])
+            before = len(found)
+            for row in rows:
+                project = Project.model_validate(row)
+                found.setdefault(project.id, project)
+            offset += len(rows)
+            if (
+                len(rows) < PROJECTS_PAGE_SIZE  # a short page is the last page
+                or len(found) == before  # nothing new: a server that ignores paging
+                or (total is not None and offset >= total)
+            ):
+                break
+        return list(found.values()), max(total or 0, len(found))
 
     def get_project(self, project_id: str) -> Project:
         response = self.api.request("GET", f"/projects/{project_id}")

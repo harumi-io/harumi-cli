@@ -85,8 +85,6 @@ TIERS: dict[str, tuple[str, str]] = {
     "status": (READ, "reads the public status page; needs no session"),
     "whats-new": (LOCAL, "prints the release notes bundled in the package"),
     "profile set": (MANUAL, "would mutate the real signed-in user's name/bio"),
-    "env list": (LOCAL, ""),
-    "env use": (LOCAL, "writes only the throwaway HARUMI_HOME config"),
     # -- discovery ------------------------------------------------------------
     "specs": (READ, "proves real API reachability"),
     "blueprints": (READ, ""),
@@ -214,7 +212,6 @@ class Step:
 # needs the canary id.
 PLAN: tuple[Step, ...] = (
     # -- preflight: no project needed ----------------------------------------
-    Step("env list", ("--all",)),
     Step("whoami"),
     Step("usage"),
     Step("status"),
@@ -301,7 +298,6 @@ PLAN: tuple[Step, ...] = (
     Step("runs cancel", ("{run}", "--project", "{project}"), gated=True),
     # -- teardown -------------------------------------------------------------
     Step("org use", ("{org}",)),
-    Step("env use", ("{env}",)),
     Step("projects rm", ("{push_project}", "--yes"), teardown=True),
     Step("projects rm", ("{new_project}", "--yes"), teardown=True),
     Step("projects rm", ("{project}", "--yes"), teardown=True),

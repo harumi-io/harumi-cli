@@ -109,15 +109,13 @@ The CLI ships two built-in environments. Each is backed by its **own Supabase**,
 | `staging` | `https://api.dev.harumi.io/api` | `https://git.dev.harumi.io` | internal, **VPN-only** |
 
 ```bash
-harumi env list            # selectable envs, active one flagged (staging hidden by default)
-harumi env list --all      # include internal/VPN-only environments (same as HARUMI_INTERNAL=1)
-harumi env use staging     # persist as the default
-harumi --env staging login # or override for a single command
+harumi login               # staff (@harumi.io) are asked production or staging; remembered
+harumi --env staging login # or override for a single command; never asked, not saved
 ```
 
-Selection precedence: `--env` > `HARUMI_ENV` > saved default (`harumi env use`) > `production`.
+Selection precedence: `--env` > `HARUMI_ENV` > the choice made at `harumi login` > `production`.
 
-Most users need nothing here — `production` is already the default. Only switch to `staging` if the user is an internal dev **on the VPN** with a staging account. Note that `staging` is only hidden from `env list` as a UX convenience; the real gate is the VPN plus a staging Supabase account.
+Most users need nothing here — `production` is already the default. Only choose `staging` if the user is an internal dev **on the VPN** with a staging account. It is only offered to `@harumi.io` emails as a convenience; the real gate is the VPN plus a staging Supabase account. There is no `harumi env` command.
 
 ## 3. Log in
 
@@ -144,11 +142,13 @@ harumi logout             # clears the session for the active environment only
 
 ## 4. Set the organization
 
-If the user belongs to exactly one org, `harumi login` stores it automatically and there is nothing to do. If they belong to several, login prints a table of org ids and you need to pick one:
+At a terminal, `harumi login` settles the workspace itself: with no organizations it uses the personal workspace automatically; otherwise it shows a menu of the user's organizations plus "Personal workspace" (an organization saved earlier that the user still belongs to is kept without asking). With no terminal (an agent or script) it never prompts: exactly one org is used, several mean the personal workspace and a table of org ids is printed, and you pick one yourself:
 
 ```bash
 harumi org list                    # see the orgs and your role in each
 harumi org use <ORG_ID>            # persist it for the active environment
+harumi org use --personal          # work in the personal workspace instead
+harumi org use                     # at a terminal: pick from a menu
 harumi --help                      # (org can also be overridden per-command with --org)
 ```
 
@@ -188,7 +188,6 @@ Override the home directory with `HARUMI_HOME`. Upgrading from a pre-environment
 | `HARUMI_API_URL` | Override the harumi-api base URL (e.g. `http://localhost:8000/api` for local dev). |
 | `HARUMI_GIT_URL` | Override the Harumi Git (Gitea) base URL. |
 | `HARUMI_ORG` | Organization id sent as `X-Organization`. |
-| `HARUMI_INTERNAL` | Set to `1` to reveal internal environments in `harumi env list`. |
 | `HARUMI_HOME` | Directory for config/credentials (default `~/.harumi`). |
 | `HARUMI_PLATFORM_URL` | Override the web-app URL used in printed project links. |
 | `HARUMI_STATUS_URL` | Override the status page used by `harumi status` and the "check the status page" hint on an unreachable-API error. The hint is otherwise skipped when the API URL is overridden (`--api-url`, `HARUMI_API_URL`), since the stock status page says nothing about that stack. |
@@ -235,9 +234,9 @@ Tell the user which of these you're doing rather than silently working around it
 | `Could not provision a Gitea token: ...` (yellow, non-fatal) | Harumi Git unreachable or not configured on that backend | Non-git commands still work; re-run `harumi login` once reachable |
 | `No Gitea token found. Run harumi login` | `git_token` missing from credentials | `harumi login` again |
 | `No Gitea username on file` | Token saved by an older CLI version that predates the field | `harumi login` again to re-provision |
-| Timeouts / connection refused on `api.dev.harumi.io` or `git.dev.harumi.io` | Staging endpoints are internal ALBs | Connect to the VPN, or switch back with `harumi env use production` |
-| `Unknown environment 'x'. Known environments: production, staging.` | Typo in `--env` / `HARUMI_ENV` / `env use` | Use one of the two names |
-| `You belong to multiple organizations.` | Ambiguous org after login | `harumi org use <ORG_ID>` (see step 4) |
+| Timeouts / connection refused on `api.dev.harumi.io` or `git.dev.harumi.io` | Staging endpoints are internal ALBs | Connect to the VPN, or switch back by running `harumi login` and picking production |
+| `Unknown environment 'x'. Known environments: production, staging.` | Typo in `--env` / `HARUMI_ENV` | Use one of the two names |
+| `Workspace: your personal workspace. You also belong to these organizations` | Several orgs and no terminal to ask in | `harumi org use <ORG_ID>` (see step 4) |
 
 ## Notes for this skill
 
