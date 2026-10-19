@@ -140,3 +140,29 @@ def test_logout_names_staging(monkeypatch):
     config.save_credentials(access_token="a", refresh_token="r", email="andre@harumi.io", replace=True)
 
     assert "staging" in runner.invoke(cli.app, ["logout"]).output
+
+
+# -- where the two kinds of wording meet (logout both says whether it cleared anything and stays quiet about production) --
+
+
+def test_logout_says_whether_it_cleared_anything_without_naming_production():
+    config.save_credentials(access_token="a", refresh_token="r", email="ana@example.com", replace=True)
+
+    first = " ".join(runner.invoke(cli.app, ["logout"]).output.split())
+    second = " ".join(runner.invoke(cli.app, ["logout"]).output.split())
+
+    assert first.startswith("Logged out.") and "harumi login" in first
+    assert second.startswith("You were not logged in;") and "nothing to clear" in second
+    assert "production" not in first + second
+
+
+def test_logout_on_staging_still_says_both_things(monkeypatch):
+    monkeypatch.setenv("HARUMI_ENV", "staging")
+    config.Config.load()
+    config.save_credentials(access_token="a", refresh_token="r", email="andre@harumi.io", replace=True)
+
+    first = " ".join(runner.invoke(cli.app, ["logout"]).output.split())
+    second = " ".join(runner.invoke(cli.app, ["logout"]).output.split())
+
+    assert first.startswith("Logged out on staging.")
+    assert second.startswith("You were not logged in on staging;")
