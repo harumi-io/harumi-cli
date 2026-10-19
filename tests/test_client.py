@@ -1072,6 +1072,37 @@ def test_client_list_project_files():
     assert result.is_truncated is False
 
 
+def test_client_create_file_upload_url_sends_the_size_only_when_given():
+    _write_credentials()
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"url": "https://s3.test/x", "key": "k", "expires_in": 900})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    client.create_file_upload_url("proj-1", "a.csv", "text/csv", size_bytes=1234)
+    client.create_file_upload_url("proj-1", "a.csv", "text/csv")
+
+    assert bodies[0] == {"path": "a.csv", "content_type": "text/csv", "size_bytes": 1234}
+    assert bodies[1] == {"path": "a.csv", "content_type": "text/csv"}  # an older caller is unchanged
+
+
+def test_client_create_file_upload_url_sends_a_zero_byte_size_too():
+    """An empty file is size 0, which is falsy: it must still be sent."""
+    _write_credentials()
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"url": "https://s3.test/x", "key": "k", "expires_in": 900})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    client.create_file_upload_url("proj-1", "empty.txt", size_bytes=0)
+
+    assert bodies[0]["size_bytes"] == 0
+
+
 def test_client_upload_file_to_presigned_url_carries_no_auth_header(tmp_path):
     """The presigned URL's query string is the only auth it accepts — adding
     this client's Authorization/X-Organization headers would invalidate the

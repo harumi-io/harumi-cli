@@ -402,6 +402,17 @@ def test_a_402_from_a_run_points_at_usage_and_the_billing_settings_page(api, bou
         ("weekly_limit_reached", "turn on overage"),
         ("member_monthly_limit_reached", "Ask your organization admin"),
         ("kernel_size_not_in_plan", "smaller kernel"),
+        # The 7-day trial and the other plan limits (harumi-api#462).
+        ("concurrent_runs_limit_reached", "Wait for a run to finish"),
+        ("live_kernel_limit_reached", "Stop another kernel"),
+        ("storage_quota_reached", "harumi files rm"),
+        ("project_limit_reached", "Delete a project"),
+        ("app_limit_reached", "Stop another app"),
+        ("app_time_exhausted", "keep your app running"),
+        ("schedule_limit_reached", "harumi schedules rm"),
+        ("schedule_too_frequent", "longer interval"),
+        ("insight_limit_reached", "resets tomorrow"),
+        ("byok_not_in_plan", "bring your own key"),
     ],
 )
 def test_a_coded_402_gets_the_hint_for_its_reason(api, bound_dir, code, hint):
@@ -1506,6 +1517,41 @@ def test_files_put_uploads_and_defaults_remote_path_to_local_name(api, tmp_path,
     assert put_calls == [("https://s3.test/proj-1/data.csv", local, "text/csv")]
     body = api.body_for("POST", "/api/projects/proj-1/files/upload-url")
     assert body["path"] == "data.csv"
+
+
+def test_files_put_sends_the_files_exact_size_so_a_plan_with_a_storage_quota_accepts_it(
+    api, tmp_path, monkeypatch
+):
+    local = tmp_path / "data.csv"
+    local.write_text("a,b\n1,2\n")
+    api.route("GET", "/api/projects/proj-1/files", {"files": [], "is_truncated": False})
+    api.route("POST", "/api/projects/proj-1/files/upload-url", {"url": "https://s3.test/x", "key": "k", "expires_in": 900})
+    monkeypatch.setattr(Client, "upload_file_to_presigned_url", lambda *a, **k: None)
+
+    result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("POST", "/api/projects/proj-1/files/upload-url")
+    assert body["size_bytes"] == local.stat().st_size
+    assert body["size_bytes"] > 0
+
+
+def test_files_put_on_a_full_project_says_what_to_do(api, tmp_path):
+    local = tmp_path / "big.bin"
+    local.write_bytes(b"x" * 10)
+    api.route("GET", "/api/projects/proj-1/files", {"files": [], "is_truncated": False})
+    api.route(
+        "POST",
+        "/api/projects/proj-1/files/upload-url",
+        {"detail": "This project has used its plan's storage.", "code": "storage_quota_reached"},
+        status=402,
+    )
+
+    result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
+
+    assert result.exit_code == 1
+    assert "used its plan's storage" in result.output
+    assert "harumi files rm" in result.output
 
 
 def test_files_put_rejects_a_missing_local_file(api, tmp_path):

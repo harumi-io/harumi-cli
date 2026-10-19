@@ -910,12 +910,21 @@ class Client:
         return ProjectFileList.model_validate(response.json())
 
     def create_file_upload_url(
-        self, project_id: str, path: str, content_type: str = "application/octet-stream"
+        self,
+        project_id: str,
+        path: str,
+        content_type: str = "application/octet-stream",
+        size_bytes: Optional[int] = None,
     ) -> FileUploadUrl:
+        """`size_bytes` is the file's exact size. It is signed into the URL, so storage
+        refuses any other length, and a plan that caps storage requires it."""
+        body: dict[str, Any] = {"path": path, "content_type": content_type}
+        if size_bytes is not None:
+            body["size_bytes"] = size_bytes
         response = self.api.request(
             "POST",
             f"/projects/{project_id}/files/upload-url",
-            json={"path": path, "content_type": content_type},
+            json=body,
         )
         return FileUploadUrl.model_validate(response.json())
 
