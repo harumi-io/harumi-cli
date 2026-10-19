@@ -6,6 +6,8 @@ lookup) and the menu replaced, so the flow itself is what is under test.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from typer.testing import CliRunner
 
@@ -276,3 +278,55 @@ def test_env_is_not_advertised():
     result = runner.invoke(cli.app, ["--help"])
     assert " env " not in result.output
     assert "--env" not in result.output
+
+
+# -- review findings -----------------------------------------------------------------------------------
+
+
+def test_the_env_stub_tells_scripts_how_to_get_the_old_behaviour_without_a_terminal():
+    result = runner.invoke(cli.app, ["env", "use", "staging"])
+
+    out = " ".join(result.output.split())
+    assert result.exit_code == 1
+    assert "HARUMI_ENV=staging" in out and "--env staging" in out
+    assert "harumi login" in out
+
+
+def _write_session(env: str, email: str) -> None:
+    path = config.credentials_path(env)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"access_token": "a", "refresh_token": "r", "email": email}))
+
+
+def test_the_email_default_comes_from_the_active_environment_first():
+    _write_session("production", "ana@example.com")
+    _write_session("staging", "ana.staging@harumi.io")
+
+    assert cli._stored_email() == "ana@example.com"  # production is the active environment
+
+
+def test_the_email_default_falls_back_to_another_environments_session():
+    """First login to staging from someone already signed in to production."""
+    _write_session("production", "andre@harumi.io")
+
+    import os
+
+    os.environ["HARUMI_ENV"] = "staging"
+    try:
+        config.Config.load()
+        assert cli._stored_email() == "andre@harumi.io"
+    finally:
+        os.environ.pop("HARUMI_ENV", None)
+
+
+def test_no_session_anywhere_means_no_default():
+    assert cli._stored_email() is None
+
+
+def test_an_unreadable_session_file_is_skipped_not_fatal():
+    path = config.credentials_path("staging")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json")
+    _write_session("production", "ana@example.com")
+
+    assert cli._stored_email() == "ana@example.com"

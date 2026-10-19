@@ -138,10 +138,14 @@ def _persist(user: LoggedUser) -> None:
 def _session_refused(status_code: int) -> bool:
     """Whether a refresh response means "this session is finished".
 
-    Any 4xx except the two that describe the request's timing rather than the
-    token: 408 (timed out) and 429 (slow down).
+    harumi-api answers a refresh token it rejects with 422 (it turns every auth
+    failure into a validation error); 400 and 401 are the other ways an API says "that
+    token is no good". Nothing else is taken to mean it. A 403 or 404 can come from a
+    proxy or firewall in front of the API, and telling someone their session expired
+    then sends them into a login loop that cannot fix anything: those stay API errors,
+    with the response's own detail.
     """
-    return 400 <= status_code < 500 and status_code not in (408, 429)
+    return status_code in (400, 401, 422)
 
 
 def has_session() -> bool:

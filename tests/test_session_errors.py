@@ -85,7 +85,7 @@ def test_a_custom_message_is_kept():
 # -- a refused refresh token is the end of the session ------------------------
 
 
-@pytest.mark.parametrize("status", [400, 401, 403, 422])
+@pytest.mark.parametrize("status", [400, 401, 422])
 def test_a_refused_refresh_token_is_an_expired_session_not_an_http_error(status):
     cfg = Config.load()
     transport = _transport(refresh_status=status)
@@ -97,10 +97,11 @@ def test_a_refused_refresh_token_is_an_expired_session_not_an_http_error(status)
     assert "HTTP" not in str(exc.value)
 
 
-@pytest.mark.parametrize("status", [408, 429, 500, 502, 503])
+@pytest.mark.parametrize("status", [403, 404, 408, 429, 500, 502, 503])
 def test_a_refresh_that_fails_for_other_reasons_is_not_called_an_expired_session(status):
-    """A server hiccup or rate limit says nothing about the login; don't tell
-    someone to sign in again because the API was briefly down."""
+    """A server hiccup, a rate limit, or a proxy or firewall in front of the API
+    (403, 404) says nothing about the login. Telling someone to sign in again then
+    sends them into a login loop that cannot fix it."""
     cfg = Config.load()
 
     with pytest.raises(ApiError) as exc:
