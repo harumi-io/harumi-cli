@@ -11,6 +11,7 @@ import pytest
 
 from harumi.client import ApiClient, Client
 from harumi.config import Config
+from harumi.models import LoggedUser
 from harumi.errors import ApiError, ApiUnreachableError, HarumiError, NotAuthenticatedError
 
 
@@ -1272,7 +1273,9 @@ def test_stream_retries_once_after_a_401_with_the_refreshed_token(monkeypatch):
         return httpx.Response(401 if len(seen) == 1 else 200, content=b"ok")
 
     def fake_refresh(config, refresh_token, transport=None):
-        save_credentials(access_token="fresh", refresh_token=refresh_token)
+        # Rotates like the real thing: the new session has a new refresh token.
+        save_credentials(access_token="fresh", refresh_token="refresh-2")
+        return LoggedUser(access_token="fresh", refresh_token="refresh-2")
 
     api = ApiClient(_config(), transport=httpx.MockTransport(handler))
     monkeypatch.setattr("harumi.auth.refresh_session", fake_refresh)
@@ -1309,7 +1312,8 @@ def test_stream_closes_the_401_response_before_retrying(monkeypatch):
 
     def fake_refresh(config, refresh_token, transport=None):
         events.append("refreshed")
-        save_credentials(access_token="fresh", refresh_token=refresh_token)
+        save_credentials(access_token="fresh", refresh_token="refresh-2")
+        return LoggedUser(access_token="fresh", refresh_token="refresh-2")
 
     api = ApiClient(_config(), transport=httpx.MockTransport(handler))
     monkeypatch.setattr("harumi.auth.refresh_session", fake_refresh)

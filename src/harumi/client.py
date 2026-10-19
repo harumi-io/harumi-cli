@@ -87,6 +87,16 @@ class ApiClient:
         # Injectable for tests (httpx.MockTransport); None uses the real network.
         self.transport = transport
 
+    @staticmethod
+    def _refresh_token_in_use() -> Optional[str]:
+        """The refresh token of the session a request is about to be sent with.
+
+        Recorded *before* sending. If the server then says 401, renewal is judged against
+        this, not against whatever the file holds by then: another process may already
+        have renewed, and its fresh token must be adopted, not spent as if it were stale.
+        """
+        return (auth.current_credentials() or {}).get("refresh_token") or None
+
     def _headers(self) -> dict[str, str]:
         token = auth.get_valid_access_token(self.config, allow_refresh=True, transport=self.transport)
         headers = {"Authorization": f"Bearer {token}"}
@@ -106,6 +116,7 @@ class ApiClient:
         **kwargs: Any,
     ) -> httpx.Response:
         url = f"{self.config.api_url}{path}"
+        sent_with = self._refresh_token_in_use()
         headers = self._headers()
         headers.update(kwargs.pop("headers", {}) or {})
 
@@ -117,9 +128,8 @@ class ApiClient:
             )
 
         if response.status_code == 401 and not _retried:
-            creds = auth.current_credentials()
-            if creds and creds.get("refresh_token"):
-                auth.refresh_session(self.config, creds["refresh_token"], transport=self.transport)
+            if sent_with:
+                auth.renew_session(self.config, sent_with, transport=self.transport)
                 return self.request(
                     method,
                     path,
@@ -156,6 +166,7 @@ class ApiClient:
         from an unrelated request made inside the block.
         """
         url = f"{self.config.api_url}{path}"
+        sent_with = self._refresh_token_in_use()
         headers = self._headers()
 
         with httpx.Client(timeout=timeout or self.timeout, transport=self.transport) as client, ExitStack() as stack:
@@ -170,10 +181,9 @@ class ApiClient:
                 # The 401 was entered on the same stack as the retry, so without
                 # this its connection stayed open for the whole download.
                 response.close()
-                creds = auth.current_credentials()
-                if not creds or not creds.get("refresh_token"):
+                if not sent_with:
                     raise NotAuthenticatedError(expired=True, environment=self.config.environment)
-                auth.refresh_session(self.config, creds["refresh_token"], transport=self.transport)
+                auth.renew_session(self.config, sent_with, transport=self.transport)
                 headers = self._headers()
                 with transport_errors_as_api_error():
                     response = stack.enter_context(

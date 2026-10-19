@@ -46,7 +46,7 @@ Logs into the **active environment** (see [Environments](#environments)). Each e
 
 - Prompts for email if `--email` omitted, then prompts for the OTP code emailed by Supabase.
 - `--signup`: creates the Supabase account first. Required the *first* time a new email logs in.
-- On success, stores `access_token`/`refresh_token` at `~/.harumi/credentials.json` (mode `0600`), then calls `POST /git/credentials` to provision a per-user Gitea personal access token (`git_token` + `git_url`), used by `harumi new`/`import`/`clone`/`link` and `harumi run` for git-over-HTTPS.
+- On success, stores `access_token`/`refresh_token` at `~/.harumi/credentials.json` (mode `0600`, written atomically; a new login replaces the whole file, so another account's git token never survives), then calls `POST /git/credentials` to provision a per-user Gitea personal access token (`git_token` + `git_url`), used by `harumi new`/`import`/`clone`/`link` and `harumi run` for git-over-HTTPS.
 - Best-effort workspace resolution (skipped when `HARUMI_ORG` is set). No organizations: the personal workspace, automatically. A saved org you still belong to: kept. Otherwise, at a terminal, a menu of your organizations plus "Personal workspace" (the choice is saved). With no terminal it never prompts: exactly one org is stored, several mean the personal workspace plus a printed table and the `harumi org use` hint.
 - At a terminal, a successful login ends with the quick-start menu (new project / import / clone, or run inside a project folder); scripts and agents get no menu.
 
