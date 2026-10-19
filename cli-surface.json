@@ -1711,7 +1711,7 @@
     },
     {
       "path": "logout",
-      "help": "Clear the stored local session for the active environment.",
+      "help": "Log out: forget the login stored on this machine.",
       "params": []
     },
     {
@@ -4396,7 +4396,7 @@
     },
     {
       "path": "whoami",
-      "help": "Show the logged-in user: profile, active environment and organization.",
+      "help": "Show the logged-in user: email, name and organization.",
       "params": [
         {
           "opts": [
