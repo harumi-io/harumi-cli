@@ -1564,6 +1564,19 @@
         },
         {
           "opts": [
+            "--yes",
+            "-y"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Don't ask for a name or confirmation: use the folder name and go."
+        },
+        {
+          "opts": [
             "--api-url"
           ],
           "secondary_opts": [],
@@ -1615,7 +1628,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Harumi project id to bind this directory to. Prompted if omitted."
+          "help": "Harumi project id to bind this directory to. Pick from a list if omitted."
         },
         {
           "opts": [
@@ -2007,10 +2020,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project name."
+          "help": "Project name. Asked for at a terminal if omitted."
         },
         {
           "opts": [
@@ -2534,7 +2547,7 @@
     },
     {
       "path": "projects get",
-      "help": "Show details for one project.",
+      "help": "Show a project: its name, where it lives, and how to open it.",
       "params": [
         {
           "opts": [
@@ -2543,10 +2556,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id."
+          "help": "Project id. Pick from a list if omitted."
         },
         {
           "opts": [
@@ -2628,10 +2641,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id."
+          "help": "Project id. Pick from a list if omitted."
         },
         {
           "opts": [
@@ -2640,10 +2653,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "New project name."
+          "help": "New project name. Asked for if omitted."
         },
         {
           "opts": [
@@ -2682,10 +2695,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id."
+          "help": "Project id. Pick from a list if omitted."
         },
         {
           "opts": [

@@ -988,8 +988,10 @@ def git_ops(monkeypatch):
     def fake_ensure_remote(*, clone_url, username, token, cwd):
         calls["ensure_remote"].append({"clone_url": clone_url, "cwd": cwd})
 
-    def fake_push_folder(folder, *, clone_url, username, token, branch, message):
-        calls["push_folder"].append({"folder": folder, "clone_url": clone_url, "branch": branch})
+    def fake_push_folder(folder, *, clone_url, username, token, branch, message, exclude=()):
+        calls["push_folder"].append(
+            {"folder": folder, "clone_url": clone_url, "branch": branch, "exclude": list(exclude)}
+        )
 
     monkeypatch.setattr(cli, "clone_repo", fake_clone_repo)
     monkeypatch.setattr(cli, "ensure_remote", fake_ensure_remote)

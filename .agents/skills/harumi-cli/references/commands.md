@@ -118,12 +118,12 @@ Lists project blueprints (`slug`, `name`, `description`) from `GET /blueprints`.
 
 ```
 harumi projects list [--limit N] [--api-url URL] [--org ORG]
-harumi projects get PROJECT_ID [--api-url URL] [--org ORG]
-harumi projects rename PROJECT_ID NAME [--api-url URL] [--org ORG]
-harumi projects rm PROJECT_ID [--yes] [--api-url URL] [--org ORG]
+harumi projects get [PROJECT_ID] [--api-url URL] [--org ORG]
+harumi projects rename [PROJECT_ID] [NAME] [--api-url URL] [--org ORG]
+harumi projects rm [PROJECT_ID] [--yes] [--api-url URL] [--org ORG]
 ```
 
-Creating a project is `harumi new` (`--no-clone` to only create it; see [new](#new)).
+With the id omitted, `get`, `rename` and `rm` open the project picker (most recently updated first); `rename` also asks for the new name, offering the current one; `rm` still requires typing the project's name afterwards, because choosing a row is not consent to delete it. With no terminal they fail listing the choices. Creating a project is `harumi new` (`--no-clone` to only create it; see [new](#new)).
 
 - **`list`**: `GET /projects`, following pages (200 at a time) until the server's `total_count` is reached, so accounts with hundreds of projects see all of them. Sorted **most recently updated first** (the server's own order is creation date; the CLI re-sorts). Table of `id`, `name`, `updated` ("3 days ago"), `workspace` (only when the projects span more than one workspace), `kernel_spec`, `role`. `--limit N` shows only the first N; any time rows are left out it says "Showing N of M projects". The project pickers (`clone` and others) use the same order and show age and workspace beside each name.
 - **`get`**: `GET /projects/{id}` → detail view.
@@ -137,11 +137,11 @@ Three journeys, three commands — plus the narrower `link` primitive and the in
 ### `new`
 
 ```
-harumi new NAME [--dir PATH] [--customer-id ID] [--personal] [--blueprint SLUG] [--no-clone]
+harumi new [NAME] [--dir PATH] [--customer-id ID] [--personal] [--blueprint SLUG] [--no-clone]
           [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
-Use when there's nothing yet.
+Use when there's nothing yet. With `NAME` omitted it asks for one at a terminal; with no terminal it fails showing `harumi new "My Project"`. When it finishes it prints the exact next step (`Next: cd my-project then harumi run --watch`, with a relative path when that is shorter).
 
 1. `POST /projects` to create the project (seeds a runnable `harumi.toml` + `main.py` + `dashboard.toml` server-side, or a blueprint's files if `--blueprint` is given — see `harumi blueprints`).
 2. `GET /projects/{id}/repo` to fetch the Gitea repo.
@@ -153,7 +153,7 @@ Use when there's nothing yet.
 ### `import`
 
 ```
-harumi import [PATH] [--project-name NAME] [--from-git URL] [--bind/--no-bind] [--personal]
+harumi import [PATH] [--project-name NAME] [--from-git URL] [--bind/--no-bind] [--personal] [--yes]
            [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
@@ -166,6 +166,9 @@ Use when you already have code on your machine — from anywhere: an old GitHub 
 | `--from-git` | Also clone this git URL (e.g. an old GitHub repo) flat into the folder — `.git` stripped, files copied alongside the existing ones — before pushing. On a filename collision the existing (folder's own) file wins; the CLI warns and lists the first few colliding paths. |
 | `--bind / --no-bind` | Bind the folder to the new project afterward. Default: `--bind`. |
 | `--personal` | Create the project in your personal workspace, ignoring the configured org. |
+| `--yes, -y` | Don't ask for a name or confirmation (use the folder name and go). |
+
+**Before anything is created** `import` prints what it will upload (`Importing <folder>: 5 files, 2.9 MB`), then what it leaves out: virtual environments (`.venv`, `venv`), `node_modules`, `__pycache__` and similar, and files that look like secrets (`.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `id_rsa*` ...), with a pointer to `harumi secrets set`. Templates such as `.env.example` are uploaded. The exclusions are written to the repo's local `.git/info/exclude`; the user's own `.gitignore` is never edited, and `.gitignore` rules are honoured. A secret-looking file that git **already tracks** cannot be skipped (it uploads, with the folder's history); that case gets a loud warning and the confirmation defaults to No. Large files (50 MB and up) are called out. At a terminal it then asks for the project name (Enter accepts the folder name) and `Create the project and upload these files?`; without a terminal, or with `--yes`, it asks nothing. A folder that already has a `.harumi` binding is refused, because `import` always makes a *new* project: use `git push harumi <branch>` instead.
 
 Sequence:
 
@@ -196,7 +199,7 @@ harumi link [--project PROJECT_ID] [--api-url URL] [--git-url URL] [--org ORG]
 
 The narrower primitive underneath `clone` — binds an **already-checked-out** directory to a project, without cloning or fetching anything. For the rare case where the code is already on disk by hand (or you're re-binding after moving the folder).
 
-1. Calls `GET /projects/{id}/repo` (prompts you to pick from `harumi projects list` if `--project` is omitted).
+1. Calls `GET /projects/{id}/repo`. With `--project` omitted, a project picker opens at a terminal (with no terminal it fails listing the projects and naming `--project`).
 2. Writes `.harumi/config.json` in the current directory with `project_id` + repo metadata.
 3. Configures the `harumi` git remote with an authenticated HTTPS URL (requires a `git_token` in credentials from `harumi login` and the current directory to already be a git working tree — `link` warns and skips remote setup otherwise).
 

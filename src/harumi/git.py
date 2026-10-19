@@ -28,7 +28,9 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from dataclasses import dataclass, field
+from fnmatch import fnmatch
+from typing import Optional, Sequence
 from urllib.parse import quote
 
 from harumi.errors import HarumiError
@@ -343,6 +345,166 @@ def delete_remote_scratch(
 # Import: push a plain folder as the initial commit of a project's repo
 # ---------------------------------------------------------------------------
 
+# What `harumi import` leaves out. Directories nobody wants uploaded, and files that
+# look like credentials. They are excluded through the repo's *local*
+# `.git/info/exclude`, never by editing the user's own `.gitignore`.
+JUNK_DIRS = (
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ipynb_checkpoints",
+)
+SECRET_GLOBS = (
+    ".env",
+    ".env.*",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "*.keystore",
+    "id_rsa",
+    "id_rsa.*",
+    "id_ed25519",
+    "id_ed25519.*",
+)
+# Look like a secret by name but are meant to be shared (a template, not a value).
+SECRET_OK = (".env.example", ".env.sample", ".env.template", ".env.dist")
+# Excluded without comment: noise, not a decision.
+_QUIET_EXCLUDES = ("*.pyc", ".DS_Store")
+LARGE_FILE_BYTES = 50 * 1024 * 1024
+_MARKER = "# harumi import (local; not part of your project)"
+
+
+def import_excludes() -> list[str]:
+    """The gitignore-syntax patterns `harumi import` adds, in order."""
+    patterns = [f"{d}/" for d in JUNK_DIRS] + list(SECRET_GLOBS)
+    patterns += [f"!{name}" for name in SECRET_OK]
+    return patterns + list(_QUIET_EXCLUDES)
+
+
+def looks_like_secret(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1]
+    if name in SECRET_OK:
+        return False
+    return any(fnmatch(name, g) for g in SECRET_GLOBS)
+
+
+@dataclass
+class ImportPlan:
+    """What an import would upload and what it would leave out."""
+
+    files: int = 0
+    total_bytes: int = 0
+    largest: list[tuple[str, int]] = field(default_factory=list)  # biggest first
+    skipped_secrets: list[str] = field(default_factory=list)
+    skipped_dirs: list[tuple[str, int]] = field(default_factory=list)  # (dir, file count)
+    # Look like secrets but git already tracks them, so they ARE included.
+    included_secrets: list[str] = field(default_factory=list)
+    # Commits already in the folder's git history; the push sends all of them.
+    history_commits: int = 0
+
+
+def _is_repo_root(folder: Path) -> bool:
+    """Whether `folder` is itself the top of a git repo (not merely inside one).
+
+    Compares resolved paths: git reports the real location, so a symlinked path
+    (macOS's /tmp is one) would otherwise never match.
+    """
+    root = repo_root(cwd=folder)
+    return root is not None and root.resolve() == folder.resolve()
+
+
+def _ls_files(folder: Path, extra_excludes: Sequence[str]) -> tuple[list[str], list[str]]:
+    """What `git add --all` would stage in `folder`: (already tracked, new).
+
+    Tracked files are always staged: an exclude pattern keeps a *new* file out, it
+    cannot un-track one git already has. So they are reported separately and
+    never subject to `extra_excludes`. The new files honour the user's own ignore
+    files plus `extra_excludes`.
+
+    Works whether or not `folder` is already a repo, without creating anything in
+    it: a folder that is not a repo is listed through a throwaway git dir with
+    `folder` as its work tree (the same thing `push_folder` will do for real).
+    """
+    new_args = ["ls-files", "-z", "--others", "--exclude-standard"]
+    new_args += [f"--exclude={p}" for p in extra_excludes]
+    if _is_repo_root(folder):
+        tracked = _run(["ls-files", "-z", "--cached"], cwd=folder).stdout
+        new = _run(new_args, cwd=folder).stdout
+    else:
+        tracked = ""
+        with tempfile.TemporaryDirectory() as scratch:
+            _run(["init", "-q", "--bare", scratch])
+            new = _run(
+                new_args, cwd=folder, env={"GIT_DIR": scratch, "GIT_WORK_TREE": str(folder)}
+            ).stdout
+    split = lambda out: sorted({p for p in out.split("\0") if p})  # noqa: E731
+    return split(tracked), split(new)
+
+
+def history_size(folder: Path) -> int:
+    """How many commits of history already exist in `folder` (0 if it is not a repo or has none)."""
+    if not _is_repo_root(folder):
+        return 0
+    result = _run(["rev-list", "--count", "HEAD"], cwd=folder, check=False)
+    try:
+        return int(result.stdout.strip()) if result.returncode == 0 else 0
+    except ValueError:
+        return 0
+
+
+def plan_import(folder: Path) -> ImportPlan:
+    """Work out, without touching `folder`, what `harumi import` will upload."""
+    tracked, new_kept = _ls_files(folder, import_excludes())
+    _, new_all = _ls_files(folder, [])
+    kept = sorted(set(tracked) | set(new_kept))
+
+    plan = ImportPlan(history_commits=history_size(folder))
+    sizes: list[tuple[str, int]] = []
+    for rel in kept:
+        try:
+            size = (folder / rel).stat().st_size
+        except OSError:
+            continue  # vanished or a dangling symlink: git will cope, we just don't count it
+        sizes.append((rel, size))
+        plan.total_bytes += size
+        if looks_like_secret(rel) and rel in tracked:
+            # Not skippable from here: git already has it, so `add --all` keeps it.
+            plan.included_secrets.append(rel)
+    plan.files = len(sizes)
+    plan.largest = sorted(sizes, key=lambda x: x[1], reverse=True)[:3]
+
+    dirs: dict[str, int] = {}
+    for rel in sorted(set(new_all) - set(new_kept)):
+        parts = rel.split("/")
+        junk = next((i for i, part in enumerate(parts[:-1]) if part in JUNK_DIRS), None)
+        if junk is not None:
+            key = "/".join(parts[: junk + 1])
+            dirs[key] = dirs.get(key, 0) + 1
+        elif looks_like_secret(rel):
+            plan.skipped_secrets.append(rel)
+        # anything else was skipped quietly (*.pyc, .DS_Store)
+    plan.skipped_dirs = sorted(dirs.items())
+    return plan
+
+
+def _write_local_excludes(folder: Path, patterns: Sequence[str]) -> None:
+    """Add `patterns` to the repo's local exclude file, once, under a marker."""
+    result = _run(["rev-parse", "--git-path", "info/exclude"], cwd=folder)
+    path = Path(result.stdout.strip())
+    if not path.is_absolute():
+        path = folder / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text() if path.exists() else ""
+    if _MARKER in existing:
+        return
+    block = "\n".join([_MARKER, *patterns, ""])
+    path.write_text(existing + ("" if existing.endswith("\n") or not existing else "\n") + block)
+
+
 def push_folder(
     folder: Path,
     clone_url: str,
@@ -351,6 +513,7 @@ def push_folder(
     branch: str = "main",
     remote: str = "harumi",
     message: str = "Import project",
+    exclude: Sequence[str] = (),
 ) -> str:
     """Commit everything in ``folder`` and push it to ``remote/branch``.
 
@@ -369,11 +532,13 @@ def push_folder(
 
     # Initialize a repo in the folder if it isn't one already. If the folder is
     # a clone of the user's GitHub repo, it already is one — reuse it.
-    if repo_root(cwd=folder) != folder:
+    if not _is_repo_root(folder):
         _run(["init"], cwd=folder)
 
     ensure_remote(clone_url, username, token, name=remote, cwd=folder)
 
+    if exclude:
+        _write_local_excludes(folder, exclude)
     _run(["add", "--all"], cwd=folder)
     # Commit; allow an empty diff to still produce a commit so push has a ref.
     _run(

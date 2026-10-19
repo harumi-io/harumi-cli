@@ -200,8 +200,11 @@ from harumi.git import (
     current_branch,
     delete_remote_scratch,
     ensure_remote,
+    ImportPlan,
     has_unpushed_commits,
+    import_excludes,
     is_dirty,
+    plan_import,
     push_folder,
     push_scratch,
     repo_root,
@@ -1104,6 +1107,27 @@ def _pick_run(client: Client, project_id: str, runs, *, action: str, flag: str) 
     return interactive.select(f"Which run do you want to {action}?", options, flag=flag)  # type: ignore[return-value]
 
 
+def _shown_path(path: Path) -> str:
+    """`path` as someone should type it: relative to where they are when that is
+    shorter and stays below it, absolute otherwise."""
+    try:
+        rel = path.resolve().relative_to(Path.cwd().resolve())
+    except ValueError:
+        return str(path)
+    text = str(rel)
+    return text if text != "." else "."
+
+
+def _next_steps(folder: Path) -> None:
+    """What to type after a project has been set up locally."""
+    where = _shown_path(folder)
+    cd = f"cd {where}" if where != "." else ""
+    steps = " then ".join(f"[bold]{c}[/bold]" for c in (cd, "harumi run --watch") if c)
+    # soft_wrap: this is a command line someone will copy, so a long path must
+    # not be broken across lines at the terminal width.
+    console.print(f"\nNext: {steps}", soft_wrap=True)
+
+
 def _recent_first(projects):
     """Most recently updated first, so the project you are working on leads.
 
@@ -1644,7 +1668,7 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
     return True
 
 
-def _pick_project(client: Client, *, action: str) -> Optional[str]:
+def _pick_project(client: Client, *, action: str, flag: str = "the PROJECT_ID argument") -> Optional[str]:
     """Let the user choose one of their projects; return its id, or None if they quit.
 
     With no terminal this raises `NonInteractiveError`, which lists the projects
@@ -1675,7 +1699,7 @@ def _pick_project(client: Client, *, action: str) -> Optional[str]:
     if total > len(projects):
         console.print(f"[dim]Showing {len(projects)} of {total} projects.[/dim]")
     picked = interactive.select(
-        f"Which project do you want to {action}?", options, flag="the PROJECT_ID argument"
+        f"Which project do you want to {action}?", options, flag=flag
     )
     return picked  # type: ignore[return-value]
 
@@ -1688,7 +1712,7 @@ def _pick_project(client: Client, *, action: str) -> Optional[str]:
 @_handle_errors
 def link(
     project: Optional[str] = typer.Option(
-        None, "--project", "-p", help="Harumi project id to bind this directory to. Prompted if omitted."
+        None, "--project", "-p", help="Harumi project id to bind this directory to. Pick from a list if omitted."
     ),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
@@ -1709,15 +1733,9 @@ def link(
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
 
     if project is None:
-        projects = client.list_projects()
-        if not projects:
-            _fail("You have no projects to link. Run [bold]harumi new <NAME>[/bold] to create one.")
-        console.print("Your projects:")
-        table = Table("id", "name")
-        for p in projects:
-            table.add_row(p.id, p.name)
-        console.print(table)
-        project = typer.prompt("Project id to bind this directory to")
+        project = _pick_project(client, action="link this folder to", flag="--project")
+        if project is None:  # backed out of the menu
+            return
 
     console.print(f"Fetching repo for project [bold]{project}[/bold]...")
     repo = client.get_project_repo(project)
@@ -1822,6 +1840,9 @@ def import_project(
         "--personal",
         help="Create in your personal workspace, ignoring the configured org.",
     ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Don't ask for a name or confirmation: use the folder name and go."
+    ),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -1835,6 +1856,10 @@ def import_project(
     intentionally overwrites the server-seeded scaffold, so if the folder
     has no `harumi.toml` one is written for you before pushing.
 
+    First it shows what would be uploaded. Virtual environments, `node_modules`
+    and files that look like secrets (`.env`, `*.pem`, `*.key`) are left out,
+    and at a terminal you are asked for a name and to confirm.
+
     Starting with nothing at all? Use `harumi new <NAME>` instead — it
     clones the seeded scaffold rather than overwriting it.
     """
@@ -1844,10 +1869,51 @@ def import_project(
         from_git=from_git,
         bind=bind,
         personal=personal,
+        assume_yes=yes,
         api_url=api_url,
         git_url=git_url,
         org=org,
     )
+
+
+def _print_import_plan(folder: Path, plan: ImportPlan) -> None:
+    """What an import is about to upload and what it leaves out, in a few lines."""
+    from harumi.git import LARGE_FILE_BYTES
+
+    history = (
+        f", plus {plan.history_commits} commit{'' if plan.history_commits == 1 else 's'} of git history"
+        if plan.history_commits
+        else ""
+    )
+    console.print(
+        f"Importing [bold]{escape(str(folder))}[/bold]: [bold]{plan.files}[/bold] "
+        f"file{'' if plan.files == 1 else 's'}, {_format_bytes(plan.total_bytes)}{history}."
+    )
+    left_out = [f"{escape(d)}/ ({n} file{'' if n == 1 else 's'})" for d, n in plan.skipped_dirs]
+    if plan.skipped_secrets:
+        left_out.append("files that look like secrets: " + ", ".join(escape(f) for f in plan.skipped_secrets[:5]))
+        if len(plan.skipped_secrets) > 5:
+            left_out[-1] += f" and {len(plan.skipped_secrets) - 5} more"
+    if left_out:
+        console.print("[dim]Left out: " + "; ".join(left_out) + ".[/dim]")
+    if plan.skipped_secrets:
+        console.print("[dim]API keys belong in [bold]harumi secrets set NAME[/bold], not in the code.[/dim]")
+    big = [(f, n) for f, n in plan.largest if n >= LARGE_FILE_BYTES]
+    if big:
+        console.print(
+            "[yellow]Large files make the upload slow:[/yellow] "
+            + ", ".join(f"{escape(f)} ({_format_bytes(n)})" for f, n in big)
+            + ". Data files usually belong in [bold]harumi files put[/bold]."
+        )
+    if plan.included_secrets:
+        console.print(
+            "[bold yellow]Heads-up:[/bold yellow] "
+            + ", ".join(escape(f) for f in plan.included_secrets[:5])
+            + " looks like a secret, but git already tracks it, so it [bold]will be uploaded[/bold]"
+            + (" with its history" if plan.history_commits else "")
+            + ". Stop here if that is not what you want, and remove it from git first "
+            "([bold]git rm --cached <file>[/bold])."
+        )
 
 
 def _push_impl(
@@ -1860,6 +1926,7 @@ def _push_impl(
     api_url: Optional[str],
     git_url: Optional[str],
     org: Optional[str],
+    assume_yes: bool = False,
 ) -> None:
     """Body of `harumi import`, factored out so `harumi start` can call it
     directly without going through Typer's CLI-parsing machinery (whose
@@ -1870,6 +1937,18 @@ def _push_impl(
     if not folder.is_dir():
         _fail(f"Not a directory: {folder}")
 
+    linked = folder / ".harumi" / "config.json"
+    if linked.exists():
+        binding = ProjectBinding.load(folder)
+        which = f" ({binding.project_id})" if binding else ""
+        _fail(
+            f"{folder} is already a Harumi project{which}, and `harumi import` always creates a "
+            "[bold]new[/bold] one.\n"
+            "To send your changes to this project, commit and run [bold]git push harumi <branch>[/bold]; "
+            "to just run them, use [bold]harumi run[/bold].\n"
+            "If you really want a second project from this folder, delete its .harumi folder first."
+        )
+
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
     # Before the merge and scaffold below change the user's folder.
     _require_entitled_workspace(client, None if personal else client.config.org_id)
@@ -1877,10 +1956,29 @@ def _push_impl(
     if from_git:
         _merge_git_repo_flat(from_git, folder)
 
+    # The summary has to count what will really be pushed, which includes the
+    # harumi.toml written below. So preview with the file counted in, and only
+    # write it once the user has agreed.
+    plan = plan_import(folder)
+    needs_manifest = not (folder / "harumi.toml").exists()
+    if needs_manifest:
+        plan.files += 1
+        plan.total_bytes += len(_DEFAULT_HARUMI_TOML.encode())
+    _print_import_plan(folder, plan)
+    can_ask = interactive.is_interactive() and not assume_yes
+    name = project_name or folder.name
+    if can_ask:
+        if project_name is None:
+            name = typer.prompt("Project name", default=folder.name)
+        if not typer.confirm(
+            "Create the project and upload these files?", default=not plan.included_secrets
+        ):
+            console.print("Nothing was created.")
+            return
+
     _ensure_scaffold(folder)
 
-    name = project_name or folder.name
-    console.print(f"Creating project [bold]{name}[/bold]...")
+    console.print(f"Creating project [bold]{escape(name)}[/bold]...")
     project = client.create_project(name, personal=personal)
     console.print(
         f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id})."
@@ -1918,6 +2016,7 @@ def _push_impl(
         token=git_token,
         branch=repo.default_branch,
         message="Push local project",
+        exclude=import_excludes(),
     )
     console.print(f"[bold green]Pushed[/bold green] to Harumi ({repo.default_branch}).")
 
@@ -1926,7 +2025,7 @@ def _push_impl(
         return
 
     if _bind_and_configure_remote(project.id, repo, cwd=folder):
-        console.print(f"\nRun [bold]cd {folder}[/bold] then [bold]harumi run[/bold] to try it.")
+        _next_steps(folder)
 
 
 # ---------------------------------------------------------------------------
@@ -1936,7 +2035,7 @@ def _push_impl(
 @app.command()
 @_handle_errors
 def new(
-    name: str = typer.Argument(..., help="Project name."),
+    name: Optional[str] = typer.Argument(None, help="Project name. Asked for at a terminal if omitted."),
     dir: Optional[Path] = typer.Option(
         None, "--dir", help="Local directory to clone the new project into. Defaults to ./<slugified-name>."
     ),
@@ -1974,6 +2073,10 @@ def new(
     Project already exists in Harumi (web app or a teammate made it)? Use
     `harumi clone <PROJECT_ID>`.
     """
+    if name is None:
+        if not interactive.is_interactive():
+            _fail("Give the project a name: [bold]harumi new \"My Project\"[/bold].")
+        name = typer.prompt("Project name")
     _new_impl(
         name=name,
         dir=dir,
@@ -2110,7 +2213,7 @@ def _clone_and_bind(project_id: str, repo, dest: Path) -> None:
     )
 
     if _bind_and_configure_remote(project_id, repo, cwd=dest):
-        console.print(f"\nRun [bold]cd {dest}[/bold] then [bold]harumi run[/bold] to try it.")
+        _next_steps(dest)
 
 
 @app.command()
@@ -2304,43 +2407,74 @@ def projects_list(
 @projects_app.command("get")
 @_handle_errors
 def projects_get(
-    project_id: str = typer.Argument(..., help="Project id."),
+    project_id: Optional[str] = typer.Argument(None, help="Project id. Pick from a list if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Show details for one project."""
+    """Show a project: its name, where it lives, and how to open it."""
     client = _get_client(api_url=api_url, org=org)
+    if project_id is None:
+        project_id = _pick_project(client, action="show")
+        if project_id is None:
+            return
     p = client.get_project(project_id)
-    table = Table("field", "value")
-    for field in ("id", "name", "customer_id", "kernel_spec", "role_name", "created_at", "updated_at"):
-        table.add_row(field, str(getattr(p, field, "") or ""))
-    console.print(table)
+    names = _workspace_names() if p.customer_id else {}
+    facts = Table.grid(padding=(0, 2))
+    facts.add_column(style="dim")
+    facts.add_column()
+    for label, value in (
+        ("Name", escape(p.name)),
+        ("Id", escape(p.id)),
+        ("Workspace", escape(_workspace_label(p, names))),
+        ("Your role", escape(p.role_name or "")),
+        ("Kernel", escape(p.kernel_spec or "")),
+        ("Created", _ago(p.created_at)),
+        ("Updated", _ago(p.updated_at)),
+        ("Open", f"{active_platform_url()}/projects/{p.id}"),
+    ):
+        if value:
+            facts.add_row(label, value)
+    console.print(facts)
 
 
 @projects_app.command("rename")
 @_handle_errors
 def projects_rename(
-    project_id: str = typer.Argument(..., help="Project id."),
-    name: str = typer.Argument(..., help="New project name."),
+    project_id: Optional[str] = typer.Argument(None, help="Project id. Pick from a list if omitted."),
+    name: Optional[str] = typer.Argument(None, help="New project name. Asked for if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Rename a project."""
     client = _get_client(api_url=api_url, org=org)
+    if project_id is None:
+        project_id = _pick_project(client, action="rename")
+        if project_id is None:
+            return
+    if name is None:
+        if not interactive.is_interactive():
+            _fail("Give the new name: [bold]harumi projects rename <PROJECT_ID> \"New name\"[/bold].")
+        current = client.get_project(project_id).name
+        name = typer.prompt("New name", default=current)
     p = client.update_project(project_id, {"name": name})
-    console.print(f"[bold green]Renamed[/bold green] project to [bold]{p.name}[/bold].")
+    console.print(f"[bold green]Renamed[/bold green] project to [bold]{escape(p.name)}[/bold].")
 
 
 @projects_app.command("rm")
 @_handle_errors
 def projects_rm(
-    project_id: str = typer.Argument(..., help="Project id."),
+    project_id: Optional[str] = typer.Argument(None, help="Project id. Pick from a list if omitted."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Delete a project. This cannot be undone."""
     client = _get_client(api_url=api_url, org=org)
+    if project_id is None:
+        # Picking is not consent: the typed-name confirmation below still applies.
+        project_id = _pick_project(client, action="delete")
+        if project_id is None:
+            return
 
     if not yes:
         p = client.get_project(project_id)
@@ -2352,7 +2486,7 @@ def projects_rm(
             return
 
     deleted = client.delete_project(project_id)
-    console.print(f"[bold red]Deleted[/bold red] project [bold]{deleted.name}[/bold].")
+    console.print(f"[bold red]Deleted[/bold red] project [bold]{escape(deleted.name)}[/bold].")
 
 
 # ---------------------------------------------------------------------------
