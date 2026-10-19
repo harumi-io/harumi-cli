@@ -116,7 +116,9 @@ class TestValidationActuallyCatchesMistakes:
         assert any("unknown flag --not-a-flag" in p for p in problems)
 
     def test_missing_required_positional_is_rejected(self, patched):
-        problems = patched(plan=PLAN + (Step("projects get"),))
+        # Any command that still requires a positional. (This used to be
+        # `projects get`, until it learned to offer a picker.)
+        problems = patched(plan=PLAN + (Step("skills add"),))
         assert any("positional" in p for p in problems)
 
     def test_missing_required_option_is_rejected(self, patched):
