@@ -350,6 +350,7 @@ def delete_remote_scratch(
 # `.git/info/exclude`, never by editing the user's own `.gitignore`.
 JUNK_DIRS = (
     ".venv",
+    ".env",  # also a common name for a virtualenv; a `.env` *file* is still a secret
     "venv",
     "node_modules",
     "__pycache__",
@@ -386,7 +387,12 @@ def import_excludes() -> list[str]:
 
 
 def looks_like_secret(path: str) -> bool:
-    name = path.rsplit("/", 1)[-1]
+    """By file name, whatever the case: `.ENV` and `Server.PEM` are secrets too.
+
+    Case matters because most people are on macOS or Windows, where `.ENV` and `.env`
+    are the same file, but git's own patterns (and `fnmatch` on Linux) compare exactly.
+    """
+    name = path.rsplit("/", 1)[-1].lower()
     if name in SECRET_OK:
         return False
     return any(fnmatch(name, g) for g in SECRET_GLOBS)
@@ -405,6 +411,9 @@ class ImportPlan:
     included_secrets: list[str] = field(default_factory=list)
     # Commits already in the folder's git history; the push sends all of them.
     history_commits: int = 0
+    # Names that look like secrets in any of those commits, including files long since
+    # deleted. They are not in the tree, but they are in what is pushed.
+    history_secrets: list[str] = field(default_factory=list)
 
 
 def _is_repo_root(folder: Path) -> bool:
@@ -456,13 +465,23 @@ def history_size(folder: Path) -> int:
         return 0
 
 
+def history_secret_names(folder: Path) -> list[str]:
+    """Secret-looking file names that appear anywhere in the history `push_folder` will send."""
+    if not _is_repo_root(folder):
+        return []
+    result = _run(["log", "HEAD", "--name-only", "--pretty=format:", "-z"], cwd=folder, check=False)
+    if result.returncode != 0:
+        return []
+    return sorted({p for p in result.stdout.split("\0") if p.strip() and looks_like_secret(p)})
+
+
 def plan_import(folder: Path) -> ImportPlan:
     """Work out, without touching `folder`, what `harumi import` will upload."""
     tracked, new_kept = _ls_files(folder, import_excludes())
     _, new_all = _ls_files(folder, [])
     kept = sorted(set(tracked) | set(new_kept))
 
-    plan = ImportPlan(history_commits=history_size(folder))
+    plan = ImportPlan(history_commits=history_size(folder), history_secrets=history_secret_names(folder))
     sizes: list[tuple[str, int]] = []
     for rel in kept:
         try:

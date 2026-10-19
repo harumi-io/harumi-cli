@@ -1577,6 +1577,18 @@
         },
         {
           "opts": [
+            "--include-tracked-secrets"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Upload secret-looking files that git already tracks, or has in its history. Without a terminal, or with --yes, the import stops instead."
+        },
+        {
+          "opts": [
             "--api-url"
           ],
           "secondary_opts": [],

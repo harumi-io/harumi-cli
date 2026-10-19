@@ -146,6 +146,7 @@ import json
 import mimetypes
 import os
 import re
+import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -194,13 +195,14 @@ from harumi.errors import (
     SessionRefreshError,
 )
 from harumi.git import (
+    LARGE_FILE_BYTES,
     GitError,
+    ImportPlan,
     NotAHarumiRepoError,
     clone_repo,
     current_branch,
     delete_remote_scratch,
     ensure_remote,
-    ImportPlan,
     has_unpushed_commits,
     import_excludes,
     is_dirty,
@@ -1114,15 +1116,16 @@ def _shown_path(path: Path) -> str:
         rel = path.resolve().relative_to(Path.cwd().resolve())
     except ValueError:
         return str(path)
-    text = str(rel)
-    return text if text != "." else "."
+    return str(rel)
 
 
 def _next_steps(folder: Path) -> None:
     """What to type after a project has been set up locally."""
     where = _shown_path(folder)
-    cd = f"cd {where}" if where != "." else ""
-    steps = " then ".join(f"[bold]{c}[/bold]" for c in (cd, "harumi run --watch") if c)
+    # Quoted for the shell (a folder called "My Project" must paste), then escaped for
+    # Rich (a "[" in a path is markup otherwise and silently vanishes).
+    cd = f"cd {shlex.quote(where)}" if where != "." else ""
+    steps = " then ".join(f"[bold]{escape(c)}[/bold]" for c in (cd, "harumi run --watch") if c)
     # soft_wrap: this is a command line someone will copy, so a long path must
     # not be broken across lines at the terminal width.
     console.print(f"\nNext: {steps}", soft_wrap=True)
@@ -1843,6 +1846,12 @@ def import_project(
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Don't ask for a name or confirmation: use the folder name and go."
     ),
+    include_tracked_secrets: bool = typer.Option(
+        False,
+        "--include-tracked-secrets",
+        help="Upload secret-looking files that git already tracks, or has in its history. Without a "
+        "terminal, or with --yes, the import stops instead.",
+    ),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -1870,6 +1879,7 @@ def import_project(
         bind=bind,
         personal=personal,
         assume_yes=yes,
+        include_tracked_secrets=include_tracked_secrets,
         api_url=api_url,
         git_url=git_url,
         org=org,
@@ -1878,8 +1888,6 @@ def import_project(
 
 def _print_import_plan(folder: Path, plan: ImportPlan) -> None:
     """What an import is about to upload and what it leaves out, in a few lines."""
-    from harumi.git import LARGE_FILE_BYTES
-
     history = (
         f", plus {plan.history_commits} commit{'' if plan.history_commits == 1 else 's'} of git history"
         if plan.history_commits
@@ -1914,6 +1922,25 @@ def _print_import_plan(folder: Path, plan: ImportPlan) -> None:
             + ". Stop here if that is not what you want, and remove it from git first "
             "([bold]git rm --cached <file>[/bold])."
         )
+    in_history_only = [f for f in plan.history_secrets if f not in plan.included_secrets]
+    if in_history_only:
+        console.print(
+            "[bold yellow]Heads-up:[/bold yellow] your git history contains "
+            + ", ".join(escape(f) for f in in_history_only[:5])
+            + (f" and {len(in_history_only) - 5} more" if len(in_history_only) > 5 else "")
+            + ". It is not in your files any more, but the history is [bold]uploaded as it is[/bold], "
+            "so anyone with access to the project could read it. Rotate that secret, or start from a clean copy "
+            "of the folder without the .git folder."
+        )
+
+
+def _ask_project_name(default: Optional[str]) -> str:
+    """Ask for a name; a blank answer is asked again rather than sent to the server."""
+    while True:
+        name = (typer.prompt("Project name", default=default) if default else typer.prompt("Project name")).strip()
+        if name:
+            return name
+        console.print("A project needs a name.")
 
 
 def _push_impl(
@@ -1927,6 +1954,7 @@ def _push_impl(
     git_url: Optional[str],
     org: Optional[str],
     assume_yes: bool = False,
+    include_tracked_secrets: bool = False,
 ) -> None:
     """Body of `harumi import`, factored out so `harumi start` can call it
     directly without going through Typer's CLI-parsing machinery (whose
@@ -1966,12 +1994,22 @@ def _push_impl(
         plan.total_bytes += len(_DEFAULT_HARUMI_TOML.encode())
     _print_import_plan(folder, plan)
     can_ask = interactive.is_interactive() and not assume_yes
+    at_risk = sorted({*plan.included_secrets, *plan.history_secrets})
+    if at_risk and not can_ask and not include_tracked_secrets:
+        # Nobody to say no: --yes is consent to "go ahead", not to publish a credential.
+        _fail(
+            "Not importing: git already has " + ", ".join(escape(f) for f in at_risk[:5])
+            + (f" and {len(at_risk) - 5} more" if len(at_risk) > 5 else "")
+            + ", which look like secrets, and they would be uploaded.\n"
+            "Remove them from git ([bold]git rm --cached <file>[/bold]) and rotate them, or, "
+            "if you really want them uploaded, run again with [bold]--include-tracked-secrets[/bold]."
+        )
     name = project_name or folder.name
     if can_ask:
         if project_name is None:
-            name = typer.prompt("Project name", default=folder.name)
+            name = _ask_project_name(folder.name)
         if not typer.confirm(
-            "Create the project and upload these files?", default=not plan.included_secrets
+            "Create the project and upload these files?", default=not at_risk
         ):
             console.print("Nothing was created.")
             return
@@ -2295,7 +2333,7 @@ def start() -> None:
         _require_entitled_workspace(client, client.config.org_id)
 
     if choice == "1":
-        name = typer.prompt("Project name")
+        name = _ask_project_name(None)
         _new_impl(
             name=name,
             dir=None,
@@ -2418,7 +2456,7 @@ def projects_get(
         if project_id is None:
             return
     p = client.get_project(project_id)
-    names = _workspace_names() if p.customer_id else {}
+    names = _workspace_names(client) if p.customer_id else {}
     facts = Table.grid(padding=(0, 2))
     facts.add_column(style="dim")
     facts.add_column()
@@ -2469,6 +2507,11 @@ def projects_rm(
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Delete a project. This cannot be undone."""
+    if project_id is None and yes:
+        # --yes skips the typed-name check, so nothing would stand between a slip in a
+        # list and a deleted project. With --yes the id has to be written down.
+        _fail("Say which project to delete: [bold]harumi projects rm <project id> --yes[/bold]. "
+              "Find the id with [bold]harumi projects list[/bold].")
     client = _get_client(api_url=api_url, org=org)
     if project_id is None:
         # Picking is not consent: the typed-name confirmation below still applies.
@@ -3423,6 +3466,12 @@ def check(
     and the kernel is one the project may use. Exits 1 when something blocks the
     project, so a script can stop before `harumi run`.
     """
+    _check(ref=ref, project=project, api_url=api_url, org=org, exit_when_blocked=True)
+
+
+def _check(*, ref: Optional[str], project: Optional[str], api_url: Optional[str], org: Optional[str], exit_when_blocked: bool) -> None:
+    """The body of `harumi check`. The deprecated `harumi repo readiness` shares it but
+    keeps its old exit code (always 0), so a script that ignores the status is unaffected."""
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -3442,12 +3491,20 @@ def check(
         )
         return
     count = len(failing)
-    console.print(
-        f"[bold red]Not ready[/bold red] on {escape(readiness.ref)}: "
-        f"{count} problem{'' if count == 1 else 's'}. "
-        "[dim]Fix them, then run [bold]harumi check[/bold] again.[/dim]"
-    )
-    raise typer.Exit(code=1)
+    if count:
+        console.print(
+            f"[bold red]Not ready[/bold red] on {escape(readiness.ref)}: "
+            f"{count} problem{'' if count == 1 else 's'}. "
+            "[dim]Fix them, then run [bold]harumi check[/bold] again.[/dim]"
+        )
+    else:
+        # Every listed check passed, yet the server says no. Say so rather than "0 problems".
+        console.print(
+            f"[bold red]Not ready[/bold red] on {escape(readiness.ref)}: the server did not say why. "
+            "[dim]Run [bold]harumi check[/bold] again, or ask your workspace admin.[/dim]"
+        )
+    if exit_when_blocked:
+        raise typer.Exit(code=1)
 
 
 # What each server-side readiness check is called when shown to a person.
@@ -3459,7 +3516,16 @@ _CHECK_LABELS = {
 }
 
 
-repo_app.command("readiness")(_deprecated("harumi repo readiness", "harumi check")(check))
+@repo_app.command("readiness")
+@_deprecated("harumi repo readiness", "harumi check")
+def _repo_readiness(
+    ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to check (defaults to the default branch)."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Deprecated: use `harumi check`. Unlike `check`, this always exits 0."""
+    _check(ref=ref, project=project, api_url=api_url, org=org, exit_when_blocked=False)
 
 
 # ---------------------------------------------------------------------------

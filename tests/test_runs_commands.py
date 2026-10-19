@@ -307,6 +307,32 @@ def test_check_exits_one_and_counts_the_problems_so_a_script_can_stop(server):
     assert "[gurobi]" in result.output  # server text is not read as markup
 
 
+def test_not_ready_with_no_failing_check_does_not_claim_zero_problems(server):
+    """The server can say not-ready without a check failing (a state the checks do not
+    cover). "0 problems" would be a contradiction a person cannot act on."""
+    server(readiness=readiness(False, [{"id": "repo", "ok": True}]))
+
+    result = runner.invoke(cli.app, ["check", "--project", P])
+
+    out = " ".join(result.output.split())
+    assert result.exit_code == 1
+    assert "0 problem" not in out
+    assert "Not ready" in out and "did not say why" in out
+
+
+def test_the_old_repo_readiness_command_still_exits_zero_for_the_scripts_that_use_it(server):
+    """`harumi check` now exits 1 when blocked. `harumi repo readiness` never did, and
+    scripts that call it and ignore the exit code must not start failing."""
+    server(readiness=readiness(False, [{"id": "manifest_valid", "ok": False, "detail": "missing entrypoint"}]))
+
+    old = runner.invoke(cli.app, ["repo", "readiness", "--project", P])
+    new = runner.invoke(cli.app, ["check", "--project", P])
+
+    assert old.exit_code == 0, old.output
+    assert "missing entrypoint" in old.output and "Not ready" in " ".join(old.output.split())
+    assert new.exit_code == 1
+
+
 def test_a_check_the_cli_has_no_name_for_still_shows_its_id(server):
     server(readiness=readiness(False, [{"id": "quota", "ok": False, "detail": "over quota"}]))
 

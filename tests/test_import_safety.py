@@ -282,7 +282,7 @@ def test_a_tracked_secret_is_a_loud_warning(world, tmp_path):
 
 
 def test_large_files_are_called_out_and_pointed_at_files_put(world, tmp_path, monkeypatch):
-    monkeypatch.setattr(hgit, "LARGE_FILE_BYTES", 1_000_000)
+    monkeypatch.setattr(cli, "LARGE_FILE_BYTES", 1_000_000)
     result = runner.invoke(cli.app, ["import", str(messy_folder(tmp_path)), "--yes"])
 
     out = " ".join(result.output.split())

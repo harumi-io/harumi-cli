@@ -35,6 +35,9 @@ PROJECTS = {
     "total_count": 2,
 }
 
+# Fetched by id only, so the pickers that list projects keep seeing the two above.
+ORG_PROJECT = {"id": "proj-org", "name": "Fleet", "notebook_ids": [], "customer_id": "org-acme-0001", "updated_at": "2026-09-01T10:00:00Z", "role_name": "member"}
+
 
 class Server:
     def __init__(self):
@@ -47,12 +50,14 @@ class Server:
 
         self.calls.append(f"{request.method} {request.url.path}")
         path = request.url.path
+        if request.method == "GET" and path.endswith("/users/organizations"):
+            return httpx.Response(200, json=[{"id": "org-acme-0001", "business_name": "Acme Corp"}])
         if request.method == "GET" and path.endswith("/projects"):
             return httpx.Response(200, json=PROJECTS)
         if request.method == "GET" and "/projects/" in path and path.endswith("/repo"):
             return httpx.Response(200, json={"owner": "acme", "name": "s", "clone_url": "https://g/acme/s.git", "default_branch": "main"})
         pid = path.rstrip("/").split("/")[-1]
-        row = next((p for p in PROJECTS["projects"] if p["id"] == pid), None)
+        row = next((p for p in [*PROJECTS["projects"], ORG_PROJECT] if p["id"] == pid), None)
         if request.method == "GET" and row:
             return httpx.Response(200, json=row)
         if request.method in ("PATCH", "PUT") and row:
@@ -70,7 +75,6 @@ def server(monkeypatch):
     monkeypatch.setattr(
         cli, "_get_client", lambda *a, **k: Client(api_url="https://api.harumi.io/api", transport=httpx.MockTransport(s.handler))
     )
-    monkeypatch.setattr(cli, "_workspace_names", lambda: {})
     return s
 
 
@@ -178,6 +182,16 @@ def test_projects_get_without_an_id_picks_from_the_list(server, monkeypatch):
     assert result.exit_code == 0, result.output
     assert seen["values"] == ["proj-1", "proj-2"]
     assert "Solver" in result.output
+
+
+def test_projects_get_names_the_workspace_of_an_organization_project(server):
+    """Every org-owned project used to crash here: the workspace lookup was called without
+    its client, and a test stub with the same wrong signature hid it. The real lookup runs."""
+    result = runner.invoke(cli.app, ["projects", "get", "proj-org"])
+
+    assert result.exit_code == 0, result.output
+    assert "Acme Corp" in result.output
+    assert "GET /api/users/organizations" in server.calls
 
 
 def test_projects_get_is_a_readable_summary_not_a_table_of_field_names(server):
@@ -288,3 +302,15 @@ def test_next_steps_for_a_folder_elsewhere_use_the_full_path(tmp_path, monkeypat
     monkeypatch.chdir(here)
     cli._next_steps(elsewhere)
     assert f"cd {elsewhere}" in capsys.readouterr().out
+
+
+def test_rm_with_yes_and_no_id_refuses_instead_of_deleting_whatever_the_picker_returns(server, monkeypatch):
+    """--yes skips the typed-name check, so a mis-click in a list would delete a project.
+    With --yes the id has to be written down."""
+    pick(monkeypatch, "proj-1")
+
+    result = runner.invoke(cli.app, ["projects", "rm", "--yes"])
+
+    assert result.exit_code != 0
+    assert "project id" in " ".join(result.output.split()).lower()
+    assert server.deleted == []
