@@ -62,7 +62,7 @@ Clears `~/.harumi/credentials.json`. No flags. Says whether anything was cleared
 harumi whoami [--api-url URL] [--org ORG]
 ```
 
-Prints the email and id of the logged-in user (`GET /users/profile`), the active environment, and — when set — the profile's name and bio and the active organization (`--org` or the one from `org use`). Replaces `profile show`.
+Prints the email and id of the logged-in user (`GET /users/profile`), the environment only when it is not production (`env: staging`; no `env:` means production), and — when set — the profile's name and bio and the active organization (`--org` or the one from `org use`). Replaces `profile show`.
 
 ## `whats-new` and update notices
 
@@ -520,7 +520,8 @@ Within the active environment, URL/org overrides (highest first): **CLI flags > 
 
 | Symptom / error | Cause | Fix |
 |---|---|---|
-| `Error: Not logged in. Run harumi login first.` | No/expired session | Ask user to run `harumi login` |
+| `Error: You're not logged in.` or `Error: Your Harumi session has expired.` (both go on to say to run harumi login) | No session, or it ended | Ask user to run `harumi login` (an agent must never automate the emailed code) |
+| `Error: Could not renew your login: harumi-api returned HTTP 403 ...` | A firewall, proxy or outage blocked the token refresh; the session may be fine | Check network/VPN and retry; logging in again will not help |
 | `harumi-api returned HTTP 422: ... Signups not allowed for otp` | New email, no account | Re-run `harumi login --signup` |
 | `Provide --project or run from a directory with a .harumi binding` | No `--project` and `.harumi/config.json` missing in cwd + parents | `harumi new`/`harumi clone <ID>` (nothing/existing project) or `harumi import` (existing folder) or `harumi link --project <ID>` (already checked out), or pass `--project` |
 | `No Gitea token found. Run harumi login` | `git_token` absent in credentials | `harumi login` again |

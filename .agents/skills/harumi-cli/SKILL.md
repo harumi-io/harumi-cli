@@ -17,7 +17,7 @@ The staging endpoints (`api.dev.harumi.io`, `git.dev.harumi.io`) are internal AL
 
 ## Preflight
 
-1. Check CLI is installed: `harumi --version`. Not installed, not on PATH, or `Not logged in. Run harumi login first.` on any command? Switch to the **`harumi-cli-setup`** skill — it covers install method selection, environment selection, the interactive OTP login (never automate this), and diagnosing a broken install. Come back here once `harumi whoami` succeeds.
+1. Check CLI is installed: `harumi --version`. Not installed, not on PATH, or `You're not logged in.` / `Your Harumi session has expired.` (both tell you to run `harumi login`) on any command? Switch to the **`harumi-cli-setup`** skill — it covers install method selection, environment selection, the interactive OTP login (never automate this), and diagnosing a broken install. Come back here once `harumi whoami` succeeds.
 2. `harumi login` also provisions a per-user Gitea token via `POST /api/git/credentials`, stored in `~/.harumi/environments/<env>/credentials.json`.
 
 ## The always-bound-repo invariant
