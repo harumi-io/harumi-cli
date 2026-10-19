@@ -3233,7 +3233,7 @@ def test_skill_path_and_profile_show_are_deprecated_not_gone(api):
     assert "dev@harumi.test" in shown.output
 
 
-def test_whoami_shows_the_profile_environment_and_org(api):
+def test_whoami_shows_the_profile_and_org_but_not_the_environment_to_a_production_user(api):
     api.route(
         "GET",
         "/api/users/profile",
@@ -3243,8 +3243,9 @@ def test_whoami_shows_the_profile_environment_and_org(api):
     result = runner.invoke(cli.app, ["whoami", "--org", "org-7"])
 
     assert result.exit_code == 0, result.output
-    for expected in ("dev@harumi.test", "u1", "Ada Lovelace", "Math", "org-7", "env:"):
+    for expected in ("dev@harumi.test", "u1", "Ada Lovelace", "Math", "org-7"):
         assert expected in result.output
+    assert "env:" not in result.output  # production is the only thing most people ever use
 
 
 def test_new_no_clone_creates_only_and_points_at_clone(api, git_ops, tmp_path, monkeypatch):
