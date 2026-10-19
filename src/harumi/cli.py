@@ -705,10 +705,32 @@ def login(
 
 
 def _stored_email() -> Optional[str]:
-    """The email of the session on file, offered as the prompt's default."""
-    creds = load_credentials()
-    email = (creds or {}).get("email")
-    return email if isinstance(email, str) and email else None
+    """An email to offer as the prompt's default: the active environment's session if
+    there is one, else any other environment's.
+
+    The second case matters for staff: each environment has its own session, so the
+    first login to staging would otherwise have nothing to suggest even though they
+    are signed in to production with the same address. It is only a suggestion; they
+    can type another.
+    """
+    from harumi.config import credentials_path
+
+    active = load_credentials()
+    candidates = [active] if active else []
+    for name in ENVIRONMENTS:
+        if name == active_environment():
+            continue
+        try:
+            data = json.loads(credentials_path(name).read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            candidates.append(data)
+    for creds in candidates:
+        email = creds.get("email")
+        if isinstance(email, str) and email:
+            return email
+    return None
 
 
 def _choose_login_environment(
@@ -992,10 +1014,9 @@ def _ago(when: Optional[datetime]) -> str:
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
     seconds = (datetime.now(timezone.utc) - when).total_seconds()
-    if seconds < 0:
-        return "just now"  # a clock a little ahead of the server's
+    if seconds < 60:
+        return "just now"  # also a clock a little ahead of the server's
     for limit, unit_seconds, unit in (
-        (60, 1, "second"),
         (3600, 60, "minute"),
         (86400, 3600, "hour"),
         (86400 * 30, 86400, "day"),
@@ -1003,8 +1024,6 @@ def _ago(when: Optional[datetime]) -> str:
     ):
         if seconds < limit:
             n = int(seconds // unit_seconds)
-            if unit == "second":
-                return "just now"
             return f"{n} {unit}{'' if n == 1 else 's'} ago"
     n = int(seconds // (86400 * 365))
     return f"{n} year{'' if n == 1 else 's'} ago"
@@ -1025,10 +1044,14 @@ def _recent_first(projects):
     return sorted(projects, key=key, reverse=True)
 
 
-def _workspace_names() -> dict[str, str]:
-    """Organization id -> name, for labelling projects. Empty if it can't be fetched."""
+def _workspace_names(client: Client) -> dict[str, str]:
+    """Organization id -> name, for labelling projects. Empty if it can't be fetched.
+
+    Takes the caller's client rather than building one: `--api-url` and `--org` apply
+    to the whole command, so the names must come from the API the projects came from.
+    """
     try:
-        return {o.id: o.business_name for o in _get_client().list_organizations()}
+        return {o.id: o.business_name for o in client.list_organizations()}
     except HarumiError:
         return {}
 
@@ -1160,8 +1183,10 @@ def env_removed() -> None:
     """Removed: Harumi staff pick their environment when they log in."""
     _fail(
         "`harumi env` was removed. Harumi staff choose an environment when they run "
-        "[bold]harumi login[/bold] (that choice is remembered), and "
-        "[bold]harumi --env staging <command>[/bold] runs a single command elsewhere."
+        "[bold]harumi login[/bold] (that choice is remembered).\n"
+        "For scripts and CI, where there is no one to ask: set [bold]HARUMI_ENV=staging[/bold] "
+        "(for example in the job's environment) to use it for every command, or pass "
+        "[bold]--env staging[/bold] to a single one."
     )
 
 
@@ -1260,11 +1285,15 @@ def org_use(
             return
         if picked == PERSONAL_WORKSPACE:
             config.clear_org_id()
+            console.print("Workspace set to your [bold]personal[/bold] workspace.")
             return
         org_id = str(picked)
+        label = next((o.business_name for o in orgs if o.id == org_id), org_id)
+    else:
+        label = org_id
 
     config.save_org_id(org_id)
-    console.print(f"Organization set to [bold]{escape(org_id)}[/bold].")
+    console.print(f"Workspace set to organization [bold]{escape(label)}[/bold].")
 
 
 config_app.command("set-org")(_deprecated("harumi config set-org", "harumi org use <ORG_ID>")(org_use))
@@ -1549,7 +1578,7 @@ def _pick_project(client: Client, *, action: str) -> Optional[str]:
     if not projects:
         _fail("You have no projects yet. Run [bold]harumi new <NAME>[/bold] to create one.")
     projects = _recent_first(projects)
-    names = _workspace_names() if len({p.customer_id for p in projects}) > 1 else {}
+    names = _workspace_names(client) if len({p.customer_id for p in projects}) > 1 else {}
     options = [
         interactive.Option(
             p.name,
@@ -2175,7 +2204,7 @@ def projects_list(
 
     projects = _recent_first(projects)
     shown = projects[:limit] if limit else projects
-    names = _workspace_names() if len({p.customer_id for p in projects}) > 1 else {}
+    names = _workspace_names(client) if len({p.customer_id for p in projects}) > 1 else {}
 
     columns = ["id", "name", "updated"] + (["workspace"] if names else []) + ["kernel_spec", "role"]
     table = Table(*columns)
@@ -2425,12 +2454,15 @@ def runs_list(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
-    limit: int = typer.Option(
-        RUNS_SHOWN, "--limit", "-n", min=1, help="How many of the latest runs to show. Use --all for every run."
+    limit: Optional[int] = typer.Option(
+        None, "--limit", "-n", min=1, help=f"How many of the latest runs to show (default {RUNS_SHOWN}). Use --all for every run."
     ),
     all_: bool = typer.Option(False, "--all", help="Show every run, however many there are."),
 ) -> None:
     """List runs for a project, newest first (the latest 25 unless you ask for more)."""
+    if all_ and limit is not None:
+        # Even `--limit 25 --all`: two ways of saying how many must not quietly disagree.
+        _fail("--limit and --all are mutually exclusive. Pass only one.")
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -2439,7 +2471,7 @@ def runs_list(
         console.print("No runs found.")
         return
 
-    shown = runs if all_ else runs[:limit]
+    shown = runs if all_ else runs[: limit or RUNS_SHOWN]
     table = Table("id", "status", "source", "git_branch", "started", "ended")
     for r in shown:
         table.add_row(

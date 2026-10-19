@@ -310,3 +310,29 @@ def test_the_gitea_username_is_no_longer_printed_on_success(monkeypatch, capsys)
     out = capsys.readouterr().out
     assert "u-440ac9f5" not in out
     assert "provisioned" not in out
+
+
+# -- review findings: org use confirms what it saved ----------------------------------------------
+
+
+def test_org_use_menu_says_which_organization_it_saved_by_name(memberships, terminal, monkeypatch):
+    memberships["orgs"] = [ORG_A, ORG_B]
+    _menu(monkeypatch, ORG_B.id)
+
+    result = runner.invoke(cli.app, ["org", "use"])
+
+    assert result.exit_code == 0, result.output
+    assert "IVECO - Test" in result.output, "named only the raw id, or nothing"
+    assert saved_org() == ORG_B.id
+
+
+def test_org_use_menu_says_when_it_switched_to_personal(memberships, terminal, monkeypatch):
+    memberships["orgs"] = [ORG_A]
+    Config.load().save_org_id(ORG_A.id)
+    _menu(monkeypatch, cli.PERSONAL_WORKSPACE)
+
+    result = runner.invoke(cli.app, ["org", "use"])
+
+    assert result.exit_code == 0, result.output
+    assert "personal" in result.output, "switched silently"
+    assert saved_org() is None
