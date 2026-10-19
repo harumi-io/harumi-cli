@@ -248,7 +248,7 @@ def test_projects_list_admits_it_when_the_server_has_more_than_could_be_fetched(
 def test_the_workspace_column_appears_only_when_projects_span_workspaces(server, monkeypatch):
     s = server(0)
     s.rows = [_row(1, customer_id=None), _row(2, customer_id="org-a"), _row(3, customer_id="org-a")]
-    monkeypatch.setattr(cli, "_workspace_names", lambda: {"org-a": "Acme Corp"})
+    monkeypatch.setattr(cli, "_workspace_names", lambda client: {"org-a": "Acme Corp"})
 
     mixed = runner.invoke(cli.app, ["projects", "list"])
 
@@ -399,3 +399,65 @@ def test_the_picker_orders_by_activity_too(server, monkeypatch):
     runner.invoke(cli.app, ["clone"])
 
     assert [o.value for o in seen["o"]] == ["proj-0001", "proj-0002"]
+
+
+# -- review findings -------------------------------------------------------------------------------------
+
+
+def test_limit_and_all_together_are_refused_even_when_limit_equals_the_default(runs):
+    """Two ways of saying how many must not quietly disagree. `--limit 25 --all` is the
+    sneaky one: a check against the default value would let it through."""
+    runs(60)
+
+    for args in (["--limit", "5", "--all"], ["--limit", "25", "--all"], ["-n", "1", "--all"]):
+        result = runner.invoke(cli.app, ["runs", "list", "--project", "p", *args])
+        assert result.exit_code == 1, args
+        assert "mutually exclusive" in result.output
+        assert "run-" not in result.output
+
+
+def test_runs_list_still_shows_25_by_default_and_all_with_all(runs):
+    runs(60)
+    assert runner.invoke(cli.app, ["runs", "list", "--project", "p"]).output.count("run-") == 25
+    assert runner.invoke(cli.app, ["runs", "list", "--project", "p", "--all"]).output.count("run-") == 60
+
+
+def test_workspace_names_come_from_the_api_the_projects_came_from(monkeypatch):
+    """The bug: `--api-url` pointed the project list at one stack while the organization
+    names were looked up on the default one. Two servers answer here; every request must
+    go to the one that was chosen, and the names shown must be that one's."""
+    chosen, default = [], []
+
+    def make_handler(log, org_name):
+        def handler(request: httpx.Request) -> httpx.Response:
+            log.append(request.url.path)
+            if request.url.path.endswith("/users/organizations"):
+                return httpx.Response(200, json=[{"id": "org-a", "business_name": org_name}])
+            rows = [_row(1, customer_id=None), _row(2, customer_id="org-a")]
+            return httpx.Response(200, json={"projects": rows, "total_count": 2})
+
+        return handler
+
+    chosen_transport = httpx.MockTransport(make_handler(chosen, "ChosenCo"))
+    default_transport = httpx.MockTransport(make_handler(default, "DefaultCo"))
+
+    def get_client(api_url=None, git_url=None, org=None):
+        # What the real `_get_client` does: --api-url selects the server.
+        transport = chosen_transport if api_url == "http://localhost:8000/api" else default_transport
+        return Client(api_url=api_url or "https://api.harumi.io/api", org_id=org, transport=transport)
+
+    monkeypatch.setattr(cli, "_get_client", get_client)
+
+    result = runner.invoke(cli.app, ["projects", "list", "--api-url", "http://localhost:8000/api"])
+
+    assert result.exit_code == 0, result.output
+    assert default == [], f"talked to the default stack: {default}"
+    assert any(p.endswith("/users/organizations") for p in chosen), "never looked the organization up"
+    assert "ChosenCo" in result.output and "DefaultCo" not in result.output
+
+
+def test_a_clock_slightly_ahead_of_the_server_does_not_print_a_negative_age():
+    from datetime import datetime, timedelta, timezone
+
+    assert cli._ago(datetime.now(timezone.utc) + timedelta(seconds=30)) == "just now"
+    assert cli._ago(datetime.now(timezone.utc) - timedelta(seconds=59)) == "just now"

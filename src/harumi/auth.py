@@ -21,7 +21,7 @@ from typing import Optional
 import httpx
 
 from harumi.config import Config, clear_credentials, load_credentials, save_credentials
-from harumi.errors import ApiError, NotAuthenticatedError, transport_errors_as_api_error
+from harumi.errors import ApiError, NotAuthenticatedError, SessionRefreshError, transport_errors_as_api_error
 from harumi.models import LoggedUser
 
 # Refresh proactively if the access token expires within this many seconds,
@@ -77,7 +77,10 @@ def refresh_session(
         )
     if _session_refused(response.status_code):
         raise NotAuthenticatedError(expired=True, environment=config.environment)
-    _raise_for_status(response)
+    try:
+        _raise_for_status(response)
+    except ApiError as exc:
+        raise SessionRefreshError(exc.status_code, exc.detail) from exc
     user = LoggedUser.model_validate(response.json())
     _persist(user)
     return user
@@ -87,11 +90,19 @@ def logout() -> None:
     clear_credentials()
 
 
-def get_valid_access_token(config: Config, *, allow_refresh: bool = True) -> str:
+def get_valid_access_token(
+    config: Config,
+    *,
+    allow_refresh: bool = True,
+    transport: Optional[httpx.BaseTransport] = None,
+) -> str:
     """Return the stored access token, proactively refreshing only if it is
     at or near expiry. Reactive refresh-on-401 is handled by ApiClient; this
     just avoids a guaranteed-to-fail request when we already know we're
     expired. Raises NotAuthenticatedError if there is no session on file.
+
+    `transport` is the client's own, so a refresh goes where the request goes (a test's
+    fake server, a proxy); without it a refresh would use a default transport.
     """
     creds = load_credentials()
     if not creds or not creds.get("access_token"):
@@ -102,7 +113,7 @@ def get_valid_access_token(config: Config, *, allow_refresh: bool = True) -> str
 
     if allow_refresh and is_near_expiry and creds.get("refresh_token"):
         try:
-            user = refresh_session(config, creds["refresh_token"])
+            user = refresh_session(config, creds["refresh_token"], transport=transport)
             return user.access_token or creds["access_token"]
         except NotAuthenticatedError:
             # The refresh token was refused. If the access token is already past
@@ -138,10 +149,14 @@ def _persist(user: LoggedUser) -> None:
 def _session_refused(status_code: int) -> bool:
     """Whether a refresh response means "this session is finished".
 
-    Any 4xx except the two that describe the request's timing rather than the
-    token: 408 (timed out) and 429 (slow down).
+    harumi-api answers a refresh token it rejects with 422 (it turns every auth
+    failure into a validation error); 400 and 401 are the other ways an API says "that
+    token is no good". Nothing else is taken to mean it. A 403 or 404 can come from a
+    proxy or firewall in front of the API, and telling someone their session expired
+    then sends them into a login loop that cannot fix anything: those stay API errors,
+    with the response's own detail.
     """
-    return 400 <= status_code < 500 and status_code not in (408, 429)
+    return status_code in (400, 401, 422)
 
 
 def has_session() -> bool:

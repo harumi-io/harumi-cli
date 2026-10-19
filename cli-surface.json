@@ -3074,8 +3074,8 @@
           "type": "int range",
           "required": false,
           "multiple": false,
-          "default": 25,
-          "help": "How many of the latest runs to show. Use --all for every run."
+          "default": null,
+          "help": "How many of the latest runs to show (default 25). Use --all for every run."
         },
         {
           "opts": [
