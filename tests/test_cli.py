@@ -3064,7 +3064,9 @@ def test_skills_add_does_not_clobber_a_users_own_skill_of_the_same_name(api, bou
     result = runner.invoke(cli.app, ["skills", "add", "scheduling-modeling"])
 
     assert result.exit_code == 1
-    assert "not the library" in result.output
+    # The message starts with the file's path, so how it wraps depends on how long the
+    # temp directory is; compare the words, not the line breaks.
+    assert "not the library" in " ".join(result.output.split())
     assert mine.read_text().endswith("my own\n")
     # Refused before asking the API for anything.
     assert api.requests == []

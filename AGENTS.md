@@ -84,11 +84,23 @@ Status names: `To Do`, `In progress`, `In review`, `Done`. If one is rejected th
 the current options with `gh project field-list 4 --owner harumi-io`. If `item_id` is empty right after
 `item-add`, retry once.
 
+### What each Status means
+
+| Status | Means |
+| --- | --- |
+| `To Do` | Not started, or paused or dropped. Nobody is working on it. |
+| `In progress` | Someone is working on it: a local or pushed branch, a draft PR, or a PR that only `Refs` the issue (part of the work). |
+| `In review` | All the code that closes the issue is pushed in a non-draft PR (or merged) and is meant to be complete, but has not been reviewed or shown to work. Never for a draft, a partial PR or work that exists only locally. |
+| `Done` | Merged and shown to work, or closed as not needed. |
+
 ### Link the PR and keep Status true
 
 - The PR body names the issue: `Closes #123`, or `Closes harumi-io/<repo>#123` across repos. Use
   `Refs` when the PR only delivers part. For a PR that already exists, `gh pr edit --body`.
-- PR ready for review: **In review**. Merged or closed: **Done**.
+- Status follows the work, not the PR. A draft PR, or one that only `Refs` the issue, stays
+  **In progress**. Set **In review** only when the PR is not a draft and holds all the code that
+  closes the issue. Merged: GitHub moves it to **Done**; if it was never shown to work, put it
+  back to **In review** and say what is unverified.
 - Built-in board workflows move some cards by themselves (closed or merged goes to Done). After each
   step read the card's Status and set it only if it is wrong.
 - Work paused or dropped: back to **To Do**, unassign if appropriate, and say so.
