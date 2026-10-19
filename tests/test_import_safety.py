@@ -168,7 +168,7 @@ def test_the_exclusions_are_written_locally_and_never_touch_the_users_gitignore(
 
     assert (folder / ".gitignore").read_text() == "build/\n"
     local = (folder / ".git" / "info" / "exclude").read_text()
-    assert ".env" in local and ".venv/" in local and "not part of your project" in local
+    assert "[eE][nN][vV]" in local and ".venv/" in local and "not part of your project" in local
 
 
 def test_importing_twice_does_not_duplicate_the_local_exclude_block(tmp_path):
@@ -263,7 +263,8 @@ def test_import_shows_what_it_uploads_and_what_it_leaves_out(world, tmp_path):
 def test_import_passes_the_exclusions_to_the_push(world, tmp_path):
     runner.invoke(cli.app, ["import", str(messy_folder(tmp_path)), "--yes"])
 
-    assert world.pushed and ".env" in world.pushed[0]["exclude"] and ".venv/" in world.pushed[0]["exclude"]
+    assert world.pushed and world.pushed[0]["exclude"] == import_excludes()
+    assert ".venv/" in world.pushed[0]["exclude"]
 
 
 def test_a_tracked_secret_is_a_loud_warning(world, tmp_path):

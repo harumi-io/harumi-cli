@@ -379,10 +379,20 @@ LARGE_FILE_BYTES = 50 * 1024 * 1024
 _MARKER = "# harumi import (local; not part of your project)"
 
 
+def _any_case(pattern: str) -> str:
+    """A gitignore pattern that matches whatever the letter case: `*.pem` -> `*.[pP][eE][mM]`.
+
+    Git's patterns compare exactly on a case-sensitive filesystem (Linux, and macOS or
+    Windows volumes set up that way), so `.ENV` would slip past `.env` there. Only letters
+    change; `*`, `.` and the rest stay as they are.
+    """
+    return "".join(f"[{c.lower()}{c.upper()}]" if c.isalpha() else c for c in pattern)
+
+
 def import_excludes() -> list[str]:
     """The gitignore-syntax patterns `harumi import` adds, in order."""
-    patterns = [f"{d}/" for d in JUNK_DIRS] + list(SECRET_GLOBS)
-    patterns += [f"!{name}" for name in SECRET_OK]
+    patterns = [f"{d}/" for d in JUNK_DIRS] + [_any_case(g) for g in SECRET_GLOBS]
+    patterns += [f"!{_any_case(name)}" for name in SECRET_OK]
     return patterns + list(_QUIET_EXCLUDES)
 
 

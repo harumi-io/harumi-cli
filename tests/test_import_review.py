@@ -126,6 +126,18 @@ def test_at_a_terminal_the_person_is_still_asked_and_the_default_is_no(world, tm
 # -- names ------------------------------------------------------------------------------------------
 
 
+@pytest.fixture
+def case_sensitive_git(monkeypatch):
+    """Make git compare names exactly, as it does on Linux and on case-sensitive volumes.
+
+    On the default macOS and Windows filesystems git folds case, so `.ENV` matched the
+    `.env` exclude by accident and these tests passed there while failing on Linux CI.
+    """
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.ignorecase")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
+
+
 @pytest.mark.parametrize("path", [".ENV", ".Env.Local", "Server.PEM", "TLS/Server.Key", "ID_RSA", "Id_Ed25519.pub", "A.P12"])
 def test_secret_names_are_matched_whatever_their_case(path):
     assert looks_like_secret(path)
@@ -136,7 +148,7 @@ def test_an_example_file_is_still_fine_in_any_case():
 
 
 @pytest.mark.parametrize("name", [".ENV", "Server.PEM", "ID_RSA"])
-def test_an_uppercase_secret_is_reported_and_not_uploaded(tmp_path, name):
+def test_an_uppercase_secret_is_reported_and_not_uploaded(tmp_path, name, case_sensitive_git):
     """On a case-sensitive filesystem git's own matching would have uploaded these."""
     f = tmp_path / "p"
     f.mkdir()
@@ -147,6 +159,42 @@ def test_an_uppercase_secret_is_reported_and_not_uploaded(tmp_path, name):
 
     assert plan.skipped_secrets == [name]
     assert plan.files == 1
+
+
+@pytest.mark.parametrize("name", [".ENV", ".Env.Local", "Server.PEM", "ID_RSA", "Id_Ed25519", "Keys/Deploy.KEY", "A.P12"])
+def test_an_uppercase_secret_is_not_in_the_commit_that_is_pushed(tmp_path, name, case_sensitive_git):
+    """The preview and the push must agree. The names were being reported while the exclude
+    patterns, which compare exactly, still let them through on a case-sensitive filesystem."""
+    f = tmp_path / "p"
+    (f / "Keys").mkdir(parents=True)
+    (f / name).write_text("secret\n")
+    (f / "a.py").write_text("1\n")
+    remote = tmp_path / "remote.git"
+    remote.mkdir()
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True, capture_output=True)
+    sh_real = hgit.ensure_remote
+
+    try:
+        hgit.ensure_remote = lambda clone_url, username, token, name="harumi", cwd=None: sh("remote", "add", name, clone_url, cwd=cwd)
+        hgit.push_folder(f, clone_url=remote.as_posix(), username="u", token="t", branch="main", exclude=hgit.import_excludes())
+    finally:
+        hgit.ensure_remote = sh_real
+    pushed = subprocess.run(
+        ["git", "--git-dir", str(remote), "ls-tree", "-r", "--name-only", "main"], capture_output=True, text=True, check=True
+    ).stdout.split()
+
+    assert pushed == ["a.py"], f"a secret went up: {pushed}"
+
+
+def test_an_example_file_is_uploaded_whatever_its_case(tmp_path, case_sensitive_git):
+    f = tmp_path / "p"
+    f.mkdir()
+    (f / ".ENV.EXAMPLE").write_text("KEY=\n")
+    (f / "a.py").write_text("1\n")
+
+    plan = plan_import(f)
+
+    assert plan.files == 2 and plan.skipped_secrets == []
 
 
 def test_a_dot_env_directory_is_a_virtualenv_not_a_pile_of_secrets(tmp_path):
@@ -211,7 +259,7 @@ def test_start_option_two_imports_the_folder_it_is_pointed_at(world, tmp_path, a
     assert result.exit_code == 0, result.output
     assert "Left out" in out and ".env" in out  # the preview ran
     assert world.client.created == ["Routing"]
-    assert ".env" in world.pushed[0]["exclude"]
+    assert world.pushed[0]["exclude"] == hgit.import_excludes()  # the push is told what to leave out
 
 
 def test_start_option_two_will_not_import_a_tracked_secret_just_because_the_flow_is_menu_driven(world, tmp_path, at_terminal):  # noqa: F811
