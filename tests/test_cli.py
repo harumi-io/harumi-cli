@@ -651,7 +651,7 @@ def test_a_non_string_status_or_api_url_in_config_json_does_not_crash_the_error_
     config = Config.load()
     assert config.api_url == "https://api.harumi.io/api"
     assert config.org_id is None
-    assert active_platform_url() == "https://platform.harumi.io"
+    assert active_platform_url() == "https://app.harumi.io"
 
 
 @pytest.mark.parametrize("value", [["staging"], {"a": 1}, 5, True])
@@ -3064,7 +3064,9 @@ def test_skills_add_does_not_clobber_a_users_own_skill_of_the_same_name(api, bou
     result = runner.invoke(cli.app, ["skills", "add", "scheduling-modeling"])
 
     assert result.exit_code == 1
-    assert "not the library" in result.output
+    # The message starts with the file's path, so how it wraps depends on how long the
+    # temp directory is; compare the words, not the line breaks.
+    assert "not the library" in " ".join(result.output.split())
     assert mine.read_text().endswith("my own\n")
     # Refused before asking the API for anything.
     assert api.requests == []
