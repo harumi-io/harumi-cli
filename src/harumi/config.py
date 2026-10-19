@@ -122,6 +122,9 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
     target, which is atomic. `mkstemp` creates the file owner-only (0600) from the
     start, so the secrets inside are never readable by others, not even briefly.
     """
+    # Write to what a symlink points at, so a credentials file kept in a dotfiles repo
+    # and linked into ~/.harumi stays a link instead of being replaced by a copy.
+    path = path.resolve() if path.is_symlink() else path
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(data, indent=2, default=str)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")

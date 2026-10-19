@@ -158,14 +158,14 @@ The resolved org is sent as the `X-Organization` header on every request, and is
 
 ```bash
 harumi --version    # prints `harumi <x.y.z>` — not another tool (see step 1)
-harumi whoami       # session is valid — prints email, user id, active environment and org
+harumi whoami       # session is valid — prints email, user id and org (plus `env: staging` when not on production; no `env:` means production)
 harumi specs        # confirms real API reachability + lists kernel sizes
 harumi projects list
 ```
 
 `harumi whoami` and `harumi specs` are the checks that actually prove the install: they require both the real binary and a valid session, so they can't be faked by a same-named tool.
 
-`harumi whoami` failing with `Not logged in. Run harumi login first.` means step 3 didn't complete (or the session expired). `harumi specs` failing with a network/timeout error on a `*.dev.harumi.io` host means the VPN isn't connected.
+`harumi whoami` failing with `You're not logged in. Run `harumi login` ...` means step 3 didn't complete; `Your Harumi session has expired. Run `harumi login` ...` means the session ended. Either way: `harumi login`. A message starting `Could not renew your login` is not a logout: something (a firewall or proxy, or an outage) is blocking the token refresh, and logging in again will not fix it. `harumi specs` failing with a network/timeout error on a `*.dev.harumi.io` host means the VPN isn't connected.
 
 Setup is done once `whoami` and `specs` both succeed. Hand off to the `harumi-cli` skill for the actual work — the next step there is usually one of the three onboarding verbs (`harumi new`, `harumi import`, or `harumi clone <PROJECT_ID>`), or `harumi start` if it's unclear which applies.
 
@@ -229,7 +229,8 @@ Tell the user which of these you're doing rather than silently working around it
 | Installed fine, but `import harumi` fails in the user's script | Installed with pipx/uv, which isolate the CLI from other interpreters | That's expected. For library use, `pip install harumi` into the venv running the code — the two installs can coexist |
 | `pipx: command not found` | pipx not installed | `brew install pipx` (macOS), `python3 -m pip install --user pipx`, or choose another method from step 1 |
 | `git not found` on `harumi run` / `harumi import`/`new`/`clone` | git missing from PATH | Install git |
-| `Not logged in. Run harumi login first.` | No session, or it expired, for the **active** environment | `harumi login` (check `harumi whoami` — you may be logged in on the other env) |
+| `You're not logged in.` / `Your Harumi session has expired.` (both say to run `harumi login`; on staging they say "on staging") | No session, or it ended, for the **active** environment | `harumi login` (check `harumi whoami` — you may be logged in on the other env) |
+| `Could not renew your login: harumi-api returned HTTP 403 ...` | The token refresh was blocked or the API failed; the session itself may be fine | Check the network, VPN or proxy and retry; do not loop on `harumi login` |
 | `harumi-api returned HTTP 422: ... Signups not allowed for otp` | First login for this email | `harumi login --signup` |
 | `Could not provision a Gitea token: ...` (yellow, non-fatal) | Harumi Git unreachable or not configured on that backend | Non-git commands still work; re-run `harumi login` once reachable |
 | `No Gitea token found. Run harumi login` | `git_token` missing from credentials | `harumi login` again |

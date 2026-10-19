@@ -390,3 +390,108 @@ def test_the_proactive_refresh_goes_through_the_lock_and_the_clients_transport(m
 
     assert token == "fresh" and seen == ["/api/users/refresh"]
     assert on_disk()["refresh_token"] == "r2" and GIT_KEYS <= set(on_disk())
+
+
+# -- the token a request was signed with: after the proactive refresh, not before -------------------------
+
+
+def _revoking_server(revoked: str):
+    """Refresh works (and rotates); the access token `revoked` is rejected forever."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.url.path, request.headers.get("authorization")))
+        if request.url.path.endswith("/users/refresh"):
+            n = sum(1 for p, _ in calls if p.endswith("/users/refresh"))
+            return httpx.Response(
+                200,
+                json={"id": "u1", "email": "ana@example.com", "access_token": f"fresh{n}", "refresh_token": f"r{n + 1}", "expires_at": int(time.time()) + 3600},
+            )
+        return httpx.Response(401 if request.headers.get("authorization") == f"Bearer {revoked}" else 200, json={"ok": True})
+
+    return httpx.MockTransport(handler), calls
+
+
+def test_a_revoked_token_after_a_proactive_refresh_is_renewed_again_not_reported_as_a_logout():
+    """The access token is expired, so building the request renews the session (the
+    refresh token rotates r1 -> r2). The server then revokes the token it was given. The
+    renewal that follows has to be judged against r2, the session the request was signed
+    with. Judged against r1 it looks as though a rival already renewed, so nothing is
+    refreshed and the retry repeats the 401: a login problem one more refresh would fix."""
+    log_in(expires_in=-100, refresh="r1", access="old")
+    transport, calls = _revoking_server(revoked="fresh1")
+
+    response = ApiClient(Config.load(), transport=transport).request("GET", "/users/profile")
+
+    assert response.status_code == 200
+    assert [a for p, a in calls if not p.endswith("/users/refresh")] == ["Bearer fresh1", "Bearer fresh2"]
+    assert sum(1 for p, _ in calls if p.endswith("/users/refresh")) == 2
+    assert on_disk()["refresh_token"] == "r3"
+
+
+def test_the_same_holds_for_a_download_stream():
+    log_in(expires_in=-100, refresh="r1", access="old")
+    transport, calls = _revoking_server(revoked="fresh1")
+
+    with ApiClient(Config.load(), transport=transport).stream("GET", "/files/x") as response:
+        assert response.status_code == 200
+
+    assert [a for p, a in calls if not p.endswith("/users/refresh")] == ["Bearer fresh1", "Bearer fresh2"]
+
+
+def test_a_rival_renewing_between_the_proactive_refresh_and_the_send_is_still_adopted(monkeypatch):
+    """The other side of the same boundary: the token read after building the headers must
+    still defer to a rival who renews in the gap before the 401 comes back."""
+    log_in(expires_in=-100, refresh="r1", access="old")
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/users/refresh"):
+            return httpx.Response(200, json={"id": "u1", "email": "ana@example.com", "access_token": "mine", "refresh_token": "r2", "expires_at": int(time.time()) + 3600})
+        seen.append(request.headers.get("authorization"))
+        if len(seen) == 1:  # a rival renews while our request is in flight, then ours is refused
+            config.save_credentials(access_token="rival", refresh_token="r3", email="ana@example.com", expires_at=int(time.time()) + 3600)
+            return httpx.Response(401, json={"detail": "x"})
+        return httpx.Response(200, json={"ok": True})
+
+    real = auth.refresh_session
+    refreshes = []
+    monkeypatch.setattr(auth, "refresh_session", lambda *a, **k: refreshes.append(a[1]) or real(*a, **k))
+
+    assert ApiClient(Config.load(), transport=httpx.MockTransport(handler)).request("GET", "/users/profile").status_code == 200
+    assert seen == ["Bearer mine", "Bearer rival"]
+    assert refreshes == ["r1"], f"spent a refresh token the rival had already replaced: {refreshes}"
+
+
+# -- a symlinked credentials file stays a symlink --------------------------------------------------------
+
+
+def test_a_refresh_writes_through_a_symlinked_credentials_file(tmp_path):
+    """People keep credentials in a dotfiles repo and link them in. Replacing the link
+    with a copy on every refresh leaves the repo's file stale and the link gone."""
+    dotfiles = tmp_path / "dotfiles"
+    dotfiles.mkdir()
+    real = dotfiles / "credentials.json"
+    real.write_text(json.dumps({"access_token": "a1", "refresh_token": "r1", "git_token": "keep-me"}))
+    link = config.credentials_path()
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(real)
+
+    config.save_credentials(access_token="a2", refresh_token="r2")
+
+    assert link.is_symlink(), "the link was replaced by a regular file"
+    assert json.loads(real.read_text()) == {"access_token": "a2", "refresh_token": "r2", "git_token": "keep-me"}
+    assert [p.name for p in dotfiles.iterdir() if p.name.endswith(".tmp")] == []
+    assert real.stat().st_mode & 0o777 == 0o600
+
+
+def test_a_dangling_symlink_is_written_through_too(tmp_path):
+    target = tmp_path / "elsewhere" / "credentials.json"
+    target.parent.mkdir()
+    link = config.credentials_path()
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(target)  # the file it points at does not exist yet
+
+    config.save_credentials(access_token="a", refresh_token="r")
+
+    assert link.is_symlink() and json.loads(target.read_text())["refresh_token"] == "r"

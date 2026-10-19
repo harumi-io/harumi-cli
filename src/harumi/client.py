@@ -91,9 +91,11 @@ class ApiClient:
     def _refresh_token_in_use() -> Optional[str]:
         """The refresh token of the session a request is about to be sent with.
 
-        Recorded *before* sending. If the server then says 401, renewal is judged against
-        this, not against whatever the file holds by then: another process may already
-        have renewed, and its fresh token must be adopted, not spent as if it were stale.
+        Recorded once the request is signed and before it is sent. If the server then says
+        401, renewal is judged against this, not against whatever the file holds by then:
+        another process may already have renewed, and its fresh token must be adopted, not
+        spent as if it were stale. Recorded *after* the headers are built because building
+        them can itself renew the session, and the request carries the renewed one.
         """
         return (auth.current_credentials() or {}).get("refresh_token") or None
 
@@ -116,8 +118,10 @@ class ApiClient:
         **kwargs: Any,
     ) -> httpx.Response:
         url = f"{self.config.api_url}{path}"
-        sent_with = self._refresh_token_in_use()
         headers = self._headers()
+        # After the headers: building them can renew an expired session (rotating the
+        # refresh token), and what matters is the session this request was signed with.
+        sent_with = self._refresh_token_in_use()
         headers.update(kwargs.pop("headers", {}) or {})
 
         with transport_errors_as_api_error(), httpx.Client(
@@ -166,8 +170,8 @@ class ApiClient:
         from an unrelated request made inside the block.
         """
         url = f"{self.config.api_url}{path}"
-        sent_with = self._refresh_token_in_use()
         headers = self._headers()
+        sent_with = self._refresh_token_in_use()  # after the headers: see `request`
 
         with httpx.Client(timeout=timeout or self.timeout, transport=self.transport) as client, ExitStack() as stack:
             # Only *opening* the stream means "could not reach harumi-api". A failure while the
