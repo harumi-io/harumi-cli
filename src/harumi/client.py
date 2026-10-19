@@ -88,7 +88,7 @@ class ApiClient:
         self.transport = transport
 
     def _headers(self) -> dict[str, str]:
-        token = auth.get_valid_access_token(self.config, allow_refresh=True)
+        token = auth.get_valid_access_token(self.config, allow_refresh=True, transport=self.transport)
         headers = {"Authorization": f"Bearer {token}"}
         if self.config.org_id:
             headers["X-Organization"] = self.config.org_id

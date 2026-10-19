@@ -310,3 +310,37 @@ def test_a_forced_colour_environment_does_not_get_the_animated_line(backend, mon
     assert result.exit_code == 0, result.output
     assert "Waiting for run run-1" in result.output  # the plain, log-friendly path
     assert "running" in result.output
+
+
+# -- a login problem is never blamed on the project ------------------------------------------------------
+
+
+@pytest.mark.parametrize("refresh_status", [400, 403, 404, 409, 422, 500])
+def test_a_failed_token_refresh_is_never_blamed_on_the_project(monkeypatch, refresh_status):
+    """The token refresh that runs before `execute` can fail with any status. If it came
+    back 404 or 422, `run` used to read that as "something is wrong with the project" and
+    send the user to `harumi check`, when it was their login (or a firewall in front of the
+    API) all along."""
+    from harumi import auth
+    from harumi.errors import SessionRefreshError
+
+    def refresh_fails(config_, token, transport=None):
+        raise SessionRefreshError(refresh_status, "refresh went wrong")
+
+    monkeypatch.setattr(auth, "refresh_session", refresh_fails)
+    config.save_credentials(access_token="stale", refresh_token="r", email="ana@example.com", expires_at=1)
+    monkeypatch.setattr(
+        cli,
+        "_get_client",
+        lambda *a, **k: Client(
+            api_url="https://api.harumi.io/api",
+            transport=httpx.MockTransport(lambda r: httpx.Response(401, json={"detail": "expired"})),
+        ),
+    )
+
+    result = _run()
+
+    out = " ".join(result.output.split())
+    assert result.exit_code == 1
+    assert "Could not renew your login" in out
+    assert "harumi check" not in out, "blamed the project for a login problem"
