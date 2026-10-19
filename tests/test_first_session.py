@@ -11,6 +11,17 @@ from harumi.models import LoggedUser
 
 runner = CliRunner()
 
+_ANSI = __import__("re").compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def plain(text: str) -> str:
+    """Output as a person reads it: styling codes removed, whitespace collapsed.
+
+    Whether rich emits colour depends on the environment (CI sets GITHUB_ACTIONS; a
+    developer's shell may set NO_COLOR), so assertions about wording must not see it.
+    """
+    return " ".join(_ANSI.sub("", text).split())
+
 
 @pytest.fixture(autouse=True)
 def home(tmp_path, monkeypatch):
@@ -148,7 +159,7 @@ def test_an_unknown_email_says_so_in_words_and_offers_signup(monkeypatch):
     result = login()
 
     assert result.exit_code == 1
-    out = " ".join(result.output.split())
+    out = plain(result.output)
     assert "no Harumi account for ana@example.com" in out and "harumi login --signup" in out
     assert "HTTP" not in out and "Signups not allowed" not in out
 
@@ -162,12 +173,12 @@ def test_other_refusals_of_the_email_are_not_mistaken_for_a_missing_account(monk
     result = login()
 
     assert result.exit_code == 1
-    assert "invalid format" in " ".join(result.output.split())
+    assert "invalid format" in plain(result.output)
     assert "no Harumi account" not in result.output
 
 
 def test_login_help_does_not_quote_the_servers_error_string():
-    out = runner.invoke(cli.app, ["login", "--help"]).output
+    out = plain(runner.invoke(cli.app, ["login", "--help"]).output)
     assert "--signup" in out and "Signups not allowed" not in out
 
 
@@ -175,17 +186,17 @@ def test_login_help_does_not_quote_the_servers_error_string():
 
 
 def test_help_is_the_same_as_dash_dash_help():
-    assert runner.invoke(cli.app, ["help"]).output == runner.invoke(cli.app, ["--help"]).output
+    assert plain(runner.invoke(cli.app, ["help"]).output) == plain(runner.invoke(cli.app, ["--help"]).output)
 
 
 def test_help_for_a_command_is_that_commands_help():
     got = runner.invoke(cli.app, ["help", "run"])
-    assert got.exit_code == 0 and got.output == runner.invoke(cli.app, ["run", "--help"]).output
+    assert got.exit_code == 0 and plain(got.output) == plain(runner.invoke(cli.app, ["run", "--help"]).output)
 
 
 def test_help_for_a_nested_command_works():
     got = runner.invoke(cli.app, ["help", "runs", "cancel"])
-    assert got.exit_code == 0 and got.output == runner.invoke(cli.app, ["runs", "cancel", "--help"]).output
+    assert got.exit_code == 0 and plain(got.output) == plain(runner.invoke(cli.app, ["runs", "cancel", "--help"]).output)
 
 
 def test_help_for_something_that_does_not_exist_says_so():
@@ -194,7 +205,7 @@ def test_help_for_something_that_does_not_exist_says_so():
 
 
 def test_help_is_not_advertised_in_the_command_list():
-    assert " help " not in runner.invoke(cli.app, ["--help"]).output
+    assert " help " not in plain(runner.invoke(cli.app, ["--help"]).output)
 
 
 # -- start --------------------------------------------------------------------------------------
