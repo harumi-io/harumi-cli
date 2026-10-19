@@ -11,12 +11,25 @@ from subdirectories of the project.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
+import tempfile
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
+
+try:  # POSIX
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None  # type: ignore[assignment]
+try:
+    import msvcrt
+except ImportError:  # POSIX
+    msvcrt = None  # type: ignore[assignment]
 
 
 @dataclass(frozen=True)
@@ -103,14 +116,100 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
+    """Write `data` to `path` so a reader (or a crash) never sees half a file.
+
+    Writes to a temporary file in the same directory, then renames it over the
+    target, which is atomic. `mkstemp` creates the file owner-only (0600) from the
+    start, so the secrets inside are never readable by others, not even briefly.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, default=str))
+    text = json.dumps(data, indent=2, default=str)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
     try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+    with contextlib.suppress(OSError):
+        # Best-effort on platforms without POSIX permission bits (e.g. some Windows filesystems).
         path.chmod(0o600)
+
+
+# One lock for the credentials file, shared by every harumi process on the machine.
+# A refresh token can be used once, so two processes that refresh at the same moment
+# would log each other out; this makes them take turns.
+_lock_state = threading.local()
+LOCK_TIMEOUT_SECONDS = 30.0
+
+
+def _lock_file(path: Path):
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return open(path, "a+b")
     except OSError:
-        # Best-effort on platforms without POSIX permission bits (e.g. some
-        # Windows filesystems). The file is still written.
-        pass
+        return None
+
+
+def _try_lock(handle, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            if fcntl is not None:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            elif msvcrt is not None:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                return False
+            return True
+        except OSError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.02)
+
+
+def _unlock(handle) -> None:
+    with contextlib.suppress(OSError):
+        if fcntl is not None:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+        elif msvcrt is not None:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+@contextlib.contextmanager
+def credentials_lock(timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[None]:
+    """Hold the credentials lock. Re-entrant within a thread.
+
+    If the lock cannot be taken (read-only home, an unsupported platform, or a wait
+    longer than `timeout`) this carries on without it rather than hanging: the
+    lock removes a race, it is not worth refusing to work for.
+    """
+    depth = getattr(_lock_state, "depth", 0)
+    if depth:
+        _lock_state.depth = depth + 1
+        try:
+            yield
+        finally:
+            _lock_state.depth -= 1
+        return
+
+    handle = _lock_file(credentials_path().with_name("credentials.json.lock"))
+    acquired = handle is not None and _try_lock(handle, timeout)
+    _lock_state.depth = 1
+    try:
+        yield
+    finally:
+        _lock_state.depth = 0
+        if handle is not None:
+            if acquired:
+                _unlock(handle)
+            handle.close()
 
 
 def _find_project_config(start: Optional[Path] = None) -> Optional[Path]:
@@ -416,16 +515,23 @@ def save_credentials(
     access_token: str,
     refresh_token: str,
     git_token: Optional[str] = None,
+    *,
+    replace: bool = False,
     **extra: Any,
 ) -> None:
-    data: dict[str, Any] = {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        **extra,
-    }
-    if git_token is not None:
-        data["git_token"] = git_token
-    _write_json(credentials_path(), data)
+    """Store the session.
+
+    By default only the session keys are updated and everything else in the file
+    (the git token, its URL and username) is kept, so a token refresh does not
+    log the user out of git. A fresh login passes `replace=True` so nothing from
+    a previous account survives.
+    """
+    with credentials_lock():
+        data: dict[str, Any] = {} if replace else _read_json(credentials_path())
+        data.update({"access_token": access_token, "refresh_token": refresh_token, **extra})
+        if git_token is not None:
+            data["git_token"] = git_token
+        _write_json(credentials_path(), data)
 
 
 def save_git_token(git_token: str, git_url: Optional[str] = None, username: Optional[str] = None) -> None:
@@ -437,14 +543,15 @@ def save_git_token(git_token: str, git_url: Optional[str] = None, username: Opti
     email here: emails contain `@`, which breaks unescaped basic-auth URLs
     (`https://user:token@host/...`) by introducing a second `@`.
     """
-    path = credentials_path()
-    creds = _read_json(path)
-    creds["git_token"] = git_token
-    if git_url:
-        creds["git_url"] = git_url
-    if username:
-        creds["git_username"] = username
-    _write_json(path, creds)
+    with credentials_lock():
+        path = credentials_path()
+        creds = _read_json(path)
+        creds["git_token"] = git_token
+        if git_url:
+            creds["git_url"] = git_url
+        if username:
+            creds["git_username"] = username
+        _write_json(path, creds)
 
 
 def load_git_token() -> Optional[str]:
