@@ -118,17 +118,17 @@ Lists project blueprints (`slug`, `name`, `description`) from `GET /blueprints`.
 
 ```
 harumi projects list [--limit N] [--api-url URL] [--org ORG]
-harumi projects get PROJECT_ID [--api-url URL] [--org ORG]
-harumi projects rename PROJECT_ID NAME [--api-url URL] [--org ORG]
-harumi projects rm PROJECT_ID [--yes] [--api-url URL] [--org ORG]
+harumi projects get [PROJECT_ID] [--api-url URL] [--org ORG]
+harumi projects rename [PROJECT_ID] [NAME] [--api-url URL] [--org ORG]
+harumi projects rm [PROJECT_ID] [--yes] [--api-url URL] [--org ORG]
 ```
 
-Creating a project is `harumi new` (`--no-clone` to only create it; see [new](#new)).
+With the id omitted, `get`, `rename` and `rm` open the project picker (most recently updated first); `rename` also asks for the new name, offering the current one; `rm` still requires typing the project's name afterwards, because choosing a row is not consent to delete it. With no terminal they fail listing the choices. Creating a project is `harumi new` (`--no-clone` to only create it; see [new](#new)).
 
 - **`list`**: `GET /projects`, following pages (200 at a time) until the server's `total_count` is reached, so accounts with hundreds of projects see all of them. Sorted **most recently updated first** (the server's own order is creation date; the CLI re-sorts). Table of `id`, `name`, `updated` ("3 days ago"), `workspace` (only when the projects span more than one workspace), `kernel_spec`, `role`. `--limit N` shows only the first N; any time rows are left out it says "Showing N of M projects". The project pickers (`clone` and others) use the same order and show age and workspace beside each name.
 - **`get`**: `GET /projects/{id}` → detail view.
 - **`rename`**: `PUT /projects/{id}` with `{name}`.
-- **`rm`**: `DELETE /projects/{id}`. Prompts you to type the exact project name to confirm unless `--yes`.
+- **`rm`**: `DELETE /projects/{id}`. Prompts you to type the exact project name to confirm unless `--yes`. With `--yes` the project id is required (no picker), so a slip in a list cannot delete a project.
 
 ## Onboarding: `new` / `import` / `clone` / `link` / `start`
 
@@ -137,11 +137,11 @@ Three journeys, three commands — plus the narrower `link` primitive and the in
 ### `new`
 
 ```
-harumi new NAME [--dir PATH] [--customer-id ID] [--personal] [--blueprint SLUG] [--no-clone]
+harumi new [NAME] [--dir PATH] [--customer-id ID] [--personal] [--blueprint SLUG] [--no-clone]
           [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
-Use when there's nothing yet.
+Use when there's nothing yet. With `NAME` omitted it asks for one at a terminal; with no terminal it fails showing `harumi new "My Project"`. When it finishes it prints the exact next step (`Next: cd my-project then harumi run --watch`, with a relative path when that is shorter).
 
 1. `POST /projects` to create the project (seeds a runnable `harumi.toml` + `main.py` + `dashboard.toml` server-side, or a blueprint's files if `--blueprint` is given — see `harumi blueprints`).
 2. `GET /projects/{id}/repo` to fetch the Gitea repo.
@@ -153,7 +153,7 @@ Use when there's nothing yet.
 ### `import`
 
 ```
-harumi import [PATH] [--project-name NAME] [--from-git URL] [--bind/--no-bind] [--personal]
+harumi import [PATH] [--project-name NAME] [--from-git URL] [--bind/--no-bind] [--personal] [--yes] [--include-tracked-secrets]
            [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
@@ -166,6 +166,10 @@ Use when you already have code on your machine — from anywhere: an old GitHub 
 | `--from-git` | Also clone this git URL (e.g. an old GitHub repo) flat into the folder — `.git` stripped, files copied alongside the existing ones — before pushing. On a filename collision the existing (folder's own) file wins; the CLI warns and lists the first few colliding paths. |
 | `--bind / --no-bind` | Bind the folder to the new project afterward. Default: `--bind`. |
 | `--personal` | Create the project in your personal workspace, ignoring the configured org. |
+| `--yes, -y` | Don't ask for a name or confirmation (use the folder name and go). Does **not** override the secret check below. |
+| `--include-tracked-secrets` | Upload secret-looking files that git already tracks or has in its history. Without it, a non-interactive import (no terminal, or `--yes`) stops with exit 1 instead. |
+
+**Before anything is created** `import` prints what it will upload (`Importing <folder>: 5 files, 2.9 MB`), then what it leaves out: virtual environments (`.venv`, `.env/`, `venv`), `node_modules`, `__pycache__` and similar, and files that look like secrets (`.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `id_rsa*` ... in any letter case), with a pointer to `harumi secrets set`. Templates such as `.env.example` are uploaded. The exclusions are written to the repo's local `.git/info/exclude` and stay there after the import (they are not removed if a later step fails, and an older block is not updated); the user's own `.gitignore` is never edited, and `.gitignore` rules are honoured. A secret-looking file that git **already tracks**, or that exists anywhere in the folder's **history** (even if deleted since), is uploaded, because the whole history is pushed as it is. At a terminal that gets a loud warning and the confirmation defaults to No; **without a terminal, or with `--yes`, the import refuses (exit 1) unless `--include-tracked-secrets` is given.** Detection is by file name only. Large files (50 MB and up) are called out. At a terminal it then asks for the project name (Enter accepts the folder name) and `Create the project and upload these files?`; without a terminal, or with `--yes`, it asks nothing (but see the secret refusal above). A folder that already has a `.harumi` binding is refused, because `import` always makes a *new* project: use `git push harumi <branch>` instead.
 
 Sequence:
 
@@ -196,7 +200,7 @@ harumi link [--project PROJECT_ID] [--api-url URL] [--git-url URL] [--org ORG]
 
 The narrower primitive underneath `clone` — binds an **already-checked-out** directory to a project, without cloning or fetching anything. For the rare case where the code is already on disk by hand (or you're re-binding after moving the folder).
 
-1. Calls `GET /projects/{id}/repo` (prompts you to pick from `harumi projects list` if `--project` is omitted).
+1. Calls `GET /projects/{id}/repo`. With `--project` omitted, a project picker opens at a terminal (with no terminal it fails listing the projects and naming `--project`).
 2. Writes `.harumi/config.json` in the current directory with `project_id` + repo metadata.
 3. Configures the `harumi` git remote with an authenticated HTTPS URL (requires a `git_token` in credentials from `harumi login` and the current directory to already be a git working tree — `link` warns and skips remote setup otherwise).
 
@@ -228,7 +232,7 @@ Requires the directory (or a parent) to be bound — via `harumi new`, `harumi i
 | `--kernel, -k` | Override the kernel spec (e.g. `or_python_small`, `gurobi_python_medium`). |
 | `--watch, -w` | Block until the run reaches a terminal status. |
 
-With `--watch`, a successful run ends by printing `harumi runs download <run-id>`. (`--output-dir` is deprecated: it still downloads, with a warning.)
+`run` prints `Running project <id> on branch <ref>` and then `Queued run <run-id>` (the run id is the UUID on that line; the internal execution-log id is no longer printed). With `--watch`: at a terminal one live line shows the status and the elapsed time; piped or logged it prints one line each time the status *changes*. Ctrl-C stops watching, never the run: it exits 130 and prints how to follow or cancel it. A succeeded run ends with `Run completed in 1m 12s.` and `harumi runs download <run-id>`; a failed, cancelled or timed-out run exits 1 and prints the cause first (error, exit code, the last 20 lines of stderr and how many were left out) and `harumi runs get <run-id>` for everything. If the server refuses the run for a reason about the project (HTTP 400, 404, 409 or 422), the message ends with `Run harumi check`. (`--output-dir` is deprecated: it still downloads, with a warning.)
 
 **Scratch-branch flow (default when tree is dirty or has unpushed commits):**
 
@@ -240,15 +244,15 @@ The CLI detects local changes, creates a temporary branch `harumi-scratch/<user>
 
 ```
 harumi runs list [--project ID] [--limit N | --all] [--api-url URL] [--org ORG]
-harumi runs get RUN_ID [--project ID] [--api-url URL] [--org ORG]
-harumi runs cancel RUN_ID [--project ID] [--api-url URL] [--org ORG]
+harumi runs get [RUN_ID] [--project ID] [--api-url URL] [--org ORG]
+harumi runs cancel [RUN_ID] [--project ID] [--api-url URL] [--org ORG]
 harumi runs download [RUN_ID] [--output-dir DIR] [--project ID] [--api-url URL] [--org ORG]
 ```
 
-- **`list`**: `GET /projects/{id}/runs` → table of `id`, `status`, `source`, `git_branch`, `started`, `ended`, newest first. Shows the latest 25 by default and says "Showing the latest 25 of N runs" when there are more; `--limit N` changes the count and `--all` shows every run.
-- **`get`**: `GET /projects/{id}/runs/{run_id}` → detail view plus `stdout`/`stderr`/`error` if present.
-- **`cancel`**: `POST /projects/{id}/runs/{run_id}/cancel` on an in-flight run.
-- **`download`**: downloads the run's output artifacts as a zip via `GET /projects/{id}/runs/{run_id}/output/archive` (proxied by the API from S3 for current runs, or Gitea for pre-migration runs). With no `RUN_ID` it takes the latest run (`GET /projects/{id}/runs`, newest first); errors if the project has no runs. `--output-dir` defaults to the current directory. Replaces `outputs --download` and `run --output-dir`.
+- **`list`**: `GET /projects/{id}/runs` → table of `id`, `status` (coloured), `source`, `branch`, `started` ("3 hours ago") and `took` ("1m 12s"), newest first. Shows the latest 25 by default and says "Showing the latest 25 of N runs" when there are more; `--limit N` changes the count and `--all` shows every run.
+- **`get`**: `GET /projects/{id}/runs/{run_id}` (no `RUN_ID`: the latest run) → a short summary (status and exit code, how long, code ref, command, kernel), then `stdout`, `stderr` and `error` if present, then the next step (`runs cancel` if it is still going, `runs download` if it left output). Output is printed literally, never read as markup.
+- **`cancel`**: `POST /projects/{id}/runs/{run_id}/cancel` on an in-flight run. With no `RUN_ID`, at a terminal, a picker offers only the runs still going (picking one is the confirmation); with no terminal it fails listing them and naming the `RUN_ID` argument. Cancelling a run that already finished says so instead of claiming a cancellation.
+- **`download`**: refuses a run that has not finished ("still running") and one that finished without output, each pointing at `runs get`; otherwise prints the zip's path and size. Downloads the run's output artifacts as a zip via `GET /projects/{id}/runs/{run_id}/output/archive` (proxied by the API from S3 for current runs, or Gitea for pre-migration runs). With no `RUN_ID` it takes the latest run (`GET /projects/{id}/runs`, newest first); errors if the project has no runs. `--output-dir` defaults to the current directory. Replaces `outputs --download` and `run --output-dir`.
 
 `--project` on every subcommand overrides the `.harumi` binding.
 
@@ -290,7 +294,7 @@ Commit once per change and push once; the old file-by-file commands made one ser
 harumi check [--ref REF] [--project ID] [--api-url URL] [--org ORG]
 ```
 
-`GET /projects/{id}/readiness?ref=` → everything blocking this project from running (repo exists, `harumi.toml` present and valid, kernel allowed), answered up front instead of surfacing as a 4xx from `run`/`schedules add`. Replaces `repo readiness`.
+`GET /projects/{id}/readiness?ref=` → everything blocking this project from running (repo exists, `harumi.toml` present and valid, kernel allowed), answered up front instead of surfacing as a 4xx from `run`/`schedules add`. Each check is shown by a readable name ("harumi.toml is valid"), then `Ready to run` with the next step, or `Not ready ...: N problems` and **exit code 1**, so a script can stop before `harumi run`. Replaces `repo readiness`.
 
 ## `dashboard`
 

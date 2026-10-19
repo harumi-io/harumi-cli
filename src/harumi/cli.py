@@ -146,6 +146,8 @@ import json
 import mimetypes
 import os
 import re
+import shlex
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -186,16 +188,26 @@ from harumi.dashboard import (
     validate_dashboard_toml,
     widget_schemas,
 )
-from harumi.errors import ApiError, ApiUnreachableError, HarumiError, NotAuthenticatedError
+from harumi.errors import (
+    ApiError,
+    ApiUnreachableError,
+    HarumiError,
+    NotAuthenticatedError,
+    SessionRefreshError,
+)
 from harumi.git import (
+    LARGE_FILE_BYTES,
     GitError,
+    ImportPlan,
     NotAHarumiRepoError,
     clone_repo,
     current_branch,
     delete_remote_scratch,
     ensure_remote,
     has_unpushed_commits,
+    import_excludes,
     is_dirty,
+    plan_import,
     push_folder,
     push_scratch,
     repo_root,
@@ -1037,6 +1049,100 @@ def _ago(when: Optional[datetime]) -> str:
     return f"{n} year{'' if n == 1 else 's'} ago"
 
 
+def _duration(seconds: Optional[float]) -> str:
+    """"45s", "1m 12s", "2h 03m": how long something took."""
+    if seconds is None or seconds < 0:
+        return ""
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, secs = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {secs:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m"
+
+
+def _run_duration(run) -> Optional[float]:
+    """Seconds between a run's start and end, when the server recorded both."""
+    if run.started is None or run.ended is None:
+        return None
+    started, ended = run.started, run.ended
+    if (started.tzinfo is None) != (ended.tzinfo is None):
+        started, ended = started.replace(tzinfo=None), ended.replace(tzinfo=None)
+    return (ended - started).total_seconds()
+
+
+def _tail_lines(text: str, keep: int) -> tuple[str, int]:
+    """The last `keep` non-empty-trailing lines of `text`, and how many were left out."""
+    lines = text.rstrip().splitlines()
+    return "\n".join(lines[-keep:]), max(0, len(lines) - keep)
+
+
+def _status_markup(status: str) -> str:
+    """A run status, coloured by what it means. Plain words, so it still reads without colour."""
+    colour = {
+        "completed": "green",
+        "finished": "green",
+        "failed": "bold red",
+        "timeout": "bold red",
+        "cancelled": "yellow",
+        "queued": "cyan",
+        "running": "cyan",
+    }.get(status)
+    return f"[{colour}]{escape(status)}[/{colour}]" if colour else escape(status)
+
+
+def _run_started(run) -> str:
+    return _ago(run.started or run.created_at)
+
+
+def _pick_run(client: Client, project_id: str, runs, *, action: str, flag: str) -> Optional[str]:
+    """Choose one of `runs`; its id, or None if the user backed out."""
+    options = [
+        interactive.Option(
+            f"{r.id[:8]}  {r.status}",
+            r.id,
+            hint="  ".join(p for p in (r.git_branch or "", f"started {_run_started(r)}" if _run_started(r) else "") if p),
+        )
+        for r in runs
+    ]
+    return interactive.select(f"Which run do you want to {action}?", options, flag=flag)  # type: ignore[return-value]
+
+
+def _shown_path(path: Path) -> str:
+    """`path` as someone should type it: relative to where they are when that is
+    shorter and stays below it, absolute otherwise."""
+    try:
+        rel = path.resolve().relative_to(Path.cwd().resolve())
+    except ValueError:
+        return str(path)
+    return str(rel)
+
+
+def _quote_for_shell(text: str, *, windows: Optional[bool] = None) -> str:
+    """`text` as one argument that pastes into the user's shell.
+
+    POSIX shells want single quotes; cmd.exe and PowerShell want double quotes, and
+    single quotes would be taken literally by cmd.exe.
+    """
+    if os.name == "nt" if windows is None else windows:
+        return subprocess.list2cmdline([text])
+    return shlex.quote(text)
+
+
+def _next_steps(folder: Path) -> None:
+    """What to type after a project has been set up locally."""
+    where = _shown_path(folder)
+    # Quoted for the shell (a folder called "My Project" must paste), then escaped for
+    # Rich (a "[" in a path is markup otherwise and silently vanishes).
+    cd = f"cd {_quote_for_shell(where)}" if where != "." else ""
+    steps = " then ".join(f"[bold]{escape(c)}[/bold]" for c in (cd, "harumi run --watch") if c)
+    # soft_wrap: this is a command line someone will copy, so a long path must
+    # not be broken across lines at the terminal width.
+    console.print(f"\nNext: {steps}", soft_wrap=True)
+
+
 def _recent_first(projects):
     """Most recently updated first, so the project you are working on leads.
 
@@ -1456,7 +1562,9 @@ def skills_add(
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(content, encoding="utf-8")
     rel = f"{skills_mod.SKILLS_DIR}/{slug}"
-    console.print(f"[bold green]Installed[/bold green] [bold]{preset.name}[/bold] (v{preset.version}) at {dest}.")
+    console.print(
+        f"[bold green]Installed[/bold green] [bold]{preset.name}[/bold] (v{preset.version}) at {dest}.", soft_wrap=True
+    )
     console.print(
         "Commit and push it so the project's assistant can use it:\n"
         f"  [bold]git add {rel} && git commit -m \"Install {slug} skill\" && git push harumi[/bold]"
@@ -1575,7 +1683,7 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
     return True
 
 
-def _pick_project(client: Client, *, action: str) -> Optional[str]:
+def _pick_project(client: Client, *, action: str, flag: str = "the PROJECT_ID argument") -> Optional[str]:
     """Let the user choose one of their projects; return its id, or None if they quit.
 
     With no terminal this raises `NonInteractiveError`, which lists the projects
@@ -1606,7 +1714,7 @@ def _pick_project(client: Client, *, action: str) -> Optional[str]:
     if total > len(projects):
         console.print(f"[dim]Showing {len(projects)} of {total} projects.[/dim]")
     picked = interactive.select(
-        f"Which project do you want to {action}?", options, flag="the PROJECT_ID argument"
+        f"Which project do you want to {action}?", options, flag=flag
     )
     return picked  # type: ignore[return-value]
 
@@ -1619,7 +1727,7 @@ def _pick_project(client: Client, *, action: str) -> Optional[str]:
 @_handle_errors
 def link(
     project: Optional[str] = typer.Option(
-        None, "--project", "-p", help="Harumi project id to bind this directory to. Prompted if omitted."
+        None, "--project", "-p", help="Harumi project id to bind this directory to. Pick from a list if omitted."
     ),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
@@ -1640,15 +1748,9 @@ def link(
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
 
     if project is None:
-        projects = client.list_projects()
-        if not projects:
-            _fail("You have no projects to link. Run [bold]harumi new <NAME>[/bold] to create one.")
-        console.print("Your projects:")
-        table = Table("id", "name")
-        for p in projects:
-            table.add_row(p.id, p.name)
-        console.print(table)
-        project = typer.prompt("Project id to bind this directory to")
+        project = _pick_project(client, action="link this folder to", flag="--project")
+        if project is None:  # backed out of the menu
+            return
 
     console.print(f"Fetching repo for project [bold]{project}[/bold]...")
     repo = client.get_project_repo(project)
@@ -1753,6 +1855,15 @@ def import_project(
         "--personal",
         help="Create in your personal workspace, ignoring the configured org.",
     ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Don't ask for a name or confirmation: use the folder name and go."
+    ),
+    include_tracked_secrets: bool = typer.Option(
+        False,
+        "--include-tracked-secrets",
+        help="Upload secret-looking files that git already tracks, or has in its history. Without a "
+        "terminal, or with --yes, the import stops instead.",
+    ),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     git_url: Optional[str] = typer.Option(None, "--git-url", help="Override the Harumi Git base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -1766,6 +1877,10 @@ def import_project(
     intentionally overwrites the server-seeded scaffold, so if the folder
     has no `harumi.toml` one is written for you before pushing.
 
+    First it shows what would be uploaded. Virtual environments, `node_modules`
+    and files that look like secrets (`.env`, `*.pem`, `*.key`) are left out,
+    and at a terminal you are asked for a name and to confirm.
+
     Starting with nothing at all? Use `harumi new <NAME>` instead — it
     clones the seeded scaffold rather than overwriting it.
     """
@@ -1775,10 +1890,69 @@ def import_project(
         from_git=from_git,
         bind=bind,
         personal=personal,
+        assume_yes=yes,
+        include_tracked_secrets=include_tracked_secrets,
         api_url=api_url,
         git_url=git_url,
         org=org,
     )
+
+
+def _print_import_plan(folder: Path, plan: ImportPlan) -> None:
+    """What an import is about to upload and what it leaves out, in a few lines."""
+    history = (
+        f", plus {plan.history_commits} commit{'' if plan.history_commits == 1 else 's'} of git history"
+        if plan.history_commits
+        else ""
+    )
+    console.print(
+        f"Importing [bold]{escape(str(folder))}[/bold]: [bold]{plan.files}[/bold] "
+        f"file{'' if plan.files == 1 else 's'}, {_format_bytes(plan.total_bytes)}{history}."
+    )
+    left_out = [f"{escape(d)}/ ({n} file{'' if n == 1 else 's'})" for d, n in plan.skipped_dirs]
+    if plan.skipped_secrets:
+        left_out.append("files that look like secrets: " + ", ".join(escape(f) for f in plan.skipped_secrets[:5]))
+        if len(plan.skipped_secrets) > 5:
+            left_out[-1] += f" and {len(plan.skipped_secrets) - 5} more"
+    if left_out:
+        console.print("[dim]Left out: " + "; ".join(left_out) + ".[/dim]")
+    if plan.skipped_secrets:
+        console.print("[dim]API keys belong in [bold]harumi secrets set NAME[/bold], not in the code.[/dim]")
+    big = [(f, n) for f, n in plan.largest if n >= LARGE_FILE_BYTES]
+    if big:
+        console.print(
+            "[yellow]Large files make the upload slow:[/yellow] "
+            + ", ".join(f"{escape(f)} ({_format_bytes(n)})" for f, n in big)
+            + ". Data files usually belong in [bold]harumi files put[/bold]."
+        )
+    if plan.included_secrets:
+        console.print(
+            "[bold yellow]Heads-up:[/bold yellow] "
+            + ", ".join(escape(f) for f in plan.included_secrets[:5])
+            + " looks like a secret, but git already tracks it, so it [bold]will be uploaded[/bold]"
+            + (" with its history" if plan.history_commits else "")
+            + ". Stop here if that is not what you want, and remove it from git first "
+            "([bold]git rm --cached <file>[/bold])."
+        )
+    in_history_only = [f for f in plan.history_secrets if f not in plan.included_secrets]
+    if in_history_only:
+        console.print(
+            "[bold yellow]Heads-up:[/bold yellow] your git history contains "
+            + ", ".join(escape(f) for f in in_history_only[:5])
+            + (f" and {len(in_history_only) - 5} more" if len(in_history_only) > 5 else "")
+            + ". It is not in your files any more, but the history is [bold]uploaded as it is[/bold], "
+            "so anyone with access to the project could read it. Rotate that secret, or start from a clean copy "
+            "of the folder without the .git folder."
+        )
+
+
+def _ask_project_name(default: Optional[str]) -> str:
+    """Ask for a name; a blank answer is asked again rather than sent to the server."""
+    while True:
+        name = (typer.prompt("Project name", default=default) if default else typer.prompt("Project name")).strip()
+        if name:
+            return name
+        console.print("A project needs a name.")
 
 
 def _push_impl(
@@ -1791,6 +1965,8 @@ def _push_impl(
     api_url: Optional[str],
     git_url: Optional[str],
     org: Optional[str],
+    assume_yes: bool = False,
+    include_tracked_secrets: bool = False,
 ) -> None:
     """Body of `harumi import`, factored out so `harumi start` can call it
     directly without going through Typer's CLI-parsing machinery (whose
@@ -1801,6 +1977,18 @@ def _push_impl(
     if not folder.is_dir():
         _fail(f"Not a directory: {folder}")
 
+    linked = folder / ".harumi" / "config.json"
+    if linked.exists():
+        binding = ProjectBinding.load(folder)
+        which = f" ({binding.project_id})" if binding else ""
+        _fail(
+            f"{folder} is already a Harumi project{which}, and `harumi import` always creates a "
+            "[bold]new[/bold] one.\n"
+            "To send your changes to this project, commit and run [bold]git push harumi <branch>[/bold]; "
+            "to just run them, use [bold]harumi run[/bold].\n"
+            "If you really want a second project from this folder, delete its .harumi folder first."
+        )
+
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
     # Before the merge and scaffold below change the user's folder.
     _require_entitled_workspace(client, None if personal else client.config.org_id)
@@ -1808,10 +1996,39 @@ def _push_impl(
     if from_git:
         _merge_git_repo_flat(from_git, folder)
 
+    # The summary has to count what will really be pushed, which includes the
+    # harumi.toml written below. So preview with the file counted in, and only
+    # write it once the user has agreed.
+    plan = plan_import(folder)
+    needs_manifest = not (folder / "harumi.toml").exists()
+    if needs_manifest:
+        plan.files += 1
+        plan.total_bytes += len(_DEFAULT_HARUMI_TOML.encode())
+    _print_import_plan(folder, plan)
+    can_ask = interactive.is_interactive() and not assume_yes
+    at_risk = sorted({*plan.included_secrets, *plan.history_secrets})
+    if at_risk and not can_ask and not include_tracked_secrets:
+        # Nobody to say no: --yes is consent to "go ahead", not to publish a credential.
+        _fail(
+            "Not importing: git already has " + ", ".join(escape(f) for f in at_risk[:5])
+            + (f" and {len(at_risk) - 5} more" if len(at_risk) > 5 else "")
+            + ", which look like secrets, and they would be uploaded.\n"
+            "Remove them from git ([bold]git rm --cached <file>[/bold]) and rotate them, or, "
+            "if you really want them uploaded, run again with [bold]--include-tracked-secrets[/bold]."
+        )
+    name = project_name or folder.name
+    if can_ask:
+        if project_name is None:
+            name = _ask_project_name(folder.name)
+        if not typer.confirm(
+            "Create the project and upload these files?", default=not at_risk
+        ):
+            console.print("Nothing was created.")
+            return
+
     _ensure_scaffold(folder)
 
-    name = project_name or folder.name
-    console.print(f"Creating project [bold]{name}[/bold]...")
+    console.print(f"Creating project [bold]{escape(name)}[/bold]...")
     project = client.create_project(name, personal=personal)
     console.print(
         f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id})."
@@ -1849,6 +2066,7 @@ def _push_impl(
         token=git_token,
         branch=repo.default_branch,
         message="Push local project",
+        exclude=import_excludes(),
     )
     console.print(f"[bold green]Pushed[/bold green] to Harumi ({repo.default_branch}).")
 
@@ -1857,7 +2075,7 @@ def _push_impl(
         return
 
     if _bind_and_configure_remote(project.id, repo, cwd=folder):
-        console.print(f"\nRun [bold]cd {folder}[/bold] then [bold]harumi run[/bold] to try it.")
+        _next_steps(folder)
 
 
 # ---------------------------------------------------------------------------
@@ -1867,7 +2085,7 @@ def _push_impl(
 @app.command()
 @_handle_errors
 def new(
-    name: str = typer.Argument(..., help="Project name."),
+    name: Optional[str] = typer.Argument(None, help="Project name. Asked for at a terminal if omitted."),
     dir: Optional[Path] = typer.Option(
         None, "--dir", help="Local directory to clone the new project into. Defaults to ./<slugified-name>."
     ),
@@ -1905,6 +2123,10 @@ def new(
     Project already exists in Harumi (web app or a teammate made it)? Use
     `harumi clone <PROJECT_ID>`.
     """
+    if name is None:
+        if not interactive.is_interactive():
+            _fail("Give the project a name: [bold]harumi new \"My Project\"[/bold].")
+        name = typer.prompt("Project name")
     _new_impl(
         name=name,
         dir=dir,
@@ -2032,7 +2254,7 @@ def _clone_and_bind(project_id: str, repo, dest: Path) -> None:
         )
         return
 
-    console.print(f"Cloning into [bold]{dest}[/bold]...")
+    console.print(f"Cloning into [bold]{dest}[/bold]...", soft_wrap=True)
     clone_repo(
         clone_url=repo.clone_url,
         username=username,
@@ -2041,7 +2263,7 @@ def _clone_and_bind(project_id: str, repo, dest: Path) -> None:
     )
 
     if _bind_and_configure_remote(project_id, repo, cwd=dest):
-        console.print(f"\nRun [bold]cd {dest}[/bold] then [bold]harumi run[/bold] to try it.")
+        _next_steps(dest)
 
 
 @app.command()
@@ -2123,7 +2345,7 @@ def start() -> None:
         _require_entitled_workspace(client, client.config.org_id)
 
     if choice == "1":
-        name = typer.prompt("Project name")
+        name = _ask_project_name(None)
         _new_impl(
             name=name,
             dir=None,
@@ -2235,43 +2457,79 @@ def projects_list(
 @projects_app.command("get")
 @_handle_errors
 def projects_get(
-    project_id: str = typer.Argument(..., help="Project id."),
+    project_id: Optional[str] = typer.Argument(None, help="Project id. Pick from a list if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Show details for one project."""
+    """Show a project: its name, where it lives, and how to open it."""
     client = _get_client(api_url=api_url, org=org)
+    if project_id is None:
+        project_id = _pick_project(client, action="show")
+        if project_id is None:
+            return
     p = client.get_project(project_id)
-    table = Table("field", "value")
-    for field in ("id", "name", "customer_id", "kernel_spec", "role_name", "created_at", "updated_at"):
-        table.add_row(field, str(getattr(p, field, "") or ""))
-    console.print(table)
+    names = _workspace_names(client) if p.customer_id else {}
+    facts = Table.grid(padding=(0, 2))
+    facts.add_column(style="dim")
+    facts.add_column()
+    for label, value in (
+        ("Name", escape(p.name)),
+        ("Id", escape(p.id)),
+        ("Workspace", escape(_workspace_label(p, names))),
+        ("Your role", escape(p.role_name or "")),
+        ("Kernel", escape(p.kernel_spec or "")),
+        ("Created", _ago(p.created_at)),
+        ("Updated", _ago(p.updated_at)),
+        ("Open", f"{active_platform_url()}/projects/{p.id}"),
+    ):
+        if value:
+            facts.add_row(label, value)
+    console.print(facts)
 
 
 @projects_app.command("rename")
 @_handle_errors
 def projects_rename(
-    project_id: str = typer.Argument(..., help="Project id."),
-    name: str = typer.Argument(..., help="New project name."),
+    project_id: Optional[str] = typer.Argument(None, help="Project id. Pick from a list if omitted."),
+    name: Optional[str] = typer.Argument(None, help="New project name. Asked for if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Rename a project."""
     client = _get_client(api_url=api_url, org=org)
+    if project_id is None:
+        project_id = _pick_project(client, action="rename")
+        if project_id is None:
+            return
+    if name is None:
+        if not interactive.is_interactive():
+            _fail("Give the new name: [bold]harumi projects rename <PROJECT_ID> \"New name\"[/bold].")
+        current = client.get_project(project_id).name
+        name = typer.prompt("New name", default=current)
     p = client.update_project(project_id, {"name": name})
-    console.print(f"[bold green]Renamed[/bold green] project to [bold]{p.name}[/bold].")
+    console.print(f"[bold green]Renamed[/bold green] project to [bold]{escape(p.name)}[/bold].")
 
 
 @projects_app.command("rm")
 @_handle_errors
 def projects_rm(
-    project_id: str = typer.Argument(..., help="Project id."),
+    project_id: Optional[str] = typer.Argument(None, help="Project id. Pick from a list if omitted."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Delete a project. This cannot be undone."""
+    if project_id is None and yes:
+        # --yes skips the typed-name check, so nothing would stand between a slip in a
+        # list and a deleted project. With --yes the id has to be written down.
+        _fail("Say which project to delete: [bold]harumi projects rm <project id> --yes[/bold]. "
+              "Find the id with [bold]harumi projects list[/bold].")
     client = _get_client(api_url=api_url, org=org)
+    if project_id is None:
+        # Picking is not consent: the typed-name confirmation below still applies.
+        project_id = _pick_project(client, action="delete")
+        if project_id is None:
+            return
 
     if not yes:
         p = client.get_project(project_id)
@@ -2283,7 +2541,7 @@ def projects_rm(
             return
 
     deleted = client.delete_project(project_id)
-    console.print(f"[bold red]Deleted[/bold red] project [bold]{deleted.name}[/bold].")
+    console.print(f"[bold red]Deleted[/bold red] project [bold]{escape(deleted.name)}[/bold].")
 
 
 # ---------------------------------------------------------------------------
@@ -2339,11 +2597,7 @@ def run(
         # Explicit ref — run it directly, no scratch needed.
         run_branch = branch
         run_commit = commit
-        console.print(
-            f"[bold]Running[/bold] project [bold]{project_id}[/bold] "
-            + (f"@ branch [bold]{run_branch}[/bold]" if run_branch else "")
-            + (f" commit [bold]{run_commit[:8]}[/bold]" if run_commit else "")
-        )
+        console.print(_running_line(project_id, run_branch, run_commit))
     else:
         # No explicit ref — inspect the working tree.
         dirty = is_dirty()
@@ -2353,10 +2607,7 @@ def run(
             # Clean and pushed: run the current branch directly.
             run_branch = current_branch() or repo.default_branch
             run_commit = None
-            console.print(
-                f"[bold]Running[/bold] project [bold]{project_id}[/bold] "
-                f"@ branch [bold]{run_branch}[/bold]"
-            )
+            console.print(_running_line(project_id, run_branch, None))
         else:
             # Dirty or unpushed: push a scratch branch.
             git_token = load_git_token()
@@ -2372,80 +2623,175 @@ def run(
                     "re-provision your Gitea credentials."
                 )
 
-            status_parts = []
-            if dirty:
-                status_parts.append("uncommitted changes")
-            if unpushed:
-                status_parts.append("unpushed commits")
+            what = " and ".join(
+                part
+                for part, present in (("uncommitted changes", dirty), ("unpushed commits", unpushed))
+                if present
+            )
             console.print(
-                f"[dim]Working tree has {' and '.join(status_parts)}. "
-                f"Pushing scratch branch...[/dim]"
+                f"Running project [bold]{project_id}[/bold] with your {what} "
+                "[dim](sent on a temporary branch; your branches are not touched)[/dim]"
             )
 
             scratch_branch, _ = push_scratch(username=username, token=git_token)  # type: ignore[arg-type]
             run_branch = scratch_branch
             run_commit = None
-            console.print(f"[dim]Scratch branch: [bold]{scratch_branch}[/bold][/dim]")
 
     try:
-        response = client.execute_project(
-            project_id,
-            branch=run_branch,
-            commit=run_commit,
-            command=command,
-            kernel_spec=kernel,
-        )
-        console.print(
-            f"Queued (execution_log_id={response.execution_log_id}, "
-            f"run_id={response.project_run_id}). status={response.status}"
-        )
+        try:
+            response = client.execute_project(
+                project_id,
+                branch=run_branch,
+                commit=run_commit,
+                command=command,
+                kernel_spec=kernel,
+            )
+        except ApiError as exc:
+            # A failed token refresh is the login's problem, not the project's, whatever
+            # status it came back with.
+            if exc.status_code in _RUN_REJECTED and not isinstance(exc, SessionRefreshError):
+                _fail(
+                    f"{_format_api_error(exc)}\n"
+                    "Run [bold]harumi check[/bold] to see what is blocking this project."
+                )
+            raise
+        run_id = response.project_run_id
+        console.print(f"Queued run [bold]{run_id}[/bold]" if run_id else "Queued.")
 
         if not watch:
-            if response.project_run_id:
+            if run_id:
                 console.print(
-                    f"Run [bold]harumi runs get {response.project_run_id} "
-                    f"--project {project_id}[/bold] to check on it later."
+                    f"[dim]Check on it with [bold]harumi runs get {run_id}[/bold], "
+                    "or add --watch to wait for it here.[/dim]"
                 )
             return
 
-        if not response.project_run_id:
+        if not run_id:
             console.print("[yellow]No run id returned; cannot watch this run.[/yellow]")
             return
 
-        from harumi.execution import download_run_output, wait_for_run
-
-        console.print("Waiting for the run to finish...")
-        result = wait_for_run(
-            client.api,
-            project_id,
-            response.project_run_id,
-            on_poll=lambda r: console.print(f"  status: {r.status}"),
-        )
-
+        result = _watch_run(client, project_id, run_id)
         if result.succeeded:
-            console.print(f"[bold green]Run finished[/bold green]: {result.status}")
-            if not output_dir:
-                console.print(
-                    f"Download its output with [bold]harumi runs download {result.id}[/bold]."
-                )
+            took = _duration(_run_duration(result))
+            console.print(
+                f"[bold green]Run {result.status}[/bold green]" + (f" in {took}." if took else ".")
+            )
             if output_dir:
+                from harumi.execution import download_run_output
+
                 try:
                     zip_path = download_run_output(client.api, project_id, result, output_dir)
-                    console.print(f"Downloaded output to {zip_path}")
+                    console.print(f"Downloaded output to {zip_path}", soft_wrap=True)
                 except HarumiError as exc:
                     console.print(f"[yellow]{exc}[/yellow]")
+            else:
+                console.print(
+                    f"[dim]Download its output with [bold]harumi runs download {result.id}[/bold].[/dim]"
+                )
         else:
-            console.print(f"[bold red]Run ended with status[/bold red]: {result.status}")
-            if result.error:
-                console.print(f"Error: {result.error}")
-            if result.stderr:
-                console.print(f"[dim]stderr:[/dim]\n{result.stderr}")
+            _print_failed_run(result)
             raise typer.Exit(code=1)
 
     finally:
         if scratch_branch:
             delete_remote_scratch(scratch_branch)
-            console.print(f"[dim]Scratch branch {scratch_branch} cleaned up.[/dim]")
+
+
+# A server that refuses to start the run for a reason about the project (a bad
+# manifest, a missing repo, a conflict) rather than about you: `harumi check` says why.
+_RUN_REJECTED = {400, 404, 409, 422}
+_STDERR_SHOWN = 20  # lines of a failed run's stderr shown before pointing at `runs get`
+
+
+def _running_line(project_id: str, branch: Optional[str], commit: Optional[str]) -> str:
+    where = " ".join(
+        part
+        for part in (
+            f"branch [bold]{branch}[/bold]" if branch else "",
+            f"commit [bold]{commit[:8]}[/bold]" if commit else "",
+        )
+        if part
+    )
+    return f"Running project [bold]{project_id}[/bold]" + (f" on {where}" if where else "")
+
+
+def _live_display_ok() -> bool:
+    """Whether to animate (spinner, a line that rewrites itself).
+
+    Needs a real TTY, not just rich's opinion: rich treats any FORCE_COLOR as
+    "this is a terminal", and CI systems set it to get colour. An animation there
+    would fill the build log with control codes.
+    """
+    try:
+        return bool(console.is_terminal and console.file.isatty())
+    except (AttributeError, ValueError):
+        return False
+
+
+def _watch_run(client: Client, project_id: str, run_id: str):
+    """Wait for a run to finish, showing progress, and return it.
+
+    At a terminal: one live line (spinner, status, time elapsed). Otherwise: one
+    line each time the status changes, so a log or a pipe is not flooded.
+    Ctrl-C stops the *watching*, never the run, and says how to cancel it.
+    """
+    import time
+
+    from rich.live import Live
+    from rich.spinner import Spinner
+
+    from harumi.execution import wait_for_run
+
+    started = time.monotonic()
+    state = {"status": "queued"}
+    live = _live_display_ok()
+
+    def on_poll(run) -> None:
+        if run.status != state["status"] and not live:
+            console.print(f"[dim]{_duration(time.monotonic() - started):>7}[/dim]  {run.status}")
+        state["status"] = run.status
+
+    spinner = Spinner("dots")
+
+    def frame():
+        spinner.update(
+            text=f" Run {state['status']} · {_duration(time.monotonic() - started)}  [dim](ctrl-c stops watching, not the run)[/dim]"
+        )
+        return spinner
+
+    try:
+        if live:
+            with Live(get_renderable=frame, console=console, refresh_per_second=8, transient=True):
+                return wait_for_run(client.api, project_id, run_id, on_poll=on_poll)
+        console.print(f"Waiting for run {run_id} to finish...")
+        return wait_for_run(client.api, project_id, run_id, on_poll=on_poll)
+    except KeyboardInterrupt:
+        console.print(
+            f"\nStopped watching. [bold]The run is still going.[/bold]\n"
+            f"  Follow it:  [bold]harumi runs get {run_id}[/bold]\n"
+            f"  Cancel it:  [bold]harumi runs cancel {run_id}[/bold]"
+        )
+        raise typer.Exit(code=130)
+
+
+def _print_failed_run(run) -> None:
+    """The cause of a run that did not succeed, without a wall of output."""
+    took = _duration(_run_duration(run))
+    headline = f"Run {run.status}" + (f" after {took}" if took else "")
+    if run.exit_code is not None:
+        headline += f" (exit code {run.exit_code})"
+    console.print(f"[bold red]{escape(headline)}.[/bold red]")
+    if run.error:
+        console.print(f"[bold]Error:[/bold] {escape(run.error)}")
+    if run.stderr and run.stderr.strip():
+        tail, hidden = _tail_lines(run.stderr, _STDERR_SHOWN)
+        console.print("[dim]Last lines of stderr:[/dim]")
+        console.print(escape(tail), soft_wrap=True, highlight=False)
+        if hidden:
+            console.print(f"[dim]({hidden} earlier lines not shown.)[/dim]")
+    elif not run.error:
+        console.print("[dim]No error output was captured.[/dim]")
+    console.print(f"[dim]Everything it printed: [bold]harumi runs get {run.id}[/bold][/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -2480,15 +2826,15 @@ def runs_list(
         return
 
     shown = runs if all_ else runs[: limit or RUNS_SHOWN]
-    table = Table("id", "status", "source", "git_branch", "started", "ended")
+    table = Table("id", "status", "source", "branch", "started", "took")
     for r in shown:
         table.add_row(
             r.id,
-            r.status,
+            _status_markup(r.status),
             r.source or "",
             r.git_branch or "",
-            str(r.started or ""),
-            str(r.ended or ""),
+            _run_started(r),
+            _duration(_run_duration(r)),
         )
     console.print(table)
     if len(shown) < len(runs):
@@ -2501,42 +2847,54 @@ def runs_list(
 @runs_app.command("get")
 @_handle_errors
 def runs_get(
-    run_id: str = typer.Argument(..., help="Run id."),
+    run_id: Optional[str] = typer.Argument(None, help="Run id. Defaults to the project's latest run."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Show details (including captured stdout/stderr) for one run."""
+    """Show one run: how it went, then everything it printed (the latest run when no id is given)."""
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
-    r = client.get_run(project_id, run_id)
-    table = Table("field", "value")
-    for field in (
-        "id",
-        "status",
-        "source",
-        "git_branch",
-        "git_commit",
-        "command",
-        "kernel_spec",
-        "exit_code",
-        "output_url",
-        "triggered_by",
-        "started",
-        "ended",
-    ):
-        table.add_row(field, str(getattr(r, field, "") or ""))
-    console.print(table)
+    r = client.get_run(project_id, run_id) if run_id else client.get_latest_run(project_id)
+    if r is None:
+        _fail("This project has no runs yet. Start one with [bold]harumi run --watch[/bold].")
+        return
 
-    if r.stdout:
-        console.print("\n[bold]stdout:[/bold]")
-        console.print(r.stdout)
-    if r.stderr:
-        console.print("\n[bold]stderr:[/bold]")
-        console.print(r.stderr)
+    status = _status_markup(r.status) + (f" (exit code {r.exit_code})" if r.exit_code is not None else "")
+    took = _duration(_run_duration(r))
+    started = _run_started(r)
+    facts = Table.grid(padding=(0, 2))
+    facts.add_column(style="dim")
+    facts.add_column()
+    for label, value in (
+        ("Run", escape(r.id)),
+        ("Status", status),
+        ("Took", took + (f"  [dim](started {started})[/dim]" if started else "") if took else (f"started {started}" if started else "")),
+        (
+            "Code",
+            " @ ".join(p for p in (escape(r.git_branch or ""), escape((r.git_commit or "")[:8])) if p),
+        ),
+        ("Command", escape(r.command or "")),
+        ("Kernel", escape(r.kernel_spec or "")),
+        ("Started by", escape(" ".join(p for p in (r.source or "", r.triggered_by or "") if p))),
+    ):
+        if value:
+            facts.add_row(label, value)
+    console.print(facts)
+
+    for title, text in (("stdout", r.stdout), ("stderr", r.stderr)):
+        if text and text.strip():
+            console.print(f"\n[bold]{title}:[/bold]")
+            console.print(escape(text.rstrip()), soft_wrap=True, highlight=False)
     if r.error:
-        console.print(f"\n[bold red]error:[/bold red] {r.error}")
+        console.print(f"\n[bold red]error:[/bold red] {escape(r.error)}")
+
+    console.print()
+    if not r.finished:
+        console.print(f"[dim]Still going. Cancel it with [bold]harumi runs cancel {r.id}[/bold].[/dim]")
+    elif r.output_url:
+        console.print(f"[dim]It left output: [bold]harumi runs download {r.id}[/bold][/dim]")
 
 
 @runs_app.command("download")
@@ -2560,24 +2918,50 @@ def runs_download(
     if run is None:
         _fail("Project has no runs yet.")
         return
+    if not run.finished:
+        _fail(
+            f"Run {run.id} is still {run.status}; its output is ready once it finishes. "
+            f"Watch it with [bold]harumi runs get {run.id}[/bold]."
+        )
+    if not run.output_url:
+        _fail(
+            f"Run {run.id} ended {run.status} without leaving any output. "
+            f"See what it printed with [bold]harumi runs get {run.id}[/bold]."
+        )
     zip_path = download_run_output(client.api, project_id, run, output_dir)
-    console.print(f"Downloaded to {zip_path}")
+    try:
+        size = f" ({_format_bytes(zip_path.stat().st_size)})"
+    except OSError:
+        size = ""
+    console.print(f"Downloaded [bold]{escape(str(zip_path))}[/bold]{size}", soft_wrap=True)
 
 
 @runs_app.command("cancel")
 @_handle_errors
 def runs_cancel(
-    run_id: str = typer.Argument(..., help="Run id."),
+    run_id: Optional[str] = typer.Argument(None, help="Run id. Pick from the runs still going if omitted."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Cancel an in-flight run."""
+    """Cancel a run that is still going (pick one from a list when no id is given)."""
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
+    if run_id is None:
+        going = [r for r in client.list_runs(project_id) if not r.finished]
+        if not going:
+            console.print("Nothing to cancel: no run is going right now.")
+            return
+        run_id = _pick_run(client, project_id, going, action="cancel", flag="the RUN_ID argument")
+        if run_id is None:
+            return  # backed out of the menu; choosing a run was the confirmation
+
     r = client.cancel_run(project_id, run_id)
-    console.print(f"[bold]Run {r.id}[/bold] status is now [bold]{r.status}[/bold].")
+    if r.finished and r.status != "cancelled":
+        console.print(f"Run {escape(r.id)} had already {_status_markup(r.status)}; there was nothing to cancel.")
+        return
+    console.print(f"Run [bold]{escape(r.id)}[/bold] is now {_status_markup(r.status)}.")
 
 
 # ---------------------------------------------------------------------------
@@ -2730,7 +3114,7 @@ def outputs(
 
         run = client.get_run(resolved_project, download)
         zip_path = download_run_output(client.api, resolved_project, run, output_dir)
-        console.print(f"Downloaded to {zip_path}")
+        console.print(f"Downloaded to {zip_path}", soft_wrap=True)
         return
 
     if latest:
@@ -2935,7 +3319,7 @@ def repo_download(
     client = _get_client(api_url=api_url, org=org)
 
     zip_path = client.download_repo_archive(project_id, output, path=path, ref=ref)
-    console.print(f"Downloaded to {zip_path}")
+    console.print(f"Downloaded to {zip_path}", soft_wrap=True)
 
 
 @repo_app.command("branches")
@@ -3091,23 +3475,69 @@ def check(
     """Report everything blocking this project from running, before you run it.
 
     Server-side checks on the repo: it exists, `harumi.toml` is present and valid,
-    and the kernel is one the project may use.
+    and the kernel is one the project may use. Exits 1 when something blocks the
+    project, so a script can stop before `harumi run`.
     """
+    _check(ref=ref, project=project, api_url=api_url, org=org, exit_when_blocked=True)
+
+
+def _check(*, ref: Optional[str], project: Optional[str], api_url: Optional[str], org: Optional[str], exit_when_blocked: bool) -> None:
+    """The body of `harumi check`. The deprecated `harumi repo readiness` shares it but
+    keeps its old exit code (always 0), so a script that ignores the status is unaffected."""
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
     readiness = client.get_project_readiness(project_id, ref=ref)
-    state = "[bold green]ready[/bold green]" if readiness.ready else "[bold red]not ready[/bold red]"
-    console.print(f"Project {readiness.project_id!r} on {readiness.ref!r} is {state}.")
+    failing = [c for c in readiness.checks if not c.ok]
 
-    table = Table("check", "ok", "detail")
+    table = Table("check", "result", "detail")
     for c in readiness.checks:
-        mark = "[green]yes[/green]" if c.ok else "[red]no[/red]"
-        table.add_row(c.id, mark, c.detail or "")
+        mark = "[green]ok[/green]" if c.ok else "[bold red]problem[/bold red]"
+        table.add_row(_CHECK_LABELS.get(c.id, c.id), mark, escape(c.detail or ""))
     console.print(table)
 
+    if readiness.ready and not failing:
+        console.print(
+            f"[bold green]Ready to run[/bold green] on {escape(readiness.ref)}. "
+            "[dim]Next: [bold]harumi run --watch[/bold][/dim]"
+        )
+        return
+    count = len(failing)
+    if count:
+        console.print(
+            f"[bold red]Not ready[/bold red] on {escape(readiness.ref)}: "
+            f"{count} problem{'' if count == 1 else 's'}. "
+            "[dim]Fix them, then run [bold]harumi check[/bold] again.[/dim]"
+        )
+    else:
+        # Every listed check passed, yet the server says no. Say so rather than "0 problems".
+        console.print(
+            f"[bold red]Not ready[/bold red] on {escape(readiness.ref)}: the server did not say why. "
+            "[dim]Run [bold]harumi check[/bold] again, or ask your workspace admin.[/dim]"
+        )
+    if exit_when_blocked:
+        raise typer.Exit(code=1)
 
-repo_app.command("readiness")(_deprecated("harumi repo readiness", "harumi check")(check))
+
+# What each server-side readiness check is called when shown to a person.
+_CHECK_LABELS = {
+    "repo": "Repository exists",
+    "manifest": "harumi.toml is present",
+    "manifest_valid": "harumi.toml is valid",
+    "kernel": "Kernel is allowed",
+}
+
+
+@repo_app.command("readiness")
+@_deprecated("harumi repo readiness", "harumi check")
+def _repo_readiness(
+    ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to check (defaults to the default branch)."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
+    org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
+) -> None:
+    """Deprecated: use `harumi check`. Unlike `check`, this always exits 0."""
+    _check(ref=ref, project=project, api_url=api_url, org=org, exit_when_blocked=False)
 
 
 # ---------------------------------------------------------------------------
@@ -3193,7 +3623,9 @@ def files_put(
     content_type = mimetypes.guess_type(str(local_path))[0] or "application/octet-stream"
     upload_url = client.create_file_upload_url(project_id, dest_path, content_type)
     client.upload_file_to_presigned_url(upload_url, local_path, content_type)
-    console.print(f"[bold green]Uploaded[/bold green] {local_path} -> {dest_path} ({_format_bytes(file_size)}).")
+    console.print(
+        f"[bold green]Uploaded[/bold green] {local_path} -> {dest_path} ({_format_bytes(file_size)}).", soft_wrap=True
+    )
 
 
 @files_app.command("get")
@@ -3219,7 +3651,7 @@ def files_get(
     dest_path = output or Path(default_name)
     download_url = client.create_file_download_url(project_id, remote_path)
     client.download_file_from_presigned_url(download_url, dest_path)
-    console.print(f"Downloaded {remote_path} -> {dest_path}")
+    console.print(f"Downloaded {remote_path} -> {dest_path}", soft_wrap=True)
 
 
 @files_app.command("rm")

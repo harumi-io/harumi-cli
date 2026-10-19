@@ -988,8 +988,10 @@ def git_ops(monkeypatch):
     def fake_ensure_remote(*, clone_url, username, token, cwd):
         calls["ensure_remote"].append({"clone_url": clone_url, "cwd": cwd})
 
-    def fake_push_folder(folder, *, clone_url, username, token, branch, message):
-        calls["push_folder"].append({"folder": folder, "clone_url": clone_url, "branch": branch})
+    def fake_push_folder(folder, *, clone_url, username, token, branch, message, exclude=()):
+        calls["push_folder"].append(
+            {"folder": folder, "clone_url": clone_url, "branch": branch, "exclude": list(exclude)}
+        )
 
     monkeypatch.setattr(cli, "clone_repo", fake_clone_repo)
     monkeypatch.setattr(cli, "ensure_remote", fake_ensure_remote)
@@ -1425,8 +1427,8 @@ def test_check_reports_ready(api):
     result = runner.invoke(cli.app, ["check", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "is ready" in result.output
-    assert "repo" in result.output
+    assert "Ready to run" in result.output
+    assert "Repository exists" in result.output  # a readable name, not the check id "repo"
 
 
 def test_check_reports_not_ready_and_forwards_ref(api):
@@ -1447,8 +1449,8 @@ def test_check_reports_not_ready_and_forwards_ref(api):
         cli.app, ["check", "--ref", "dev", "--project", "proj-1"]
     )
 
-    assert result.exit_code == 0, result.output
-    assert "not ready" in result.output
+    assert result.exit_code == 1, result.output  # a script can stop before `harumi run`
+    assert "Not ready" in result.output and "1 problem" in result.output
     assert "missing entrypoint" in result.output
     assert api.params_for("GET", "/api/projects/proj-1/readiness")["ref"] == "dev"
 
@@ -3304,7 +3306,11 @@ def test_runs_download_defaults_to_the_latest_run(api, tmp_path, monkeypatch):
         return dest / f"{run.id}.zip"
 
     monkeypatch.setattr("harumi.execution.download_run_output", fake_download)
-    api.route("GET", "/api/projects/proj-1/runs", {"runs": [{**RUN, "id": "newest"}, {**RUN, "id": "older"}]})
+    api.route(
+        "GET",
+        "/api/projects/proj-1/runs",
+        {"runs": [{**RUN, "id": "newest", "output_url": "s3://x"}, {**RUN, "id": "older", "output_url": "s3://y"}]},
+    )
 
     result = runner.invoke(cli.app, ["runs", "download", "--project", "proj-1", "-o", str(tmp_path)])
 
@@ -3315,7 +3321,7 @@ def test_runs_download_defaults_to_the_latest_run(api, tmp_path, monkeypatch):
 
 def test_runs_download_takes_an_explicit_run_id(api, tmp_path, monkeypatch):
     monkeypatch.setattr("harumi.execution.download_run_output", lambda _a, _p, run, dest: dest / f"{run.id}.zip")
-    api.route("GET", "/api/projects/proj-1/runs/run-1", RUN)
+    api.route("GET", "/api/projects/proj-1/runs/run-1", {**RUN, "output_url": "s3://x"})
 
     result = runner.invoke(cli.app, ["runs", "download", "run-1", "--project", "proj-1", "-o", str(tmp_path)])
 

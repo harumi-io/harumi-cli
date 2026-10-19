@@ -199,7 +199,7 @@ class Step:
     # Where to find the id in stdout. Defaults to "the first UUID printed",
     # which is unambiguous on a fresh canary. Set it when a command prints
     # several ids and the first one is the wrong one — `run` prints
-    # execution_log_id before the run_id that `runs get` actually wants.
+    # an internal id before the run id that `runs get` actually wants.
     capture_re: Optional[str] = None
     # True for steps that cost real compute; skipped unless --include-run.
     gated: bool = False
@@ -284,14 +284,14 @@ PLAN: tuple[Step, ...] = (
     # -- runs -----------------------------------------------------------------
     Step("runs list", ("--project", "{project}")),
     # `run` has no --project: it reads the .harumi binding, which is why the
-    # harness runs from the bound temp directory. It prints execution_log_id
-    # *before* run_id, and `runs get` wants the latter — hence the explicit
-    # pattern instead of "first UUID wins".
+    # harness runs from the bound temp directory. The run id is the UUID on
+    # the "Queued run <id>" line — hence the explicit pattern instead of "first
+    # UUID wins".
     Step(
         "run",
         ("--command", "python main.py"),
         capture="run",
-        capture_re=r"run_id=([0-9a-fA-F-]{36})",
+        capture_re=r"Queued run ([0-9a-fA-F-]{36})",
         gated=True,
     ),
     Step("runs get", ("{run}", "--project", "{project}"), gated=True),
