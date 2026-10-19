@@ -536,6 +536,18 @@ _PAYWALL_HINTS = {
     "member_monthly_limit_reached": _ORG_ADMIN_HINT,
     "free_kernel_time_exhausted": _UPGRADE_HINT,
     "free_concurrent_runs": "Wait for your current run to finish, or upgrade at {billing}.",
+    # The 7-day trial and the other plan limits (harumi-api#462). Each hint says the next
+    # step; the API's `detail` already says what was hit.
+    "concurrent_runs_limit_reached": "Wait for a run to finish before starting another.",
+    "live_kernel_limit_reached": "Stop another kernel first, or upgrade at {billing}.",
+    "storage_quota_reached": "Delete some files with `harumi files rm`, or upgrade at {billing}.",
+    "project_limit_reached": "Delete a project you no longer need, or upgrade at {billing}.",
+    "app_limit_reached": "Stop another app first, or upgrade at {billing}.",
+    "app_time_exhausted": "Upgrade at {billing} to keep your app running.",
+    "schedule_limit_reached": "Delete a schedule with `harumi schedules rm`, or upgrade at {billing}.",
+    "schedule_too_frequent": "Choose a longer interval, or upgrade at {billing}.",
+    "insight_limit_reached": "It resets tomorrow, or upgrade at {billing}.",
+    "byok_not_in_plan": "Use Harumi's own models, or upgrade at {billing} to bring your own key.",
     "kernel_size_not_in_plan": "Pick a smaller kernel, or upgrade at {billing}.",
     "kernel_requires_higher_plan": "Pick a smaller kernel, or upgrade at {billing}.",
     "gurobi_requires_higher_plan": "Contact sales at https://harumi.io/contact for an Enterprise plan.",
@@ -3191,7 +3203,9 @@ def files_put(
                 )
 
     content_type = mimetypes.guess_type(str(local_path))[0] or "application/octet-stream"
-    upload_url = client.create_file_upload_url(project_id, dest_path, content_type)
+    upload_url = client.create_file_upload_url(
+        project_id, dest_path, content_type, size_bytes=file_size
+    )
     client.upload_file_to_presigned_url(upload_url, local_path, content_type)
     console.print(f"[bold green]Uploaded[/bold green] {local_path} -> {dest_path} ({_format_bytes(file_size)}).")
 
