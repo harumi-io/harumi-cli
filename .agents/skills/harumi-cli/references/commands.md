@@ -52,9 +52,7 @@ Logs into the **active environment** (see [Environments](#environments)). Each e
 
 ### `harumi logout`
 
-Clears `~/.harumi/credentials.json`. No flags. Says whether anything was cleared (`You were not logged in on production; there was nothing to clear.` otherwise).
-
-`harumi help` is `harumi --help`, and `harumi help <command>` is `harumi <command> --help` (it is not listed in the command list). `harumi start` checks that you are logged in before it asks its first question.
+Clears `~/.harumi/credentials.json`. No flags. Says whether anything was cleared (`You were not logged in; there was nothing to clear.` otherwise). Both lines add `on staging` when the active environment is not production.
 
 ### `harumi whoami`
 
@@ -202,6 +200,8 @@ The narrower primitive underneath `clone` — binds an **already-checked-out** d
 2. Writes `.harumi/config.json` in the current directory with `project_id` + repo metadata.
 3. Configures the `harumi` git remote with an authenticated HTTPS URL (requires a `git_token` in credentials from `harumi login` and the current directory to already be a git working tree — `link` warns and skips remote setup otherwise).
 
+`harumi help` is `harumi --help`, and `harumi help <command>` is `harumi <command> --help` (it is not listed in the command list).
+
 After binding (via `new`/`import`/`clone`/`link`), `harumi run`, `harumi runs`, `harumi check`, `harumi skills add`, `harumi datasources`, `harumi schedules`, and `harumi secrets` all work without any `--project` flag. `.harumi/config.json` is searched upward from cwd, so these commands work from subdirectories too.
 
 ### `start`
@@ -210,7 +210,7 @@ After binding (via `new`/`import`/`clone`/`link`), `harumi run`, `harumi runs`, 
 harumi start
 ```
 
-Interactive entry point for a confused or new user: asks "What do you have?" (nothing yet / a local folder / an existing Harumi project) and dispatches to `new`/`import`/`clone` accordingly. Equivalent to picking the right one yourself.
+Interactive entry point for a confused or new user. It checks that you are logged in before it asks anything. It asks "What do you have?" (nothing yet / a local folder / an existing Harumi project) and dispatches to `new`/`import`/`clone` accordingly. Equivalent to picking the right one yourself.
 
 ## `run`
 

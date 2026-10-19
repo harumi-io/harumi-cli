@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import re
+
 import pytest
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from harumi import auth, cli, config, interactive
@@ -11,7 +15,12 @@ from harumi.models import LoggedUser
 
 runner = CliRunner()
 
-_ANSI = __import__("re").compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def plain_lines(text: str) -> str:
+    """Styling removed but line structure kept, for tests that read a table row by row."""
+    return _ANSI.sub("", text)
 
 
 def plain(text: str) -> str:
@@ -25,7 +34,7 @@ def plain(text: str) -> str:
 
 @pytest.fixture(autouse=True)
 def home(tmp_path, monkeypatch):
-    real_home = __import__("os").path.expanduser("~/.harumi")
+    real_home = os.path.expanduser("~/.harumi")
     monkeypatch.setattr("harumi.config.HARUMI_HOME", tmp_path)
     monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "config.json")
     monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "credentials.json")
@@ -204,8 +213,14 @@ def test_help_for_something_that_does_not_exist_says_so():
     assert got.exit_code != 0 and "frobnicate" in got.output
 
 
-def test_help_is_not_advertised_in_the_command_list():
-    assert " help " not in plain(runner.invoke(cli.app, ["--help"]).output)
+def test_help_is_a_real_command_that_the_command_list_does_not_advertise():
+    """Asserting on the rendered list can pass for the wrong reason (wrapped text may simply
+    not contain the substring), so ask the command tree itself."""
+    commands = get_command(cli.app).commands
+
+    assert "help" in commands and commands["help"].hidden is True
+    listed = re.findall(r"^[│|] *(\w[\w-]*) ", plain_lines(runner.invoke(cli.app, ["--help"]).output), re.M)
+    assert "help" not in listed and "login" in listed  # the parse found the table, and help is not in it
 
 
 # -- start --------------------------------------------------------------------------------------
@@ -229,6 +244,7 @@ def test_start_with_a_login_still_asks(monkeypatch):
     result = runner.invoke(cli.app, ["start"], input="\n")  # no choice: aborts after showing the menu
 
     assert "What do you have" in result.output
+    assert "harumi login" not in result.output  # the login guard did not fire for someone who is logged in
 
 
 # -- logout -------------------------------------------------------------------------------------
@@ -249,3 +265,18 @@ def test_logout_when_not_logged_in_does_not_pretend_otherwise():
 
     assert result.exit_code == 0
     assert "not logged in" in result.output and "Logged out" not in result.output
+
+
+def test_an_email_with_brackets_is_printed_whole_after_login(monkeypatch):
+    """Rich reads [..] as markup; an address (or a server-supplied one) must not vanish into it."""
+    monkeypatch.setattr(auth, "request_otp", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_resolve_and_store_org", lambda c: None)
+    monkeypatch.setattr(cli, "_provision_git_token", lambda c: None)
+    monkeypatch.setattr(cli, "_quickstart", lambda **k: None)
+    monkeypatch.setattr(
+        auth, "verify_otp", lambda cfg, email, code, transport=None: LoggedUser(id="u", email="a[bold]b@example.com", access_token="a", refresh_token="r")
+    )
+
+    result = runner.invoke(cli.app, ["login", "--email", "x@example.com"], input="123456\n")
+
+    assert "a[bold]b@example.com" in plain(result.output)

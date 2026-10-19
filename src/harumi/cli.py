@@ -200,7 +200,7 @@ from harumi.git import (
     push_scratch,
     repo_root,
 )
-from harumi.models import ProjectShareLink
+from harumi.models import LoggedUser, ProjectShareLink
 
 app = typer.Typer(
     name="harumi",
@@ -678,6 +678,8 @@ def login(
         try:
             auth.request_otp(config, email, sign_up=signup)
         except ApiError as exc:
+            # This matches the server's English wording. If that wording changes the match
+            # simply fails and the raw error is shown, which is a worse message, not a wrong one.
             if not signup and exc.status_code == 422 and "signups not allowed" in str(exc).lower():
                 _fail(
                     f"There is no Harumi account for {escape(email)} yet. New here? "
@@ -687,7 +689,7 @@ def login(
         console.print(f"A login code was sent to [bold]{escape(email)}[/bold].")
         user = _verify_code(config, email)
         console.print(
-            f"[bold green]Logged in[/bold green] as {user.email or email}{_on(config.environment)}."
+            f"[bold green]Logged in[/bold green] as {escape(user.email or email)}{_on(config.environment)}."
         )
 
     if picked:
@@ -722,7 +724,7 @@ def _on(environment: str) -> str:
 _CODE_ATTEMPTS = 3
 
 
-def _verify_code(config: Config, email: str):
+def _verify_code(config: Config, email: str) -> LoggedUser:
     """Ask for the emailed code and check it.
 
     At a terminal a wrong code can be retyped (three tries); anywhere else there is
