@@ -2,6 +2,8 @@
 
 Detailed flag reference, config/credential storage, troubleshooting, and the Python `Client` SDK. Loaded on demand from [SKILL.md](../SKILL.md).
 
+`harumi help` is `harumi --help`, and `harumi help <command>` is `harumi <command> --help` (it is not listed in the command list). Running `harumi` with no arguments opens the quick start (a short menu of what to do next).
+
 ## Contents
 
 - [Auth commands](#auth-commands)
@@ -199,8 +201,6 @@ The narrower primitive underneath `clone` — binds an **already-checked-out** d
 1. Calls `GET /projects/{id}/repo` (prompts you to pick from `harumi projects list` if `--project` is omitted).
 2. Writes `.harumi/config.json` in the current directory with `project_id` + repo metadata.
 3. Configures the `harumi` git remote with an authenticated HTTPS URL (requires a `git_token` in credentials from `harumi login` and the current directory to already be a git working tree — `link` warns and skips remote setup otherwise).
-
-`harumi help` is `harumi --help`, and `harumi help <command>` is `harumi <command> --help` (it is not listed in the command list).
 
 After binding (via `new`/`import`/`clone`/`link`), `harumi run`, `harumi runs`, `harumi check`, `harumi skills add`, `harumi datasources`, `harumi schedules`, and `harumi secrets` all work without any `--project` flag. `.harumi/config.json` is searched upward from cwd, so these commands work from subdirectories too.
 

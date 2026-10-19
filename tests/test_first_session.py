@@ -280,3 +280,16 @@ def test_an_email_with_brackets_is_printed_whole_after_login(monkeypatch):
     result = runner.invoke(cli.app, ["login", "--email", "x@example.com"], input="123456\n")
 
     assert "a[bold]b@example.com" in plain(result.output)
+
+
+def test_the_help_note_in_the_skill_reference_is_not_filed_under_an_unrelated_command():
+    """A note about `harumi help` that sits at the end of the `link` or `logout` section reads
+    as part of that command, and an agent looking up `help` will not find it."""
+    import pathlib
+
+    ref = (pathlib.Path(__file__).resolve().parents[1] / ".agents/skills/harumi-cli/references/commands.md").read_text(encoding="utf-8")
+    note = "`harumi help <command>` is `harumi <command> --help`"
+    first_heading = ref.index("\n## ")
+
+    assert note in ref
+    assert ref.index(note) < first_heading, "the note is under a command's section instead of the overview at the top"
