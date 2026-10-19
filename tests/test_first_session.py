@@ -6,6 +6,7 @@ import os
 import re
 
 import pytest
+import typer
 from typer.main import get_command
 from typer.testing import CliRunner
 
@@ -240,10 +241,21 @@ def test_start_without_a_login_fails_before_asking_anything(monkeypatch):
 
 def test_start_with_a_login_still_asks(monkeypatch):
     config.save_credentials(access_token="a", refresh_token="r", email="ana@example.com", replace=True)
+    asked = []
 
-    result = runner.invoke(cli.app, ["start"], input="\n")  # no choice: aborts after showing the menu
+    def stop_at_the_first_question(text, *a, **k):
+        asked.append(text)
+        raise typer.Abort()
+
+    # Not `input="\n"` and hoping the input runs out: click 8.4 treats that as an abort, but
+    # click 8.1 (the Python 3.9 job) returns an empty answer forever, and `start` re-asks
+    # until it gets 1, 2 or 3, so the test hung CI for twelve minutes.
+    monkeypatch.setattr(cli.typer, "prompt", stop_at_the_first_question)
+
+    result = runner.invoke(cli.app, ["start"])
 
     assert "What do you have" in result.output
+    assert asked == ["Choice (1/2/3)"]  # it got as far as asking
     assert "harumi login" not in result.output  # the login guard did not fire for someone who is logged in
 
 
