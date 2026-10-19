@@ -116,7 +116,10 @@ the current options with `gh project field-list 4 --owner harumi-io`. If `item_i
   `chore(deploy-dev): …`, bot PRs.
 - **PR body:** use the PR template: `What`, `Why`, `Testing`, `Issue` (`Closes #N`, or `Refs #N` if the
   PR is partial) and, only for auth, billing, data, deploy or infra changes, `Risk`. Open as a draft
-  until CI is green and you have read your own diff. One concern per PR, about 400 changed lines or
+  and push every change to it while it is a draft (the review bot skips drafts). When the work is
+  complete, CI is green and you have read your own diff, mark it ready yourself (`gh pr ready <n>`)
+  and set the issue to In review, so the bot reviews once, on the final state. Do not mark it ready
+  earlier, and do not wait for a person to do it. One concern per PR, about 400 changed lines or
   fewer (lockfiles and generated files do not count); say why if it is larger. UI changes get a
   screenshot. Do not force-push after review starts.
 - **Issue:** title `Area: short description`, in English. Set the issue type (`Feature`, `Bug`, `Task`
