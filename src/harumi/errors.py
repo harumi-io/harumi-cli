@@ -55,6 +55,22 @@ class ApiError(HarumiError):
         super().__init__(f"harumi-api returned HTTP {status_code}: {detail}")
 
 
+class SessionRefreshError(ApiError):
+    """Renewing the login failed for a reason that does not mean "the session is over"
+    (a firewall's 403, a server error, a rate limit).
+
+    A separate type so callers can tell it from the error of whatever command was
+    running: a refresh that fails while `harumi run` executes is not the project's fault.
+    """
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(status_code, detail)
+        self.args = (f"Could not renew your login: harumi-api returned HTTP {status_code}: {detail}",)
+
+    def __str__(self) -> str:
+        return self.args[0]
+
+
 class ApiUnreachableError(ApiError):
     """harumi-api could not be reached at all (status 0). Distinct from other `ApiError(0, ...)`
     (e.g. a failed presigned S3 transfer) so the CLI only points at the Harumi status page

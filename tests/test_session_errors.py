@@ -315,3 +315,65 @@ def test_run_without_a_login_does_not_push_your_code_first(tmp_path, monkeypatch
     assert result.exit_code == 1
     assert "not logged in" in result.output
     assert "harumi login" in result.output
+
+
+# -- a failed refresh is labelled as one ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("status", [403, 404, 500, 502, 503])
+def test_a_refresh_that_fails_without_ending_the_session_is_its_own_kind_of_error(status):
+    from harumi.errors import SessionRefreshError
+
+    with pytest.raises(SessionRefreshError) as exc:
+        auth.refresh_session(Config.load(), "r", transport=_transport(refresh_status=status))
+
+    assert exc.value.status_code == status
+    assert "renew your login" in str(exc.value)
+    assert isinstance(exc.value, ApiError)  # existing handlers still catch it
+
+
+def test_an_unreachable_server_is_not_dressed_up_as_a_refresh_failure():
+    from harumi.errors import ApiUnreachableError, SessionRefreshError
+
+    def down(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    with pytest.raises(ApiUnreachableError) as exc:
+        auth.refresh_session(Config.load(), "r", transport=httpx.MockTransport(down))
+    assert not isinstance(exc.value, SessionRefreshError)
+
+
+def test_at_the_command_line_a_blocked_refresh_says_so_and_does_not_say_expired(api):
+    _store()
+    api["transport"] = _transport(refresh_status=403)  # e.g. a firewall in front of the API
+
+    result = runner.invoke(cli.app, ["whoami"])
+
+    out = " ".join(result.output.split())
+    assert result.exit_code == 1
+    assert "Could not renew your login" in out and "403" in out
+    assert "has expired" not in out and "Run `harumi login`" not in out, "sent them into a login loop"
+
+
+# -- the proactive refresh goes where the client goes ----------------------------------------------------
+
+
+def test_the_proactive_refresh_uses_the_clients_own_transport():
+    """The refresh that runs *before* a request (the access token is about to expire)
+    used a default transport, so the five tests above it had been sending a fake refresh
+    token to the real production API, and passed only because it answered 422 like the
+    fake did. It has to go through the transport the client was given."""
+    _store()  # an expired access token, so the refresh happens before the request
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path.endswith("/users/refresh"):
+            return httpx.Response(
+                200, json={"id": "u1", "email": "ana@example.com", "access_token": "new", "refresh_token": "r2", "expires_at": int(time.time()) + 3600}
+            )
+        return httpx.Response(200, json={"ok": True})
+
+    ApiClient(Config.load(), transport=httpx.MockTransport(handler)).request("GET", "/users/profile")
+
+    assert seen == ["/api/users/refresh", "/api/users/profile"], seen
