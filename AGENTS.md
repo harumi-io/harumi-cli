@@ -26,6 +26,12 @@ no `set_status`: they are GraphQL, and many agents share one token, so they exha
 quota and everything starts failing with `API rate limit already exceeded`. Cards move by
 themselves ("How cards move"). Only a person moves one by hand, in the project UI, to pause an item.
 
+**Do not poll.** Look at a PR, a check or an issue once per step, not in a loop: no `gh pr checks --watch`,
+no sleep-and-recheck on `gh pr view`, `gh pr list`, `gh issue view` or `gh issue list` (all GraphQL, so
+each repeat spends the shared quota). To wait for CI, read it over REST at most once a minute
+(`gh api repos/{owner}/{repo}/commits/<sha>/check-runs --jq '.check_runs[]|"\(.name) \(.conclusion)"'`),
+or tell me what is pending and stop.
+
 ### Before writing code
 
 Skip this for read-only questions and reviews. Otherwise check, then say in a line or two what you
