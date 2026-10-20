@@ -363,3 +363,96 @@ def test_select_builds_the_prompt_inside_the_patch(monkeypatch):
 
     assert at_build["patched"] is True
     assert InquirerControl.get_search_string_tokens is original
+
+
+# -- select_many: driven through the real prompt, with real key presses ------------------------------------
+
+
+def _drive(keys: str, options, **kw):
+    """Run select_many for real: questionary and prompt_toolkit, fed `keys` as if typed."""
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe:
+        pipe.send_text(keys)
+        with create_app_session(input=pipe, output=DummyOutput()):
+            return interactive.select_many("Pick", options, **kw)
+
+
+DOWN, SPACE, ENTER, CTRL_C = "\x1b[B", " ", "\r", "\x03"
+ROWS = [Option("a", "run-a"), Option("b", "run-b"), Option("c", "run-c"), Option("d", "run-d")]
+
+
+@pytest.fixture
+def at_a_terminal(monkeypatch):
+    monkeypatch.setattr(interactive, "is_interactive", lambda *a, **k: True)
+
+
+def test_select_many_returns_what_was_ticked_in_list_order(at_a_terminal):
+    # tick the first, move down twice, tick the third, confirm
+    assert _drive(SPACE + DOWN + DOWN + SPACE + ENTER, ROWS, at_least=1) == ["run-a", "run-c"]
+
+
+def test_enter_is_refused_until_enough_are_ticked(at_a_terminal):
+    # Enter with nothing ticked does nothing; then tick one and confirm
+    assert _drive(ENTER + SPACE + ENTER, ROWS, at_least=1) == ["run-a"]
+
+
+def test_it_will_not_accept_more_than_the_maximum(at_a_terminal):
+    # tick a, b and c with a limit of two: the first Enter is refused. The cursor is still on c,
+    # so the next space unticks c, and the second Enter is accepted with a and b.
+    keys = SPACE + DOWN + SPACE + DOWN + SPACE + ENTER + SPACE + ENTER
+    assert _drive(keys, ROWS, at_least=1, at_most=2) == ["run-a", "run-b"]
+
+
+def test_ctrl_c_quits_quietly(at_a_terminal):
+    assert _drive(CTRL_C, ROWS) is None
+
+
+def test_without_a_terminal_it_fails_with_the_choices_and_the_flag(monkeypatch):
+    monkeypatch.setattr(interactive, "is_interactive", lambda *a, **k: False)
+    monkeypatch.setattr("questionary.checkbox", lambda *a, **k: (_ for _ in ()).throw(AssertionError("prompted")))
+
+    with pytest.raises(NonInteractiveError) as err:
+        interactive.select_many("Pick runs", ROWS, flag="the RUN_ID arguments")
+
+    text = str(err.value)
+    assert "no interactive terminal" in text and "the RUN_ID arguments" in text
+    assert all(o.label in text for o in ROWS)
+
+
+@pytest.mark.parametrize(
+    "least, most, said",
+    [(1, None, "pick at least 1"), (2, 2, "pick exactly 2"), (1, 3, "pick 1 to 3")],
+)
+def test_the_rule_is_said_in_words(least, most, said):
+    assert interactive._count_rule(least, most) == said
+
+
+def test_a_label_with_brackets_is_printed_whole_after_ticking(at_a_terminal, capsys):
+    _drive(SPACE + ENTER, [Option("[x] odd", "v")], at_least=1)
+
+    assert "[x] odd" in capsys.readouterr().out
+
+
+def test_select_many_needs_at_least_one_option():
+    with pytest.raises(ValueError):
+        interactive.select_many("Pick", [])
+
+
+def test_the_multi_select_erases_itself_when_it_closes(at_a_terminal, monkeypatch):
+    """A full-screen list left behind after the answer is clutter; only the answer line stays."""
+    seen = {}
+
+    class Fake:
+        application = types.SimpleNamespace(erase_when_done=False)
+
+        def unsafe_ask(self):
+            seen["erase"] = self.application.erase_when_done
+            return ["run-a"]
+
+    monkeypatch.setattr("questionary.checkbox", lambda *a, **k: Fake())
+
+    assert interactive.select_many("Pick", ROWS) == ["run-a"]
+    assert seen["erase"] is True

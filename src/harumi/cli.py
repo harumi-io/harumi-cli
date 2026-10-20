@@ -1066,7 +1066,11 @@ _TIER_LABELS = {
 
 
 def _tier_label(tier: Optional[str]) -> str:
-    return _TIER_LABELS.get(tier or "", tier or "none")
+    """A plan's name for people. Known plans have their own spelling; a plan the CLI has
+    not heard of yet (the 7-day trial arrived this way) is shown as words, not as a code."""
+    if not tier:
+        return "none"
+    return _TIER_LABELS.get(tier) or tier.replace("_", " ").replace("-", " ").title()
 
 
 def _fmt_reset(iso: Optional[str], *, with_time: bool) -> str:
@@ -1150,16 +1154,30 @@ def _run_started(run) -> str:
     return _ago(run.started or run.created_at)
 
 
+def _newest_runs_first(runs):
+    """Runs by the date the menu shows (started, else created), newest first; undated last.
+
+    Not trusting the order the API sends them in: cutting to the latest few before sorting
+    would quietly offer the wrong few if that order ever changed.
+    """
+    floor = datetime.min.replace(tzinfo=timezone.utc)
+
+    def key(r):
+        when = r.started or r.created_at or floor
+        return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+    return sorted(runs, key=key, reverse=True)
+
+
+def _run_option(r) -> interactive.Option:
+    """One run as a menu row: a short id and its status, with its branch and age beside it."""
+    hint = "  ".join(p for p in (r.git_branch or "", f"started {_run_started(r)}" if _run_started(r) else "") if p)
+    return interactive.Option(f"{r.id[:8]}  {r.status}", r.id, hint=hint)
+
+
 def _pick_run(client: Client, project_id: str, runs, *, action: str, flag: str) -> Optional[str]:
     """Choose one of `runs`; its id, or None if the user backed out."""
-    options = [
-        interactive.Option(
-            f"{r.id[:8]}  {r.status}",
-            r.id,
-            hint="  ".join(p for p in (r.git_branch or "", f"started {_run_started(r)}" if _run_started(r) else "") if p),
-        )
-        for r in runs
-    ]
+    options = [_run_option(r) for r in runs]
     return interactive.select(f"Which run do you want to {action}?", options, flag=flag)  # type: ignore[return-value]
 
 
@@ -1334,7 +1352,10 @@ def usage(
 
     over = any(p is not None and p >= 100 for p in (weekly_pct, monthly_pct))
     if over and not usage_data.overage_enabled:
-        console.print(f"[yellow]You've reached a limit. {_paywall_hint('weekly_limit_reached')}[/yellow]")
+        # Not _paywall_hint: that one sends you to `harumi usage`, which is where you are.
+        # And overage is only an option on plans that have it.
+        way_on = "upgrade or turn on overage" if usage_data.overage_allowed else "upgrade"
+        console.print(f"[yellow]You've reached a limit. Visit {_billing_url()} to {way_on}.[/yellow]")
 
 
 # ---------------------------------------------------------------------------
@@ -1634,18 +1655,33 @@ def specs(
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """List available kernel specs (sizes/images) for running code."""
+    """List the kernels a run can use: size, GPU, and which plans include them.
+
+    Pass a kernel's name to `harumi run --kernel`, or set it as `kernel` in harumi.toml.
+    """
     client = _get_client(api_url=api_url, org=org)
-    table = Table("name", "display_name", "cpu", "memory", "subscription_required")
-    for spec in client.get_specs():
+    specs_ = client.get_specs()
+    if not specs_:
+        console.print("No kernels are available to this workspace.")
+        return
+    # The name column never shrinks: it is what someone copies into --kernel, and a name
+    # cut to fit is no use. The rest wrap or give way.
+    # Short headers and the long label last, so the label is what wraps or gives way and
+    # no header is cut ("subscription" became "subscript…" when it was a column of its own).
+    table = Table("name", "cpu", "memory", "gpu", "plan", "label")
+    table.columns[0].no_wrap = True
+    table.columns[0].overflow = "fold"
+    for spec in specs_:
         table.add_row(
-            spec.name,
-            spec.display_name,
-            str(spec.size.cpu),
-            spec.size.memory,
-            "yes" if spec.subscription_required else "no",
+            escape(spec.name),
+            f"{spec.size.cpu:g}",
+            escape(spec.size.memory),
+            "yes" if spec.size.gpu else "no",
+            "paid" if spec.subscription_required else "any",
+            escape(spec.display_name),
         )
     console.print(table)
+    console.print("[dim]Use one with [bold]harumi run --kernel <name>[/bold].[/dim]")
 
 
 @app.command()
@@ -2610,7 +2646,7 @@ def run(
     branch: Optional[str] = typer.Option(None, "--branch", "-b", help="Run a specific branch."),
     commit: Optional[str] = typer.Option(None, "--commit", help="Run a specific commit SHA."),
     command: Optional[str] = typer.Option(None, "--command", "-c", help="Override the harumi.toml command."),
-    kernel: Optional[str] = typer.Option(None, "--kernel", "-k", help="Override the kernel spec."),
+    kernel: Optional[str] = typer.Option(None, "--kernel", "-k", help="Kernel to run on (see `harumi specs`), overriding harumi.toml."),
     watch: bool = typer.Option(False, "--watch", "-w", help="Block until the run finishes."),
     output_dir: Optional[Path] = typer.Option(
         None,
@@ -3025,6 +3061,7 @@ def runs_cancel(
 # ---------------------------------------------------------------------------
 
 _MIN_COMPARE_RUNS, _MAX_COMPARE_RUNS = 2, 4
+_COMPARE_PICKER_RUNS = 25  # as many as `runs list` shows by default
 _NO_VALUE = "—"
 
 
@@ -3051,10 +3088,59 @@ def _kpi_cell(value: object, unit: Optional[str], delta: object) -> str:
     return f"{text} ({change:+.4g})" if change is not None else text
 
 
+_FIND_RUN_IDS = "Find run ids with [bold]harumi runs list[/bold], or give none at a terminal to pick them from a list."
+
+
+def _pick_runs_to_compare(client: Client, project_id: str) -> Optional[list[str]]:
+    """Ask for a baseline, then the runs to compare it with. None if the user backed out.
+
+    Only runs that succeeded are offered: one still going has no output yet, and a failed
+    one never will, so choosing it could only produce an empty column.
+    """
+    ready = _newest_runs_first([r for r in client.list_runs(project_id) if r.succeeded])[:_COMPARE_PICKER_RUNS]
+    if len(ready) < _MIN_COMPARE_RUNS:
+        _fail(
+            "Comparing needs at least two runs that succeeded, and this project has "
+            f"{'one' if ready else 'none'}. Run it again with [bold]harumi run --watch[/bold]."
+        )
+    flag = f"the RUN_ID arguments ({_MIN_COMPARE_RUNS} to {_MAX_COMPARE_RUNS}; the first is the baseline)"
+    # With no terminal either menu raises NonInteractiveError, which `_handle_errors` prints
+    # with the list of runs and `flag`, the same as `runs cancel`.
+    baseline = _pick_run(client, project_id, ready, action="use as the baseline", flag=flag)
+    if baseline is None:
+        return None
+    others = interactive.select_many(
+        "Which runs do you want to compare it with?",
+        [_run_option(r) for r in ready if r.id != baseline],
+        at_least=_MIN_COMPARE_RUNS - 1,
+        at_most=_MAX_COMPARE_RUNS - 1,
+        flag=flag,
+    )
+    return None if not others else [baseline, *others]  # type: ignore[list-item]
+
+
+def _check_compare_ids(run_ids: list[str]) -> list[str]:
+    """The ids to compare, or a message about what is wrong with them."""
+    ids = list(dict.fromkeys(run_ids))
+    if len(ids) != len(run_ids):
+        _fail(f"A run can only be compared once: one of those ids is in the list more than once. {_FIND_RUN_IDS}")
+    if len(ids) < _MIN_COMPARE_RUNS:
+        _fail(f"Comparing needs {_MIN_COMPARE_RUNS} to {_MAX_COMPARE_RUNS} runs, and the first is the baseline. {_FIND_RUN_IDS}")
+    if len(ids) > _MAX_COMPARE_RUNS:
+        _fail(f"Comparing takes at most {_MAX_COMPARE_RUNS} runs, and you gave {len(ids)}. {_FIND_RUN_IDS}")
+    if any("," in run_id for run_id in ids):
+        # The API takes the ids as one comma-separated parameter, so a comma would
+        # silently become extra ids.
+        _fail("Run ids can't contain a comma; separate them with spaces.")
+    return ids
+
+
 @app.command()
 @_handle_errors
 def compare(
-    run_ids: list[str] = typer.Argument(..., metavar="RUN_ID...", help="2-4 run ids. The first is the baseline."),
+    run_ids: Optional[list[str]] = typer.Argument(
+        None, metavar="[RUN_ID]...", help="2-4 run ids; the first is the baseline. Pick from a list if omitted."
+    ),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     as_json: bool = typer.Option(False, "--json", help="Print the API's comparison as JSON, for scripts."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
@@ -3063,19 +3149,30 @@ def compare(
     """Compare 2-4 runs: KPIs, the winner, and whether they used the same inputs.
 
     The first run is the baseline; each change is measured against it. KPIs are
-    the project's `[[output.kpi]]` declarations in harumi.toml.
+    the project's `\\[\\[output.kpi]]` declarations in harumi.toml. With no run ids, at
+    a terminal, you pick the baseline and then the runs to compare it with.
     """
-    ids = list(dict.fromkeys(run_ids))
-    if not _MIN_COMPARE_RUNS <= len(ids) <= _MAX_COMPARE_RUNS or len(ids) != len(run_ids):
-        _fail(f"Compare {_MIN_COMPARE_RUNS} to {_MAX_COMPARE_RUNS} distinct runs (the first is the baseline).")
-    if any("," in run_id for run_id in ids):
-        # The API takes the ids as one comma-separated parameter, so a comma would
-        # silently become extra ids.
-        _fail("Run ids can't contain a comma.")
+    if run_ids:
+        # Say what is wrong with the arguments before needing a project or a login: someone
+        # outside a project who mistypes should hear about the typo, not about the project.
+        ids = _check_compare_ids(run_ids)
+        project_id = _resolve_project(project)
+        client = _get_client(api_url=api_url, org=org)
+    else:
+        project_id = _resolve_project(project)
+        client = _get_client(api_url=api_url, org=org)
+        picked = _pick_runs_to_compare(client, project_id)
+        if picked is None:
+            return  # backed out of a menu
+        ids = picked  # valid by construction: the menus take 2 to 4 distinct runs
 
-    project_id = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-    result = client.compare_runs(project_id, ids)
+    try:
+        result = client.compare_runs(project_id, ids)
+    except ApiError as exc:
+        if exc.status_code == 404:
+            # The API's own words say what is missing; this says where to find the real ids.
+            _fail(f"{escape(str(exc))}\nIf a run id is wrong, list this project's runs with [bold]harumi runs list[/bold].")
+        raise
 
     if as_json:
         # typer.echo, not the rich console: no wrapping or colour in piped output.
@@ -3124,6 +3221,13 @@ def compare(
         branch = next((c.get("branch") for c in columns if c.get("run_id") == winner), None) or winner
         note = " (best value of the primary KPI, marked *)" if any_primary else ""
         console.print(f"Winner: [bold]{escape(str(branch))}[/bold]{note}")
+        console.print(f"[dim]Get its files: [bold]harumi runs download {escape(str(winner))}[/bold][/dim]", soft_wrap=True)
+    elif not result.get("kpis"):
+        # An empty table whose "reason" is about a primary KPI misleads: there are no KPIs at all.
+        console.print(
+            "[yellow]This project declares no KPIs, so there is only runtime to compare.[/yellow] "
+            "Declare them as [bold]\\[\\[output.kpi]][/bold] tables in harumi.toml."
+        )
     elif result.get("no_winner_reason"):
         console.print(f"No winner: {escape(str(result['no_winner_reason']))}")
 
@@ -4602,7 +4706,7 @@ def schedules_add(
     git_branch: str = typer.Option("main", "--git-branch", help="Branch to run on each fire."),
     git_commit: Optional[str] = typer.Option(None, "--git-commit", help="Pin to a specific commit instead of the branch tip."),
     command: Optional[str] = typer.Option(None, "--command", help="Override the harumi.toml command."),
-    kernel: Optional[str] = typer.Option(None, "--kernel", help="Override the kernel spec."),
+    kernel: Optional[str] = typer.Option(None, "--kernel", help="Kernel to run on (see `harumi specs`), overriding the project's."),
     output_format: Optional[str] = typer.Option(None, "--output-format", help="Output format for scheduled runs."),
     email_to: Optional[str] = typer.Option(None, "--email-to", help="only-me | everyone | comma-separated emails."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
@@ -4651,7 +4755,7 @@ def schedules_update(
     git_branch: Optional[str] = typer.Option(None, "--git-branch", help="Branch to run on each fire."),
     git_commit: Optional[str] = typer.Option(None, "--git-commit", help="Pin to a specific commit instead of the branch tip."),
     command: Optional[str] = typer.Option(None, "--command", help="Override the harumi.toml command."),
-    kernel: Optional[str] = typer.Option(None, "--kernel", help="Override the kernel spec."),
+    kernel: Optional[str] = typer.Option(None, "--kernel", help="Kernel to run on (see `harumi specs`), overriding the project's."),
     output_format: Optional[str] = typer.Option(None, "--output-format", help="Output format for scheduled runs."),
     email_to: Optional[str] = typer.Option(None, "--email-to", help="only-me | everyone | comma-separated emails."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),

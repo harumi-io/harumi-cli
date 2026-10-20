@@ -155,6 +155,67 @@ def select(
     return value
 
 
+def select_many(
+    message: str,
+    options: Sequence[Option],
+    *,
+    at_least: int = 1,
+    at_most: Optional[int] = None,
+    flag: Optional[str] = None,
+) -> Optional[list]:
+    """Ask the user to tick several options; return their `value`s in list order, or None if they quit.
+
+    Arrow keys move, space ticks, Enter confirms. Enter is refused, with the reason on
+    screen, until the number ticked is within [at_least, at_most]. The same terminal
+    rules as `select`: without one this raises `NonInteractiveError` naming `flag`.
+    """
+    if not options:
+        raise ValueError("select_many() needs at least one option")
+    if not is_interactive():
+        raise NonInteractiveError(non_interactive_message(message, options, flag))
+
+    import questionary
+    from questionary import Choice
+
+    def check(picked) -> object:
+        n = len(picked)
+        if n < at_least or (at_most is not None and n > at_most):
+            return _count_rule(at_least, at_most)
+        return True
+
+    width = max(len(o.label) for o in options)
+    # Plain text titles, as in `select` for long lists: the library matches and redraws them as strings.
+    choices = [Choice(title=_title(o, width, True), value=o.value) for o in options]
+    try:
+        question = questionary.checkbox(
+            message,
+            choices=choices,
+            qmark="",
+            pointer=_pointer(),
+            # Short on purpose: longer wrapped mid-phrase at 100 columns.
+            instruction=f"(space to tick, enter to confirm; {_count_rule(at_least, at_most)})",
+            validate=check,
+            style=_style(),
+        )
+        question.application.erase_when_done = True
+        values = question.unsafe_ask()
+    except KeyboardInterrupt:
+        return None
+    if values is None:
+        return None
+    labels = [o.label for o in options if o.value in values]
+    _echo_answer(message, ", ".join(labels))
+    return values
+
+
+def _count_rule(at_least: int, at_most: Optional[int]) -> str:
+    if at_most is None:
+        return f"pick at least {at_least}"
+    if at_least == at_most:
+        return f"pick exactly {at_least}"
+    return f"pick {at_least} to {at_most}"
+
+
 def _plain_title(choice) -> str:
     title = getattr(choice, "title", "")
     return "".join(t[1] for t in title) if isinstance(title, list) else str(title)

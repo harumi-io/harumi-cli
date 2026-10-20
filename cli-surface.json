@@ -218,10 +218,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "2-4 run ids. The first is the baseline."
+          "help": "2-4 run ids; the first is the baseline. Pick from a list if omitted."
         },
         {
           "opts": [
@@ -2804,7 +2804,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the kernel spec."
+          "help": "Kernel to run on (see `harumi specs`), overriding harumi.toml."
         },
         {
           "opts": [
@@ -3177,7 +3177,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the kernel spec."
+          "help": "Kernel to run on (see `harumi specs`), overriding the project's."
         },
         {
           "opts": [
@@ -3494,7 +3494,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the kernel spec."
+          "help": "Kernel to run on (see `harumi specs`), overriding the project's."
         },
         {
           "opts": [
@@ -4332,7 +4332,7 @@
     },
     {
       "path": "specs",
-      "help": "List available kernel specs (sizes/images) for running code.",
+      "help": "List the kernels a run can use: size, GPU, and which plans include them.",
       "params": [
         {
           "opts": [

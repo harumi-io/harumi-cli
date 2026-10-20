@@ -43,6 +43,7 @@ harumi runs list
 harumi runs get <RUN_ID>
 
 # Compare 2-4 runs (the first is the baseline): KPIs, winner, same inputs?
+harumi compare                      # pick the runs from a list
 harumi compare <RUN_ID> <RUN_ID>
 
 # 6. Check the project's dashboard.toml renders the widgets you expect
