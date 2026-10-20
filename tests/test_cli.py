@@ -2755,13 +2755,21 @@ def test_compare_older_api_without_a_verdict_still_prints(api):
     assert "Total cost" in result.output
 
 
-@pytest.mark.parametrize("ids", [["run-1"], ["a", "b", "c", "d", "e"], ["run-1", "run-1"]])
-def test_compare_needs_two_to_four_distinct_runs_before_calling_the_api(api, ids):
+@pytest.mark.parametrize(
+    "ids, said",
+    [
+        (["run-1"], "needs 2 to 4 runs"),
+        (["a", "b", "c", "d", "e"], "at most 4 runs"),
+        (["run-1", "run-1"], "more than once"),
+    ],
+)
+def test_compare_needs_two_to_four_distinct_runs_before_calling_the_api(api, ids, said):
     result = runner.invoke(cli.app, ["compare", *ids, "--project", "proj-1"])
 
     assert result.exit_code != 0
-    assert "Compare 2 to 4 distinct runs" in result.output
-    assert api.paths() == []
+    assert said in " ".join(result.output.split())  # each case says what is wrong with it
+    assert "harumi runs list" in " ".join(result.output.split())  # and where ids come from
+    assert api.paths() == []  # and nothing was sent
 
 
 def test_compare_prints_branch_names_and_paths_that_look_like_rich_markup(api):

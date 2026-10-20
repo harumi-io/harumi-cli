@@ -9,6 +9,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [Auth commands](#auth-commands)
 - [Environments](#environments)
 - [profile](#profile)
+- [usage](#usage)
 - [specs](#specs)
 - [blueprints](#blueprints)
 - [projects](#projects)
@@ -100,13 +101,21 @@ harumi profile set [--first-name N] [--last-name N] [--bio TEXT] [--api-url URL]
 
 `set` sends only the flags you pass as a partial update (`PUT /users/profile`); errors locally with "No fields to update" if none are given.
 
+## `usage`
+
+```
+harumi usage [--org ORG] [--api-url URL]
+```
+
+Shows the plan, the weekly and monthly allowance as a percentage used (with when each resets), and overage. `--org` shows an organization's pooled allowance instead of your personal one. States it can print: `no active plan` with the reason and what to do; `Harumi team, unlimited`; `no limit` for a window the plan does not cap; `Overage: not available on this plan`, `off`, `on` (dollars spent of the cap) or `paused` (an invoice is unpaid). When a limit is reached it ends with the billing link, and offers overage only if the plan has it. A plan the CLI has no label for is shown as words (`trial` becomes `Trial`). It exits 1 with the usual platform-down message when the API fails. This is the same allowance a `402` from `run` or chat is about.
+
 ## `specs`
 
 ```
 harumi specs [--api-url URL] [--org ORG]
 ```
 
-Lists kernel specs (`name`, `display_name`, `cpu`, `memory`, `subscription_required`) from `GET /sandbox/specs`. `name` is what you pass to `run --kernel`.
+Lists kernel specs from `GET /sandbox/specs` as a table of `name`, `cpu`, `memory`, `gpu` (yes/no), `plan` (`any` = every plan includes it, `paid` = it needs a subscription) and `label`. `name` is what you pass to `run --kernel` and `schedules add/update --kernel`; it is never shortened, whatever the terminal width. It ends with a line saying how to use one. An empty list prints `No kernels are available to this workspace.`
 
 ## `blueprints`
 
@@ -261,11 +270,14 @@ harumi runs download [RUN_ID] [--output-dir DIR] [--project ID] [--api-url URL] 
 ## `compare`
 
 ```
-harumi compare RUN_ID... [--json] [--project ID] [--api-url URL] [--org ORG]
+harumi compare [RUN_ID...] [--json] [--project ID] [--api-url URL] [--org ORG]
 ```
 
-- Compares 2–4 distinct runs (the first is the baseline): `GET /projects/{id}/compare?runs=a,b,c`. Checked before any request is made.
-- Prints the project's `[[output.kpi]]` values with the change against the baseline, runtimes, the winner (best value of the primary KPI; or why there is none), whether the runs used the same inputs (`same` / `differs` with the files / `unknown`), and the server's warnings.
+- Compares 2–4 distinct runs (the first is the baseline): `GET /projects/{id}/compare?runs=a,b,c`. The count and duplicates are checked before the comparison request; a wrong count says to find ids with `harumi runs list`.
+- **No `RUN_ID`s**: at a terminal it asks for the baseline, then ticks the runs to compare it with (space ticks, Enter confirms; baseline + 1 to 3 others). Only runs that **succeeded** are offered (the latest 25, newest first): one still going has no output yet and a failed one never will. It needs at least two, else it says so and points at `harumi run`. **Without a terminal (agents, CI, pipes) it never prompts**: it exits 1 listing the runs and telling you to pass them as `RUN_ID` arguments. An agent should pass the ids itself.
+- An unknown run id (HTTP 404) adds a pointer to `harumi runs list`.
+- Prints the project's `[[output.kpi]]` values with the change against the baseline, runtimes, the winner (best value of the primary KPI; or why there is none) followed by `harumi runs download <winner id>`, whether the runs used the same inputs (`same` / `differs` with the files / `unknown`), and the server's warnings.
+- A project with no KPIs declared says so and how to declare them (`[[output.kpi]]` tables in `harumi.toml`), instead of "no KPI is marked primary" under a table that has only runtime.
 - **`--json`**: prints the API's response unchanged, for scripts.
 
 ## Editing the repo (git)
