@@ -35,41 +35,63 @@ jobs:
           READY: In review
           DRAFT: In progress
         run: |
-          # $vars in the single-quoted GraphQL strings are GraphQL variables, not shell ones
-          # (actionlint reports them as SC2016 info; that is expected).
           set -euo pipefail
 
           # A PR opened ready is linked to its issue at the same moment, and the built-in
           # "PR linked" workflow then writes In progress. Let it land first so ours is last.
           if [ "$ACTION" = "opened" ]; then sleep 45; fi
 
-          read -r NAME_OWNER NAME <<<"${REPO%%/*} ${REPO##*/}"
+          OWNER_NAME="${REPO%%/*}"
+          REPO_NAME="${REPO##*/}"
 
-          pr_json=$(gh api graphql \
-            -f owner="$NAME_OWNER" -f name="$NAME" -F pr="$PR" \
-            -f query='
-              query($owner: String!, $name: String!, $pr: Int!) {
-                repository(owner: $owner, name: $name) {
-                  pullRequest(number: $pr) {
-                    state
-                    isDraft
-                    closingIssuesReferences(first: 20) {
+          # Quoted heredocs: the $vars in the GraphQL are GraphQL variables, not shell ones.
+          read -r -d '' PR_QUERY <<'GRAPHQL' || true
+          query($owner: String!, $name: String!, $pr: Int!) {
+            repository(owner: $owner, name: $name) {
+              pullRequest(number: $pr) {
+                state
+                isDraft
+                closingIssuesReferences(first: 20) {
+                  nodes {
+                    number
+                    projectItems(first: 20) {
                       nodes {
-                        number
-                        projectItems(first: 20) {
-                          nodes {
-                            id
-                            project { id number owner { ... on Organization { login } } }
-                            status: fieldValueByName(name: "Status") {
-                              ... on ProjectV2ItemFieldSingleSelectValue { name }
-                            }
-                          }
+                        id
+                        project { id number owner { ... on Organization { login } } }
+                        status: fieldValueByName(name: "Status") {
+                          ... on ProjectV2ItemFieldSingleSelectValue { name }
                         }
                       }
                     }
                   }
                 }
-              }')
+              }
+            }
+          }
+          GRAPHQL
+
+          read -r -d '' FIELD_QUERY <<'GRAPHQL' || true
+          query($id: ID!) {
+            node(id: $id) {
+              ... on ProjectV2 {
+                field(name: "Status") {
+                  ... on ProjectV2SingleSelectField { id options { id name } }
+                }
+              }
+            }
+          }
+          GRAPHQL
+
+          read -r -d '' MUTATION <<'GRAPHQL' || true
+          mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+            updateProjectV2ItemFieldValue(input: {
+              projectId: $project, itemId: $item, fieldId: $field,
+              value: { singleSelectOptionId: $option }
+            }) { projectV2Item { id } }
+          }
+          GRAPHQL
+
+          pr_json=$(gh api graphql -f owner="$OWNER_NAME" -f name="$REPO_NAME" -F pr="$PR" -f query="$PR_QUERY")
 
           state=$(jq -r '.data.repository.pullRequest.state' <<<"$pr_json")
           if [ "$state" != "OPEN" ]; then
@@ -97,16 +119,7 @@ jobs:
           fi
 
           project_id=$(jq -r '.[0].project' <<<"$items")
-          field_json=$(gh api graphql -f id="$project_id" -f query='
-            query($id: ID!) {
-              node(id: $id) {
-                ... on ProjectV2 {
-                  field(name: "Status") {
-                    ... on ProjectV2SingleSelectField { id options { id name } }
-                  }
-                }
-              }
-            }')
+          field_json=$(gh api graphql -f id="$project_id" -f query="$FIELD_QUERY")
           field_id=$(jq -r '.data.node.field.id' <<<"$field_json")
           option_id=$(jq -r --arg t "$target" '.data.node.field.options[] | select(.name == $t) | .id' <<<"$field_json")
           if [ -z "$option_id" ]; then
@@ -128,12 +141,6 @@ jobs:
             gh api graphql \
               -f project="$project_id" -f item="$(jq -r '.item' <<<"$row")" \
               -f field="$field_id" -f option="$option_id" \
-              -f query='
-                mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
-                  updateProjectV2ItemFieldValue(input: {
-                    projectId: $project, itemId: $item, fieldId: $field,
-                    value: { singleSelectOptionId: $option }
-                  }) { projectV2Item { id } }
-                }' >/dev/null
+              -f query="$MUTATION" >/dev/null
             echo "#$issue: '$current' -> '$target'."
           done
