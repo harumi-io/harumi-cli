@@ -494,10 +494,12 @@ def _hidden_alias(group: typer.Typer, old_name: str, fn, old: str, use: str) -> 
 
 # What is taken out of a name someone else chose (the pattern is raw: `re` reads the \x and \u escapes,
 # so the source line has no invisible characters of its own):
-#   C0 and C1 controls (terminal escapes), and the line and paragraph separators U+2028/U+2029 (below)
+#   C0 and C1 controls (terminal escapes)
 #   U+00AD soft hyphen, U+061C Arabic letter mark, U+200B-U+200F zero-width and direction marks,
 #   U+202A-U+202E bidirectional embeddings and overrides, U+2060-U+2064 word joiner and invisible
 #   operators, U+2066-U+2069 isolates, U+FEFF byte-order mark.
+# The line and paragraph separators U+2028/U+2029 are not in the class: `_printable` turns them into spaces
+# first, like a tab or a newline, so the words around them stay apart.
 # Without the invisible ones a name like "Client<RLO> dashboard" can read as a different name in a delete prompt.
 _CONTROL_CHARS = re.compile(
     r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"

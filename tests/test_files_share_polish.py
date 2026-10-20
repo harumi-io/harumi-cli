@@ -738,30 +738,24 @@ def test_printable_also_removes_the_remaining_invisible_characters(raw, clean):
 
 def test_the_pattern_is_a_raw_string_so_its_escapes_read_the_same_in_every_tool():
     """A non-raw pattern relies on Python turning "\\x00" into a byte; a raw one hands the escapes to `re`,
-    and the source reads the same in a diff, an editor and a review."""
-    source = pathlib.Path(cli.__file__).read_bytes()
-    start = source.index(b"_CONTROL_CHARS = re.compile(")
-    statement = source[start : source.index(b"\n)\n", start) + 3]  # the whole (possibly wrapped) statement
+    and the source reads the same in a diff, an editor and a review.
 
-    assert b'r"[' in statement, statement
-    assert not [b for b in statement if (b < 32 and b != 10) or b == 127], "control bytes embedded in the source"
-    assert not [c for c in statement.decode("utf-8") if ord(c) > 127], "invisible characters embedded in the source"
+    Checked on the pattern itself, so reformatting the statement (one line, or wrapped) cannot break the test:
+    a raw pattern keeps its backslash escapes as text, a non-raw one has real control characters in it."""
+    pattern = cli._CONTROL_CHARS.pattern
+
+    assert "\\x00" in pattern and "\\u202a" in pattern, "the pattern holds the escapes as text, as a raw string does"
+    assert not [c for c in pattern if ord(c) < 32 or ord(c) == 127 or ord(c) > 127], "real control or invisible characters in the pattern"
 
 
-def test_the_delete_question_for_a_file_cleans_the_name_but_sends_the_original(api):
+def test_the_delete_question_for_a_file_cleans_the_name_but_sends_the_original(api, monkeypatch):
     """The name shown to the person is cleaned; the name sent to the server is exactly what was given."""
     odd = "inputs/x\u202e.csv"
     api.files[odd] = (5, ago(days=1))
     asked = []
+    monkeypatch.setattr(cli.typer, "confirm", lambda text, **k: asked.append(text) or False)
 
-    import typer as _typer
-
-    real = _typer.confirm
-    cli.typer.confirm = lambda text, **k: asked.append(text) or False
-    try:
-        runner.invoke(cli.app, ["files", "rm", odd])
-    finally:
-        cli.typer.confirm = real
+    runner.invoke(cli.app, ["files", "rm", odd])
 
     assert asked and "\u202e" not in asked[0] and "inputs/x.csv" in asked[0]
 
