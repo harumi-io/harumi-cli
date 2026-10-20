@@ -219,6 +219,22 @@ def _raise_for_status(response: httpx.Response, streamed: bool = False) -> None:
         raise ApiError(response.status_code, str(detail) or response.reason_phrase, code=code)
 
 
+# harumi-api scans an uploaded file for up to `clamav_scan_timeout_seconds` (120) before it answers.
+_COMPLETE_UPLOAD_TIMEOUT = 180.0
+_QUARANTINE_PREFIX = ".quarantine/"
+
+
+def upload_is_staged(project_id: str, key: str) -> bool:
+    """Whether `key` is a staging key that still needs `complete_file_upload`.
+
+    Mirrors harumi-api's `is_project_quarantine_key`: `{project}/.quarantine/<one flat name>`.
+    A server that predates the quarantine change returns the file's final key, so the extra
+    call is skipped for it rather than sent to a route it does not have.
+    """
+    prefix = f"{project_id}/{_QUARANTINE_PREFIX}"
+    return key.startswith(prefix) and len(key) > len(prefix) and "/" not in key[len(prefix) :]
+
+
 class Client:
     """Main SDK entry point.
 
@@ -927,6 +943,21 @@ class Client:
             json=body,
         )
         return FileUploadUrl.model_validate(response.json())
+
+    def complete_file_upload(self, project_id: str, path: str, upload_key: str) -> None:
+        """Ask harumi-api to scan a staged upload and promote it to a project file.
+
+        The scan (ClamAV) can take up to two minutes server-side, so this waits longer than
+        an ordinary request. Raises `ApiError` when the file is refused or cannot be checked:
+        422 (rejected as unsafe), 413 (too large to scan), 503 (no scanner), 404 (nothing
+        staged under that key).
+        """
+        self.api.request(
+            "POST",
+            f"/projects/{project_id}/files/complete-upload",
+            json={"path": path, "upload_key": upload_key},
+            timeout=_COMPLETE_UPLOAD_TIMEOUT,
+        )
 
     def create_file_download_url(self, project_id: str, path: str) -> FileDownloadUrl:
         response = self.api.request(

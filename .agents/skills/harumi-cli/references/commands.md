@@ -22,6 +22,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [runs](#runs)
 - [Editing the repo (git)](#editing-the-repo-git)
 - [check](#check)
+- [files](#files)
 - [dashboard](#dashboard)
 - [share](#share)
 - [datasources](#datasources)
@@ -309,6 +310,22 @@ harumi check [--ref REF] [--project ID] [--api-url URL] [--org ORG]
 ```
 
 `GET /projects/{id}/readiness?ref=` → everything blocking this project from running (repo exists, `harumi.toml` present and valid, kernel allowed), answered up front instead of surfacing as a 4xx from `run`/`schedules add`. Each check is shown by a readable name ("harumi.toml is valid"), then `Ready to run` with the next step, or `Not ready ...: N problems` and **exit code 1**, so a script can stop before `harumi run`. Replaces `repo readiness`.
+
+## `files`
+
+```
+harumi files ls  [--project ID] [--api-url URL] [--org ORG]
+harumi files put LOCAL_PATH [REMOTE_PATH] [--project ID] [...]
+harumi files get REMOTE_PATH [-o LOCAL_PATH] [--project ID] [...]
+harumi files rm  REMOTE_PATH [--yes] [--project ID] [...]
+```
+
+The project's non-git file storage. A run finds these files under `inputs/` in its sandbox. A project may hold at most **500 files and 500 MB** in total (the limit every run enforces); `put` refuses an upload that would pass either, before sending anything, and replacing an existing path does not count twice.
+
+- **`put`** asks harumi-api for a presigned URL (`POST /projects/{id}/files/upload-url`), uploads the bytes to it, and then, **if the server staged the upload** (its key is `{project}/.quarantine/<id>`), calls `POST /projects/{id}/files/complete-upload`, which virus-scans the file (up to about two minutes) and only then makes it a project file. It prints `Checking the file...` while waiting and `Uploaded ...` only after the server accepts it. A file the server refuses exits 1 with `... was not added`: 422 = could not be verified as safe, 413 = too large to be checked, 503 = the scanner is unavailable right now (retry later), 404 = the upload did not arrive (retry). Older servers that do not stage uploads return the final key, and `put` then makes no second call. `REMOTE_PATH` defaults to the local file's name.
+- **`get`** downloads through a presigned URL to `REMOTE_PATH`'s own name, or `-o`. The file is written to `<name>.part` and renamed only when complete, so a dropped connection leaves nothing half-written.
+- **`rm`** is a hard delete (no trash): it prompts unless `--yes`.
+- **`ls`** lists every file (name, size, modified); if the listing is truncated it says so.
 
 ## `dashboard`
 
