@@ -2698,7 +2698,7 @@
     },
     {
       "path": "projects rm",
-      "help": "Delete a project.",
+      "help": "Move a project to the Trash.",
       "params": [
         {
           "opts": [

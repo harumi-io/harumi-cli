@@ -130,7 +130,7 @@ With the id omitted, `get`, `rename` and `rm` open the project picker (most rece
 - **`list`**: `GET /projects`, following pages (200 at a time) until the server's `total_count` is reached, so accounts with hundreds of projects see all of them. Sorted **most recently updated first** (the server's own order is creation date; the CLI re-sorts). Table of `id`, `name`, `updated` ("3 days ago"), `workspace` (only when the projects span more than one workspace), `kernel_spec`, `role`. `--limit N` shows only the first N; any time rows are left out it says "Showing N of M projects". The project pickers (`clone` and others) use the same order and show age and workspace beside each name.
 - **`get`**: `GET /projects/{id}` → detail view.
 - **`rename`**: `PUT /projects/{id}` with `{name}`.
-- **`rm`**: `DELETE /projects/{id}`. Prompts you to type the exact project name to confirm unless `--yes`. With `--yes` the project id is required (no picker), so a slip in a list cannot delete a project.
+- **`rm`**: `DELETE /projects/{id}`, which **moves the project to the Trash; it is not erased**. It stops at once (schedules cancelled, a deployed app shut down) and its share links are removed for good: restoring does not bring them back. It can be restored for **7 days** (harumi-api's `project_trash_retention_days`, default 7), after which a daily sweep deletes it permanently. **The CLI has no restore command**: restore from the Trash page in the web app (or `POST /projects/{id}/restore`). So when asked to undo a `projects rm`, do not say it is gone; point at the Trash and the 7-day window. It shows what will stop, then prompts you to type the exact project name unless `--yes`. With `--yes` the project id is required (no picker), so a slip in a list cannot trash a project. Contrast `org rm`, which really is permanent.
 
 ## Onboarding: `new` / `import` / `clone` / `link` / `start`
 
@@ -488,7 +488,7 @@ harumi org use [ORG_ID | --personal]
 - **`list`**: `GET /users/organizations`.
 - **`create`**: `POST /users/organizations` with `{business_name}`.
 - **`rename`**: `PUT /users/organizations/{id}` with `{business_name}`.
-- **`rm`**: `DELETE /users/organizations/{id}`, prompting for confirmation unless `--yes`.
+- **`rm`**: `DELETE /users/organizations/{id}`, prompting for confirmation unless `--yes`. **Permanent**: unlike projects, an organization is not soft-deleted (harumi-api purges its projects at once and cancels its subscription), so this is the one delete here with no way back.
 - **`members`**: `GET /users/organizations/{id}/users`.
 - **`invite`**: `POST /users/organizations/{id}/users` with `{email, role}`.
 - **`role`**: `PUT /users/organizations/{id}/users/{user_id}` with `{role}`.
