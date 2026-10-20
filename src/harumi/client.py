@@ -227,12 +227,27 @@ _QUARANTINE_PREFIX = ".quarantine/"
 def upload_is_staged(project_id: str, key: str) -> bool:
     """Whether `key` is a staging key that still needs `complete_file_upload`.
 
-    Mirrors harumi-api's `is_project_quarantine_key`: `{project}/.quarantine/<one flat name>`.
-    A server that predates the quarantine change returns the file's final key, so the extra
-    call is skipped for it rather than sent to a route it does not have.
+    harumi-api issues `{project}/.quarantine/<one flat name>`. A server that predates the
+    quarantine change returns the file's own final key, so for it the extra call is skipped
+    rather than sent to a route it does not have.
+
+    The match is deliberately looser than that exact shape. If the server moves the staging
+    area (a nested name, a prefix in front), a strict match would say "not staged", skip the
+    completion and report success for a file that never appears. So `.quarantine` as the first
+    path segment, or as the segment right after the project (wherever the project id sits at
+    the front of the key), counts. A user's own folder with that name deeper inside the
+    project (`{project}/data/.quarantine/x`) does not: on an old server that is a real file.
     """
-    prefix = f"{project_id}/{_QUARANTINE_PREFIX}"
-    return key.startswith(prefix) and len(key) > len(prefix) and "/" not in key[len(prefix) :]
+    parts = [p for p in key.split("/") if p]
+    staging = _QUARANTINE_PREFIX.rstrip("/")
+    for i, part in enumerate(parts[:-1]):  # the last segment is a name, never the staging folder
+        if part != staging:
+            continue
+        before = parts[:i]
+        # directly at the front, or only a prefix and the project id in front of it
+        if not before or before[-1] == project_id:
+            return True
+    return False
 
 
 class Client:
