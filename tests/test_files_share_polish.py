@@ -576,11 +576,10 @@ def test_the_skill_reference_records_the_files_rm_exit_code_change_for_scripts()
     ref = (root / ".agents/skills/harumi-cli/references/commands.md").read_text(encoding="utf-8")
     section = ref[ref.index("## `files`") : ref.index("## `dashboard`")]
 
-    assert "harumi files rm  REMOTE_PATH [--yes] [--missing-ok]" in section
+    flat = " ".join(section.split())  # a realigned usage block must not break this
+    assert "harumi files rm REMOTE_PATH [--yes] [--missing-ok]" in flat
     assert "exit 0" in section and "exit 1" in section and "--missing-ok" in section and "folder name" in section
     assert "`1.4 MB`" in section and "3 days ago" in section and "never cut" in section
-
-
 
 
 # -- review: one listing for rm, and a label cannot drive the terminal ---------------------------------------
@@ -620,3 +619,99 @@ def test_a_file_name_with_terminal_control_characters_is_not_echoed_raw_by_files
     out = runner.invoke(cli.app, ["files", "ls"]).output
 
     assert "\x1b" not in out and "\x07" not in out and "inputs/evil" in out
+
+
+# -- review round 3: names others chose, bidi tricks, and what the docs promise ----------------------------
+
+
+@pytest.mark.parametrize(
+    "raw, clean",
+    [
+        ("plain name", "plain name"),
+        ("tab\there", "tab here"),  # a tab is harmless in a name, but keep the words apart
+        ("line\nbreak", "line break"),
+        ("esc\x1b[2Japed", "esc[2Japed"),  # the escape byte goes; the harmless text after it stays
+        ("bell\x07ring", "bellring"),
+        ("nul\x00byte", "nulbyte"),
+        ("c1\x9bcontrol", "c1control"),
+        ("\x7fdelete", "delete"),
+        ("zero\u200bwidth", "zerowidth"),
+        ("mark\u200e\u200fs", "marks"),
+        ("flip\u202eevil", "flipevil"),  # right-to-left override: makes "evil" read backwards in front of "flip"
+        ("iso\u2066late\u2069d", "isolated"),
+        ("bom\ufeffhere", "bomhere"),
+        ("naïve café 日本語", "naïve café 日本語"),  # ordinary non-ASCII text is left alone
+        ("", ""),
+    ],
+)
+def test_printable_removes_what_could_drive_or_mislead_a_terminal(raw, clean):
+    assert cli._printable(raw) == clean
+
+
+def test_a_label_cannot_pretend_to_be_another_with_a_direction_override(api):
+    """\u202e flips what follows it, so "Client\u202e dashboard" can read as a different name in the delete prompt."""
+    api.links[0]["label"] = "Client\u202e dashboard"
+
+    out = runner.invoke(cli.app, ["share", "rm", L1], input="n\n").output
+
+    assert "\u202e" not in out and "Client dashboard" in plain(out)
+
+
+def test_the_folder_message_cleans_the_file_names_it_lists(api):
+    api.files["data/evil\x1b[2J\x07.csv"] = (1, ago(days=1))
+
+    result = runner.invoke(cli.app, ["files", "rm", "data", "--yes"])
+
+    assert result.exit_code == 1 and "\x1b" not in result.output and "\x07" not in result.output
+    assert "is a folder" in plain(result.output) and "evil" in result.output
+
+
+def test_a_missing_file_message_does_not_echo_control_characters_the_user_typed(api):
+    result = runner.invoke(cli.app, ["files", "rm", "no\x1b[2Jpe.csv", "--yes"])
+
+    assert "\x1b" not in result.output and result.exit_code == 1
+
+
+def test_share_rm_says_a_full_id_that_is_not_in_the_listing_is_refused_before_asking(api):
+    """With --yes a full id is sent as given. Without it, the listing is read to name the link in the
+    question, so an unknown full id is reported before the question rather than after it."""
+    result = runner.invoke(cli.app, ["share", "rm", UNKNOWN], input="y\n")
+
+    assert result.exit_code == 1 and "[y/N]" not in result.output and "harumi share list" in plain(result.output)
+    assert api.deleted_links == []
+
+
+def test_the_skill_reference_says_when_a_full_share_id_is_looked_up_and_when_it_is_not():
+    import pathlib
+
+    ref = (pathlib.Path(cli.__file__).resolve().parents[2] / ".agents/skills/harumi-cli/references/commands.md").read_text(encoding="utf-8")
+    section = ref[ref.index("## `share`") : ref.index("## `datasources`")]
+
+    flat = " ".join(section.split())
+    assert "`rm --yes`" in flat and "**without** `--yes`" in flat and "before the question" in flat
+
+
+def test_the_files_usage_line_is_checked_without_depending_on_spacing():
+    import pathlib
+
+    ref = (pathlib.Path(cli.__file__).resolve().parents[2] / ".agents/skills/harumi-cli/references/commands.md").read_text(encoding="utf-8")
+    section = ref[ref.index("## `files`") : ref.index("## `dashboard`")]
+    flat = " ".join(section.split())  # a realigned usage block must not break this
+
+    assert "harumi files rm REMOTE_PATH [--yes] [--missing-ok]" in flat
+
+
+def test_a_typed_name_with_control_characters_is_cleaned_in_every_message_that_repeats_it(api):
+    """The user typed it, so the risk is low; but a name pasted from somewhere else may carry an
+    escape sequence, and every message that echoes it goes through the same cleaning."""
+    bad = "x\x1b[2J\u202e"
+    api.files["f\x1b[2J\u202e/inner.csv"] = (1, ago(days=1))  # a folder whose own name carries them
+    api.files[bad] = (5, ago(days=1))  # a file that exists, to reach the "Deleted" line
+
+    for args in (
+        ["files", "rm", "f\x1b[2J\u202e", "--yes"],  # the folder message echoes the folder name
+        ["files", "rm", "nope\x1b[2J\u202e", "--yes", "--missing-ok"],  # the "was not there" line
+        ["files", "rm", bad, "--yes"],  # the "Deleted" line
+    ):
+        out = runner.invoke(cli.app, args).output
+        assert "\x1b" not in out and "\u202e" not in out, f"{args} echoed a control character:\n{out!r}"

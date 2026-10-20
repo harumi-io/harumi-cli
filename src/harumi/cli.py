@@ -492,7 +492,11 @@ def _hidden_alias(group: typer.Typer, old_name: str, fn, old: str, use: str) -> 
     group.command(old_name, hidden=True)(_deprecated(old, use)(fn))
 
 
-_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+# C0 and C1 controls (terminal escapes), plus the invisible characters that change how text is
+# drawn or read: zero-width and direction marks (U+200B-U+200F), the bidirectional embeddings and
+# overrides (U+202A-U+202E), the isolates (U+2066-U+2069) and the byte-order mark (U+FEFF). Without
+# the last group a name like "Client<RLO> dashboard" can read as a different name in a delete prompt.
+_CONTROL_CHARS = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
 
 
 def _printable(text: object) -> str:
@@ -3867,14 +3871,14 @@ def _find_project_file(client: Client, project_id: str, name: str, *, missing_ok
             return f
     inside = sorted(f.name for f in listing.files if f.name.startswith(name.rstrip("/") + "/"))
     if inside:
-        shown = ", ".join(escape(n) for n in inside[:3]) + (f" and {len(inside) - 3} more" if len(inside) > 3 else "")
-        _fail(f"{escape(name)} is a folder, not a file. It holds {shown}.")
+        shown = ", ".join(escape(_printable(n)) for n in inside[:3]) + (f" and {len(inside) - 3} more" if len(inside) > 3 else "")
+        _fail(f"{escape(_printable(name))} is a folder, not a file. It holds {shown}.")
     if listing.is_truncated:
         return None
     if missing_ok:
         raise _FileNotThere()
     _fail(
-        f"No file called {escape(name)} in this project. See what is there with [bold]harumi files ls[/bold]. "
+        f"No file called {escape(_printable(name))} in this project. See what is there with [bold]harumi files ls[/bold]. "
         "In a script that may run twice, add [bold]--missing-ok[/bold]."
     )
 
@@ -3947,7 +3951,7 @@ def files_rm(
     try:
         found = _find_project_file(client, project_id, remote_path, missing_ok=missing_ok)
     except _FileNotThere:
-        console.print(f"{escape(remote_path)} was not there, so there was nothing to delete.")
+        console.print(f"{escape(_printable(remote_path))} was not there, so there was nothing to delete.")
         return
     what = f"'{remote_path}'" + (f" ({_format_bytes(found.size)})" if found else "")
     if not yes and not typer.confirm(f"Delete {what} from this project's files? This cannot be undone."):
@@ -3956,7 +3960,7 @@ def files_rm(
 
     client.delete_project_file(project_id, remote_path)
     size = f" ({_format_bytes(found.size)})" if found else ""
-    console.print(f"[bold red]Deleted[/bold red] {escape(remote_path)}{size}.")
+    console.print(f"[bold red]Deleted[/bold red] {escape(_printable(remote_path))}{size}.")
 
 
 # ---------------------------------------------------------------------------
