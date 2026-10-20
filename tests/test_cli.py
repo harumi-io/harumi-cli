@@ -1500,7 +1500,9 @@ def test_files_ls_reports_no_files(api):
 def test_files_put_uploads_and_defaults_remote_path_to_local_name(api, tmp_path, monkeypatch):
     local = tmp_path / "data.csv"
     local.write_text("a,b\n1,2\n")
-    api.route("GET", "/api/projects/proj-1/files", {"files": [], "is_truncated": False})
+    # The project already holds data.csv, so this is a replacement and the listing after the upload shows it:
+    # `put` checks that a file whose key looked final really is in the project.
+    api.route("GET", "/api/projects/proj-1/files", {"files": [{"name": "data.csv", "key": "proj-1/data.csv", "size": 8}], "is_truncated": False})
     api.route("POST", "/api/projects/proj-1/files/upload-url", {"url": "https://s3.test/proj-1/data.csv", "key": "proj-1/data.csv", "expires_in": 900})
 
     put_calls = []
@@ -1524,7 +1526,7 @@ def test_files_put_sends_the_files_exact_size_so_a_plan_with_a_storage_quota_acc
 ):
     local = tmp_path / "data.csv"
     local.write_text("a,b\n1,2\n")
-    api.route("GET", "/api/projects/proj-1/files", {"files": [], "is_truncated": False})
+    api.route("GET", "/api/projects/proj-1/files", {"files": [{"name": "data.csv", "key": "k", "size": 8}], "is_truncated": False})
     api.route("POST", "/api/projects/proj-1/files/upload-url", {"url": "https://s3.test/x", "key": "k", "expires_in": 900})
     monkeypatch.setattr(Client, "upload_file_to_presigned_url", lambda *a, **k: None)
 

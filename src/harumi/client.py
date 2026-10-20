@@ -8,6 +8,7 @@ or schema change only needs to be made here.
 
 from __future__ import annotations
 
+import posixpath
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
@@ -224,15 +225,38 @@ _COMPLETE_UPLOAD_TIMEOUT = 180.0
 _QUARANTINE_PREFIX = ".quarantine/"
 
 
-def upload_is_staged(project_id: str, key: str) -> bool:
+def upload_is_staged(project_id: str, key: str, requested: Optional[str] = None) -> bool:
     """Whether `key` is a staging key that still needs `complete_file_upload`.
 
-    Mirrors harumi-api's `is_project_quarantine_key`: `{project}/.quarantine/<one flat name>`.
-    A server that predates the quarantine change returns the file's final key, so the extra
-    call is skipped for it rather than sent to a route it does not have.
+    harumi-api issues `{project}/.quarantine/<one flat name>`. A server that predates the
+    quarantine change returns the file's own final key, so for it the extra call is skipped
+    rather than sent to a route it does not have.
+
+    `requested` is the path the user asked for. If the key is exactly `{project}/{that path}`
+    (after the normalising the server does), it is the file's own key and final, whatever it
+    contains: `put x .quarantine/x.csv` on an older server returns `{project}/.quarantine/x.csv`,
+    which is a plain user path and must not be mistaken for staging.
+
+    Only when the key differs from the requested path does its shape matter, and then the match is
+    looser than today's exact shape: if the server moves the staging area (a nested name, a prefix),
+    a strict match would say "not staged", skip the completion and report success for a file that
+    never appears. So `.quarantine` as the first path segment, or as the segment right after the
+    project, counts. A user's own folder of that name deeper inside the project does not.
     """
-    prefix = f"{project_id}/{_QUARANTINE_PREFIX}"
-    return key.startswith(prefix) and len(key) > len(prefix) and "/" not in key[len(prefix) :]
+    if requested is not None:
+        own = f"{project_id}/{posixpath.normpath(requested.strip('/'))}"
+        if key == own:
+            return False
+    parts = [p for p in key.split("/") if p]
+    staging = _QUARANTINE_PREFIX.rstrip("/")
+    for i, part in enumerate(parts[:-1]):  # the last segment is a name, never the staging folder
+        if part != staging:
+            continue
+        before = parts[:i]
+        # directly at the front, or only a prefix and the project id in front of it
+        if not before or before[-1] == project_id:
+            return True
+    return False
 
 
 class Client:

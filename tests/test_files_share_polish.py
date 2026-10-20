@@ -801,6 +801,7 @@ def test_put_cleans_the_names_in_its_success_line(api, tmp_path, monkeypatch):
     local.write_text("a,b\n1,2\n")
     monkeypatch.setattr(Client, "create_file_upload_url", lambda self, *a, **k: type("U", (), {"url": "https://s3.test/x", "key": f"{P}/inputs/x.csv", "expires_in": 900})())
     monkeypatch.setattr(Client, "upload_file_to_presigned_url", lambda *a, **k: None)
+    api.files["inputs/x\u202e\x1b[2J.csv"] = (8, ago(days=0))  # the upload lands, as on a real server
 
     out = runner.invoke(cli.app, ["files", "put", str(local), "inputs/x\u202e\x1b[2J.csv"]).output
 

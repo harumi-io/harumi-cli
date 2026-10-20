@@ -145,6 +145,7 @@ import functools
 import json
 import mimetypes
 import os
+import posixpath
 import re
 import shlex
 import subprocess
@@ -3849,13 +3850,19 @@ def files_put(
         project_id, dest_path, content_type, size_bytes=file_size
     )
     client.upload_file_to_presigned_url(upload_url, local_path, content_type)
-    if upload_is_staged(project_id, upload_url.key):
+    if upload_is_staged(project_id, upload_url.key, requested=dest_path):
         # The bytes are in a holding area; the file only exists once the server has checked it.
         console.print("Checking the file...")
         try:
             client.complete_file_upload(project_id, dest_path, upload_url.key)
         except ApiError as exc:
             _fail(_upload_refusal(exc, dest_path))
+    else:
+        # The key looked final, so there was nothing to complete. That is true of an older
+        # server. It is also what a newer one that changed its staging key would look like, and
+        # then the file never appears, which is the bug `complete_file_upload` exists to prevent.
+        # Look, rather than assume.
+        _confirm_upload_landed(client, project_id, dest_path)
     console.print(
         f"[bold green]Uploaded[/bold green] {escape(_printable(local_path))} -> {escape(_printable(dest_path))} ({_format_bytes(file_size)}).",
         soft_wrap=True,
@@ -3894,10 +3901,35 @@ def _find_project_file(
     )
 
 
+def _confirm_upload_landed(client: Client, project_id: str, dest_path: str) -> None:
+    """Fail unless the uploaded file is listed. A truncated listing proves nothing, so it passes."""
+    stored = posixpath.normpath(dest_path.strip("/"))  # how harumi-api stores the path it is given
+    try:
+        listing = client.list_project_files(project_id)
+    except (ApiError, ValueError):
+        # Cannot tell: an error status, or a body that is not what a listing looks like (pydantic's
+        # ValidationError is a ValueError). The upload itself already succeeded; a safeguard that cannot
+        # run must not turn it into a failure.
+        return
+    if listing.is_truncated or any(f.name == stored for f in listing.files):
+        return
+    _fail(
+        f"{escape(_printable(dest_path))} was sent but does not appear in the project, so it may not have been added. "
+        "Check with [bold]harumi files ls[/bold], and try again if it is missing."
+    )
+
+
 def _upload_refusal(exc: ApiError, dest_path: str) -> str:
     """Why an upload was not added, in words. The API gives the same text for an unsafe file and
     for a scanner that is down, so the status picks the sentence, not the API's detail."""
-    shown = escape(dest_path)
+    shown = escape(_printable(dest_path))
+    if isinstance(exc, ApiUnreachableError):
+        # No answer at all (the connection dropped, or the scan outlasted the wait). The server may
+        # still finish and promote the file, so "not added" would be a claim we cannot make.
+        return (
+            f"Did not hear back about {shown}: it may or may not have been added. "
+            "Check with [bold]harumi files ls[/bold] before uploading it again."
+        )
     if exc.status_code == 422:
         return f"{shown} could not be verified as safe, so it was not added."
     if exc.status_code == 413:
