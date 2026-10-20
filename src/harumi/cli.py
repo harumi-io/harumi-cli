@@ -2602,6 +2602,12 @@ def projects_rename(
     console.print(f"[bold green]Renamed[/bold green] project to [bold]{escape(p.name)}[/bold].")
 
 
+# How long a project stays in the Trash before the daily sweep deletes it. harumi-api's
+# `project_trash_retention_days` (7 by default; the API does not send it to clients) and the
+# web app's Trash page both use 7.
+_TRASH_DAYS = 7
+
+
 @projects_app.command("rm")
 @_handle_errors
 def projects_rm(
@@ -2610,30 +2616,45 @@ def projects_rm(
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Delete a project. This cannot be undone."""
+    """Move a project to the Trash. You can restore it for 7 days.
+
+    The project stops at once: its schedules are cancelled, a deployed app is shut down and its share links are removed (restoring does not bring them back).
+
+    It stays in the Trash for 7 days. Restore it from the Trash in the web app; after that it is deleted for good.
+    """
     if project_id is None and yes:
         # --yes skips the typed-name check, so nothing would stand between a slip in a
         # list and a deleted project. With --yes the id has to be written down.
-        _fail("Say which project to delete: [bold]harumi projects rm <project id> --yes[/bold]. "
+        _fail("Say which project to move to the Trash: [bold]harumi projects rm <project id> --yes[/bold]. "
               "Find the id with [bold]harumi projects list[/bold].")
     client = _get_client(api_url=api_url, org=org)
     if project_id is None:
         # Picking is not consent: the typed-name confirmation below still applies.
-        project_id = _pick_project(client, action="delete")
+        project_id = _pick_project(client, action="move to the Trash")
         if project_id is None:
             return
 
     if not yes:
         p = client.get_project(project_id)
-        typed = typer.prompt(
-            f"Type the project name ({p.name!r}) to confirm deletion"
+        console.print(
+            f"[bold]{escape(p.name)}[/bold] goes to the Trash. It stops running now (schedules cancelled, "
+            f"app shut down) and its share links are removed. You can restore it within {_TRASH_DAYS} days."
         )
+        typed = typer.prompt(f"Type the project name ({p.name!r}) to move it to the Trash")
         if typed != p.name:
             console.print("Aborted (name did not match).")
             return
 
     deleted = client.delete_project(project_id)
-    console.print(f"[bold red]Deleted[/bold red] project [bold]{escape(deleted.name)}[/bold].")
+    console.print(
+        f"[bold]Moved[/bold] project [bold]{escape(deleted.name)}[/bold] to the Trash. "
+        "It has stopped running and its share links are removed."
+    )
+    console.print(
+        f"Restore it within {_TRASH_DAYS} days from the Trash in the web app ({active_platform_url()}); "
+        "after that it is deleted for good.",
+        soft_wrap=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3421,7 +3442,9 @@ def repo_rm(
     """Delete a file, or every file under a folder, as one commit."""
     project_id = _resolve_project(project)
 
-    if not yes and not typer.confirm(f"Delete '{path}' from the repo? This cannot be undone."):
+    if not yes and not typer.confirm(
+        f"Delete '{path}' from the repo? It is a new commit, so `git revert` brings it back."
+    ):
         console.print("Aborted.")
         return
 
