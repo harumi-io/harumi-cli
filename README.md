@@ -46,6 +46,10 @@ harumi runs get <RUN_ID>
 harumi compare                      # pick the runs from a list
 harumi compare <RUN_ID> <RUN_ID>
 
+# Input files (land in inputs/ for every run; 500 files / 500 MB per project)
+harumi files put data.csv
+harumi files ls
+
 # 6. Check the project's dashboard.toml renders the widgets you expect
 harumi dashboard validate --latest
 ```

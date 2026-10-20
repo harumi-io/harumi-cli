@@ -22,6 +22,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [runs](#runs)
 - [Editing the repo (git)](#editing-the-repo-git)
 - [check](#check)
+- [files](#files)
 - [dashboard](#dashboard)
 - [share](#share)
 - [datasources](#datasources)
@@ -310,6 +311,22 @@ harumi check [--ref REF] [--project ID] [--api-url URL] [--org ORG]
 
 `GET /projects/{id}/readiness?ref=` → everything blocking this project from running (repo exists, `harumi.toml` present and valid, kernel allowed), answered up front instead of surfacing as a 4xx from `run`/`schedules add`. Each check is shown by a readable name ("harumi.toml is valid"), then `Ready to run` with the next step, or `Not ready ...: N problems` and **exit code 1**, so a script can stop before `harumi run`. Replaces `repo readiness`.
 
+## `files`
+
+```
+harumi files ls  [--project ID] [--api-url URL] [--org ORG]
+harumi files put LOCAL_PATH [REMOTE_PATH] [--project ID] [...]
+harumi files get REMOTE_PATH [-o LOCAL_PATH] [--project ID] [...]
+harumi files rm  REMOTE_PATH [--yes] [--missing-ok] [--project ID] [...]
+```
+
+The project's non-git file storage. A run finds these files under `inputs/` in its sandbox. A project may hold at most **500 files and 500 MB** in total (the limit every run enforces); `put` refuses an upload that would pass either, before sending anything, and replacing an existing path does not count twice.
+
+- **`put`** asks harumi-api for a presigned URL (`POST /projects/{id}/files/upload-url`), uploads the bytes to it, and then, **if the server staged the upload** (its key is `{project}/.quarantine/<id>`), calls `POST /projects/{id}/files/complete-upload`, which virus-scans the file (up to about two minutes) and only then makes it a project file. It prints `Checking the file...` while waiting and `Uploaded ...` only after the server accepts it. A file the server refuses exits 1 with `... was not added`: 422 = could not be verified as safe, 413 = too large to be checked, 503 = the scanner is unavailable right now (retry later), 404 = the upload did not arrive (retry). Older servers that do not stage uploads return the final key, and `put` then makes no second call. `REMOTE_PATH` defaults to the local file's name.
+- **`get`** downloads through a presigned URL to `REMOTE_PATH`'s own name, or `-o`. A name that is not in the project, or is a folder, exits 1 saying so and pointing at `files ls`. The file is written to `<name>.part` and renamed only when complete, so a dropped connection leaves nothing half-written.
+- **`rm`** is a hard delete (no trash): it prompts unless `--yes`, and the question and the result name the file and its size. harumi-api answers `deleted: 1` for **any** path, so the CLI reads the project's file listing first (one request, up to 500 files) and refuses a name that is not there, or is a folder, with exit 1 and a reason. **This changed `files rm <missing> --yes` from exit 0 to exit 1.** A cleanup script that may run twice should pass **`--missing-ok`**: it exits 0 with "was not there" for a missing file, and does not excuse a folder name.
+- **`ls`** lists every file (`name`, `size` as `1.4 MB`, `modified` as `3 days ago`; names are never cut) and ends with the total against the limits (`3 files, 87.3 MB (of 500 files and 500.0 MB every run can use)`), with a warning at 90%. If the listing is truncated it says the figures are a minimum. File names are shown without terminal control characters.
+
 ## `dashboard`
 
 ```
@@ -327,16 +344,6 @@ No backend endpoint — a dashboard spec is a plain file in the project's Gitea 
   - `--against FILE`: additionally resolves every widget's dot-path keys (`value_key`, `rows_key`, `data_key`, `tasks_key`, etc.) against a local `output.json` and reports any that don't resolve (widget renders empty on the platform, not an error there).
   - `--run RUN_ID` / `--latest`: same dot-path check, but fetches the run's structured output from `GET /projects/{id}/runs/{run_id}/output` (S3-backed for current runs, Gitea for pre-migration runs — resolved transparently by the API) instead of a local file.
   - At most one of `--against`/`--run`/`--latest` may be passed.
-
-## `files rm` and scripts
-
-```
-harumi files rm REMOTE_PATH [--yes] [--missing-ok] [--project ID] [--api-url URL] [--org ORG]
-```
-
-*(This note moves into the `files` section when that section lands.)*
-
-`harumi files rm <path> --yes` used to exit 0 for any path, because harumi-api answers `deleted: 1` whether or not the file exists. It now exits 1 when the file is not in the project (or is a folder), so a typo is not reported as a deletion. A cleanup script that may run twice should pass **`--missing-ok`**, which exits 0 with "was not there" for a missing file; it does not excuse a folder name. `rm` reads the project's file listing first (one request, up to 500 files) before every delete, even with `--yes`.
 
 ## `share`
 

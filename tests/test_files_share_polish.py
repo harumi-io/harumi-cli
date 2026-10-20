@@ -569,16 +569,18 @@ def test_a_label_with_brackets_is_shown_whole_in_the_question(api):
 
 
 def test_the_skill_reference_records_the_files_rm_exit_code_change_for_scripts():
-    """`files rm <missing> --yes` used to exit 0 for any name. A script relying on that needs to know.
-    The files section itself arrives with the complete-upload fix; until then the note lives here."""
+    """`files rm <missing> --yes` used to exit 0 for any name. A script relying on that needs to know."""
     import pathlib
 
     root = pathlib.Path(cli.__file__).resolve().parents[2]
     ref = (root / ".agents/skills/harumi-cli/references/commands.md").read_text(encoding="utf-8")
+    section = ref[ref.index("## `files`") : ref.index("## `dashboard`")]
 
-    section = ref[ref.index("## `files rm` and scripts") : ref.index("## `share`")]
-    assert "harumi files rm REMOTE_PATH [--yes] [--missing-ok]" in section
-    assert "exit 0" in section and "exits 1" in section and "folder name" in section
+    assert "harumi files rm  REMOTE_PATH [--yes] [--missing-ok]" in section
+    assert "exit 0" in section and "exit 1" in section and "--missing-ok" in section and "folder name" in section
+    assert "`1.4 MB`" in section and "3 days ago" in section and "never cut" in section
+
+
 
 
 # -- review: one listing for rm, and a label cannot drive the terminal ---------------------------------------
