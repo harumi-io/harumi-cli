@@ -130,6 +130,7 @@ def test_uploaded_is_only_printed_after_the_server_has_accepted_the_file(api, cs
 
     monkeypatch.setattr(Client, "complete_file_upload", completing)
     real_print = cli.console.print
+
     def spy(*x, **k):
         text = str(x[0]) if x else ""
         events.append("printed: Uploaded" if "Uploaded" in text else "printed: Checking" if "Checking" in text else "printed: other")
