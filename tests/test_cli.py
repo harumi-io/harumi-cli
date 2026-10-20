@@ -1494,7 +1494,7 @@ def test_files_ls_reports_no_files(api):
     result = runner.invoke(cli.app, ["files", "ls", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "No files uploaded." in result.output
+    assert "No files uploaded yet" in result.output
 
 
 def test_files_put_uploads_and_defaults_remote_path_to_local_name(api, tmp_path, monkeypatch):
@@ -1696,14 +1696,17 @@ def test_files_get_reports_an_unwritable_output_path(api, tmp_path, monkeypatch)
 
 
 def test_files_rm_aborts_without_confirmation(api):
+    api.route("GET", "/api/projects/proj-1/files", {"files": [{"name": "data.csv", "key": "proj-1/data.csv", "size": 10}], "is_truncated": False})
+
     result = runner.invoke(cli.app, ["files", "rm", "data.csv", "--project", "proj-1"], input="n\n")
 
     assert result.exit_code == 0, result.output
     assert "Aborted." in result.output
-    assert api.requests == []
+    assert not any(r.method == "DELETE" for r in api.requests)  # the listing is read; nothing is deleted
 
 
 def test_files_rm_deletes_when_confirmed(api):
+    api.route("GET", "/api/projects/proj-1/files", {"files": [{"name": "data.csv", "key": "proj-1/data.csv", "size": 10}], "is_truncated": False})
     api.route("DELETE", "/api/projects/proj-1/files", {"deleted": 1})
 
     result = runner.invoke(cli.app, ["files", "rm", "data.csv", "--project", "proj-1"], input="y\n")
@@ -1824,7 +1827,7 @@ def test_schedules_get_surfaces_a_404_as_a_clean_error(api):
 # ---------------------------------------------------------------------------
 
 SHARE_LINK = {
-    "id": "link-1",
+    "id": "0a1b2c3d-1111-4222-8333-444455556666",
     "project_id": "proj-1",
     "token": "tok-abc123",
     "label": "Client dashboard",
@@ -1844,8 +1847,9 @@ def test_share_list_renders_the_links_and_their_flags(api):
     result = runner.invoke(cli.app, ["share", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "link-1" in result.output
-    assert "tok-abc123" in result.output
+    assert "0a1b2c3d" in result.output  # the start of the id: every share command accepts it
+    assert "Client dashboard" in result.output
+    assert "tok-abc123" not in result.output  # the token is the secret in the public URL; `share get` shows the URL
 
 
 def test_share_list_reports_empty(api):
@@ -1854,13 +1858,13 @@ def test_share_list_reports_empty(api):
     result = runner.invoke(cli.app, ["share", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "No share links found." in result.output
+    assert "No share links yet" in result.output and "harumi share add" in result.output
 
 
 def test_share_get_shows_the_link_url_and_permissions(api):
     api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})
 
-    result = runner.invoke(cli.app, ["share", "get", "link-1", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["share", "get", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "tok-abc123" in result.output
@@ -1917,15 +1921,15 @@ def test_share_add_forwards_label_and_permission_flags(api):
 
 
 def test_share_update_only_sends_provided_fields(api):
-    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
+    api.route("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", SHARE_LINK)
 
     result = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--run-control", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--run-control", "--project", "proj-1"],
     )
 
     assert result.exit_code == 0, result.output
-    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
+    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666")
     assert body == {"run_control_enabled": True}
 
 
@@ -1943,13 +1947,13 @@ def test_share_add_still_accepts_the_removed_io_control_flag_with_a_warning(api)
 
 
 def test_share_update_still_accepts_the_removed_io_control_flag_with_a_warning(api):
-    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
+    api.route("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", SHARE_LINK)
 
-    result = runner.invoke(cli.app, ["share", "update", "link-1", "--no-io-control", "--chat", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--no-io-control", "--chat", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "no longer does anything" in result.output
-    assert api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1") == {"chat_enabled": True}
+    assert api.body_for("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666") == {"chat_enabled": True}
 
 
 def test_the_removed_io_control_flag_is_hidden_from_help():
@@ -1958,29 +1962,29 @@ def test_the_removed_io_control_flag_is_hidden_from_help():
 
 
 def test_share_update_forwards_app_flag(api):
-    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
+    api.route("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", SHARE_LINK)
 
     result = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--app", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--app", "--project", "proj-1"],
     )
 
     assert result.exit_code == 0, result.output
-    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
+    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666")
     assert body == {"app_enabled": True}
 
     result = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--no-app", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--no-app", "--project", "proj-1"],
     )
 
     assert result.exit_code == 0, result.output
-    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
+    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666")
     assert body == {"app_enabled": False}
 
 
 def test_share_update_with_no_flags_fails_without_a_request(api):
-    result = runner.invoke(cli.app, ["share", "update", "link-1", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1"])
 
     assert result.exit_code == 1
     assert "No fields to update" in result.output
@@ -1988,33 +1992,36 @@ def test_share_update_with_no_flags_fails_without_a_request(api):
 
 
 def test_share_remove_aborts_without_confirmation(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})  # read to name the link in the question
+
     result = runner.invoke(
-        cli.app, ["share", "rm", "link-1", "--project", "proj-1"], input="n\n"
+        cli.app, ["share", "rm", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1"], input="n\n"
     )
 
     assert result.exit_code == 0, result.output
     assert "Aborted." in result.output
-    assert api.requests == []
+    assert "Client dashboard" in result.output  # the question names what is being deleted
+    assert not any(r.method == "DELETE" for r in api.requests)  # and nothing was deleted
 
 
 def test_share_remove_deletes_when_confirmed(api):
-    api.route("DELETE", "/api/projects/proj-1/share-links/link-1", None, status=204)
+    api.route("DELETE", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", None, status=204)
 
     result = runner.invoke(
-        cli.app, ["share", "rm", "link-1", "--project", "proj-1", "--yes"]
+        cli.app, ["share", "rm", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1", "--yes"]
     )
 
     assert result.exit_code == 0, result.output
     assert "Deleted" in result.output
-    assert api.paths() == ["/api/projects/proj-1/share-links/link-1"]
+    assert api.paths() == ["/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666"]
 
 
 def test_share_rotate_mints_a_new_token(api):
     rotated = {**SHARE_LINK, "token": "tok-new456"}
-    api.route("POST", "/api/projects/proj-1/share-links/link-1/rotate", rotated)
+    api.route("POST", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/rotate", rotated)
 
     result = runner.invoke(
-        cli.app, ["share", "rotate", "link-1", "--project", "proj-1", "--yes"]
+        cli.app, ["share", "rotate", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1", "--yes"]
     )
 
     assert result.exit_code == 0, result.output
@@ -2023,26 +2030,26 @@ def test_share_rotate_mints_a_new_token(api):
 
 def test_share_update_password_prompts_and_never_echoes_it(api):
     api.route(
-        "PUT", "/api/projects/proj-1/share-links/link-1/password", {**SHARE_LINK, "password_set": True}
+        "PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", {**SHARE_LINK, "password_set": True}
     )
 
     result = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--password", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--password", "--project", "proj-1"],
         input="correcthorse\ncorrecthorse\n",
     )
 
     assert result.exit_code == 0, result.output
     assert "correcthorse" not in result.output
-    body = api.body_for("PUT", "/api/projects/proj-1/share-links/link-1/password")
+    body = api.body_for("PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password")
     assert body == {"password": "correcthorse"}
 
 
 def test_share_update_no_password_removes_it(api):
-    api.route("DELETE", "/api/projects/proj-1/share-links/link-1/password", SHARE_LINK)
+    api.route("DELETE", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", SHARE_LINK)
 
     result = runner.invoke(
-        cli.app, ["share", "update", "link-1", "--no-password", "--project", "proj-1"]
+        cli.app, ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--no-password", "--project", "proj-1"]
     )
 
     assert result.exit_code == 0, result.output
@@ -3236,11 +3243,11 @@ def test_deprecated_names_are_hidden_from_help_and_the_surface():
     "argv, method, route, use",
     [
         (["projects", "delete", "p1", "--yes"], "DELETE", "/api/projects/p1", "harumi projects rm"),
-        (["share", "remove", "link-1", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/link-1", "harumi share rm"),
+        (["share", "remove", "0a1b2c3d-1111-4222-8333-444455556666", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", "harumi share rm"),
         (["schedules", "remove", "sched-1", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/schedules/sched-1", "harumi schedules rm"),
         (["datasources", "remove", "sales_db", "--yes", "-p", "proj-1"], "DELETE", "/api/datasources/proj-1/sales_db", "harumi datasources rm"),
         (["org", "delete", "org-1", "--yes"], "DELETE", "/api/users/organizations/org-1", "harumi org rm"),
-        (["share", "rm-password", "link-1", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/link-1/password", "share update <LINK_ID> --no-password"),
+        (["share", "rm-password", "0a1b2c3d-1111-4222-8333-444455556666", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", "share update <LINK_ID> --no-password"),
         (["repo", "ls", "-p", "proj-1"], "GET", "/api/projects/proj-1/repo/files", "git ls-files"),
     ],
 )
@@ -3395,18 +3402,18 @@ def test_runs_download_with_no_runs_is_a_clean_error(api):
 
 
 def test_share_update_password_can_combine_with_other_flags_and_alone_needs_no_other_field(api):
-    api.route("PUT", "/api/projects/proj-1/share-links/link-1/password", {**SHARE_LINK, "password_set": True})
-    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", {**SHARE_LINK, "label": "renamed"})
+    api.route("PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", {**SHARE_LINK, "password_set": True})
+    api.route("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", {**SHARE_LINK, "label": "renamed"})
 
     alone = runner.invoke(
-        cli.app, ["share", "update", "link-1", "--password", "--project", "proj-1"], input="correcthorse\ncorrecthorse\n"
+        cli.app, ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--password", "--project", "proj-1"], input="correcthorse\ncorrecthorse\n"
     )
     both = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--label", "renamed", "--password", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--label", "renamed", "--password", "--project", "proj-1"],
         input="correcthorse\ncorrecthorse\n",
     )
-    nothing = runner.invoke(cli.app, ["share", "update", "link-1", "--project", "proj-1"])
+    nothing = runner.invoke(cli.app, ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1"])
 
     assert alone.exit_code == 0, alone.output
     assert both.exit_code == 0, both.output
@@ -3426,12 +3433,12 @@ def test_run_output_dir_is_deprecated_but_still_accepted(api, git, bound_dir):
 
 
 def test_share_update_does_not_touch_the_password_when_the_other_fields_are_rejected(api):
-    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", {"detail": "bad label"}, status=422)
-    api.route("PUT", "/api/projects/proj-1/share-links/link-1/password", SHARE_LINK)
+    api.route("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", {"detail": "bad label"}, status=422)
+    api.route("PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", SHARE_LINK)
 
     result = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--label", "x", "--password", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--label", "x", "--password", "--project", "proj-1"],
         input="correcthorse\ncorrecthorse\n",
     )
 
@@ -3440,12 +3447,12 @@ def test_share_update_does_not_touch_the_password_when_the_other_fields_are_reje
 
 
 def test_share_update_says_so_when_only_the_password_part_fails(api):
-    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
-    api.route("PUT", "/api/projects/proj-1/share-links/link-1/password", {"detail": "too short"}, status=422)
+    api.route("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", SHARE_LINK)
+    api.route("PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", {"detail": "too short"}, status=422)
 
     result = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--label", "x", "--password", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--label", "x", "--password", "--project", "proj-1"],
         input="short\nshort\n",
     )
 
@@ -3454,17 +3461,17 @@ def test_share_update_says_so_when_only_the_password_part_fails(api):
 
 
 def test_share_update_password_prompt_must_be_confirmed(api):
-    api.route("PUT", "/api/projects/proj-1/share-links/link-1/password", {**SHARE_LINK, "password_set": True})
+    api.route("PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", {**SHARE_LINK, "password_set": True})
 
     result = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--password", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--password", "--project", "proj-1"],
         input="correcthorse\ntypo-horse\ncorrecthorse\ncorrecthorse\n",
     )
 
     assert result.exit_code == 0, result.output
     # The mismatched pair was rejected and re-asked; only the confirmed value was sent.
-    assert api.body_for("PUT", "/api/projects/proj-1/share-links/link-1/password") == {"password": "correcthorse"}
+    assert api.body_for("PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password") == {"password": "correcthorse"}
     assert len([r for r in api.requests if r.method == "PUT"]) == 1
 
 
