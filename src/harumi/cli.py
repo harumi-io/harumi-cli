@@ -162,7 +162,11 @@ from rich.table import Table
 from harumi import __version__, auth, interactive, quickstart
 from harumi import skills as skills_mod
 from harumi.client import Client
-from harumi.file_sync_cap import MAX_PROJECT_SYNC_FILES, MAX_PROJECT_SYNC_TOTAL_BYTES, check_project_sync_cap
+from harumi.file_sync_cap import (
+    MAX_PROJECT_SYNC_FILES,
+    MAX_PROJECT_SYNC_TOTAL_BYTES,
+    check_project_sync_cap,
+)
 from harumi.config import (
     DEFAULT_ENVIRONMENT,
     ENVIRONMENTS,
@@ -212,7 +216,7 @@ from harumi.git import (
     push_scratch,
     repo_root,
 )
-from harumi.models import LoggedUser, ProjectShareLink
+from harumi.models import LoggedUser, ProjectFile, ProjectShareLink
 
 app = typer.Typer(
     name="harumi",
@@ -3825,7 +3829,11 @@ def files_put(
     )
 
 
-def _find_project_file(client: Client, project_id: str, name: str):
+class _FileNotThere(Exception):
+    """`files rm --missing-ok` named a file that is not in the project: nothing to delete."""
+
+
+def _find_project_file(client: Client, project_id: str, name: str, *, missing_ok: bool = False) -> Optional[ProjectFile]:
     """The listed file called `name`, or a clear failure saying it is missing or is a folder.
 
     harumi-api tells a missing file from an existing one only for downloads (a 404); a delete
@@ -3843,7 +3851,12 @@ def _find_project_file(client: Client, project_id: str, name: str):
         _fail(f"{escape(name)} is a folder, not a file. It holds {shown}.")
     if listing.is_truncated:
         return None
-    _fail(f"No file called {escape(name)} in this project. See what is there with [bold]harumi files ls[/bold].")
+    if missing_ok:
+        raise _FileNotThere()
+    _fail(
+        f"No file called {escape(name)} in this project. See what is there with [bold]harumi files ls[/bold]. "
+        "In a script that may run twice, add [bold]--missing-ok[/bold]."
+    )
 
 
 @files_app.command("get")
@@ -3883,6 +3896,11 @@ def files_get(
 def files_rm(
     remote_path: str = typer.Argument(..., help="File path within the project's files."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    missing_ok: bool = typer.Option(
+        False,
+        "--missing-ok",
+        help="Exit 0 when the file is not there, for scripts that may run twice. A folder name is still an error.",
+    ),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -3891,7 +3909,11 @@ def files_rm(
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
-    found = _find_project_file(client, project_id, remote_path)
+    try:
+        found = _find_project_file(client, project_id, remote_path, missing_ok=missing_ok)
+    except _FileNotThere:
+        console.print(f"{escape(remote_path)} was not there, so there was nothing to delete.")
+        return
     what = f"'{remote_path}'" + (f" ({_format_bytes(found.size)})" if found else "")
     if not yes and not typer.confirm(f"Delete {what} from this project's files? This cannot be undone."):
         console.print("Aborted.")
@@ -4130,7 +4152,7 @@ def _pick_share_link(client: Client, project_id: str, action: str) -> Optional[s
         _fail("This project has no share links. Create one with [bold]harumi share add[/bold].")
     options = [
         interactive.Option(
-            f"{(link.label or 'untitled')}",
+            link.label or "untitled",
             link.id,
             hint=f"{'on' if link.enabled else 'off'}, {_share_short_reach(link)}, "
             f"{'password' if link.password_set else 'no password'}  {link.id}",
@@ -4153,13 +4175,17 @@ def _resolve_share_link(client: Client, project_id: str, link_id: str) -> str:
     """
     if _FULL_ID.match(link_id):
         return link_id
-    links = client.list_share_links(project_id)
+    return _match_share_link(client.list_share_links(project_id), link_id).id
+
+
+def _match_share_link(links: list[ProjectShareLink], link_id: str) -> ProjectShareLink:
+    """The one link in `links` that `link_id` names, exactly or as the start of its id."""
     exact = next((link for link in links if link.id == link_id), None)
     if exact:
-        return exact.id
+        return exact
     starts = [link for link in links if link_id and link.id.startswith(link_id)]
     if len(starts) == 1:
-        return starts[0].id
+        return starts[0]
     if len(starts) > 1:
         _fail(f"'{escape(link_id)}' matches more than one share link. Give more of the id (see [bold]harumi share list[/bold]).")
     _fail(f"No share link '{escape(link_id)}' on this project. See them with [bold]harumi share list[/bold].")
@@ -4227,9 +4253,9 @@ def share_get(
         link_id = _pick_share_link(client, project_id, "look at")
         if link_id is None:
             return
-    link_id = _resolve_share_link(client, project_id, link_id)
-    link = next(sl for sl in client.list_share_links(project_id) if sl.id == link_id)
-    _print_share_link(link)
+    # `get` needs the link itself, so it lists once and matches here (a full id too: a typo in
+    # one hex digit must read as "no such link", not crash).
+    _print_share_link(_match_share_link(client.list_share_links(project_id), link_id))
 
 
 _IO_CONTROL_OPTION = typer.Option(
@@ -4383,9 +4409,13 @@ def share_rm(
             return
     link_id = _resolve_share_link(client, project_id, link_id)
 
-    if not yes and not typer.confirm(f"Delete share link '{link_id}'? This cannot be undone."):
-        console.print("Aborted.")
-        return
+    if not yes:
+        # Name the link, not just its id: a prefix that matched the wrong one is then easy to spot.
+        known = next((sl for sl in client.list_share_links(project_id) if sl.id == link_id), None)
+        who = f"'{known.label or 'untitled'}' ({link_id})" if known else f"'{link_id}'"
+        if not typer.confirm(f"Delete share link {who}? This cannot be undone."):  # plain text: not Rich markup
+            console.print("Aborted.")
+            return
 
     try:
         client.delete_share_link(project_id, link_id)

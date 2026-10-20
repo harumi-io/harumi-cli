@@ -1459,6 +1459,18 @@
         },
         {
           "opts": [
+            "--missing-ok"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Exit 0 when the file is not there, for scripts that may run twice. A folder name is still an error."
+        },
+        {
+          "opts": [
             "--project",
             "-p"
           ],

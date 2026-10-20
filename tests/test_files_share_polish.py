@@ -148,7 +148,9 @@ def test_files_ls_names_are_never_cut(api):
 
     out = runner.invoke(cli.app, ["files", "ls"]).output
 
-    assert "final_name_of_a_file.csv" in out.replace("\n", "").replace("│", "").replace(" ", "") or "final_name_of_a_file.csv" in out
+    # Folded, not cut: the pieces of the name are all present, in order, with no ellipsis.
+    glued = "".join(line.strip("│ ").split("│")[0].strip() for line in out.splitlines() if line.startswith("│"))
+    assert "a/very/deeply/nested/folder/structure/with/a/long/final_name_of_a_file.csv" in glued
     assert "…" not in out
 
 
@@ -277,6 +279,7 @@ def test_every_id_the_list_prints_works_as_an_argument(api):
     for shown in ids:
         result = runner.invoke(cli.app, ["share", "get", shown])
         assert result.exit_code == 0, f"{shown!r} was printed by `share list` but `share get` refused it:\n{result.output}"
+        assert shown in result.output
 
 
 def test_the_shown_ids_are_all_different(api):
@@ -431,13 +434,24 @@ def test_a_closed_link_says_the_url_does_not_work(api):
 UNKNOWN = "99999999-aaaa-4bbb-8ccc-000000000009"
 
 
-@pytest.mark.parametrize("args", [["share", "update", UNKNOWN, "--disable"], ["share", "rm", UNKNOWN, "--yes"], ["share", "rotate", UNKNOWN, "--yes"]])
+@pytest.mark.parametrize(
+    "args",
+    [["share", "get", UNKNOWN], ["share", "update", UNKNOWN, "--disable"], ["share", "rm", UNKNOWN, "--yes"], ["share", "rotate", UNKNOWN, "--yes"]],
+)
 def test_a_full_but_unknown_id_goes_to_the_server_and_comes_back_with_a_pointer(api, args):
     api.links = []  # nothing to match; the full id must still be tried as given
 
     result = runner.invoke(cli.app, args)
 
     assert result.exit_code == 1 and "harumi share list" in plain(result.output)
+    assert result.exception is None or isinstance(result.exception, SystemExit), repr(result.exception)  # not a traceback
+
+
+def test_share_get_lists_the_links_once_whatever_the_id_looks_like(api):
+    runner.invoke(cli.app, ["share", "get", L2])
+    runner.invoke(cli.app, ["share", "get", L2[:8]])
+
+    assert api.calls.count(f"GET /api/projects/{P}/share-links") == 2  # one per command, not two
 
 
 def test_a_full_id_costs_no_extra_request(api):
@@ -498,3 +512,68 @@ def test_the_skill_reference_describes_the_share_ids_pickers_and_exposure_warnin
     for usage in ("share get [LINK_ID]", "share update [LINK_ID]", "share rm [LINK_ID]", "share rotate [LINK_ID]"):
         assert usage in section
     assert "valid types" in ref[ref.index("## `dashboard`") : ref.index("## `share`")]
+
+
+# -- a script that removes a file that may already be gone -------------------------------------------------
+
+
+def test_removing_a_missing_file_with_missing_ok_succeeds_quietly(api):
+    """`files rm x --yes` used to exit 0 for any name (harumi-api answers deleted: 1 for everything).
+    Cleanup scripts depend on that; --missing-ok keeps them working without hiding typos by default."""
+    result = runner.invoke(cli.app, ["files", "rm", "nope.csv", "--yes", "--missing-ok"])
+
+    out = plain(result.output)
+    assert result.exit_code == 0 and "was not there" in out and "nothing to delete" in out
+    assert api.deleted_files == []
+
+
+def test_missing_ok_does_not_excuse_a_folder_name(api):
+    result = runner.invoke(cli.app, ["files", "rm", "data", "--yes", "--missing-ok"])
+
+    assert result.exit_code == 1 and "is a folder" in plain(result.output)
+
+
+def test_missing_ok_still_deletes_a_file_that_is_there(api):
+    result = runner.invoke(cli.app, ["files", "rm", "models/model.lp", "--yes", "--missing-ok"])
+
+    assert result.exit_code == 0 and api.deleted_files == ["models/model.lp"]
+
+
+def test_a_missing_file_without_the_flag_names_the_flag_for_scripts(api):
+    out = plain(runner.invoke(cli.app, ["files", "rm", "nope.csv", "--yes"]).output)
+
+    assert "--missing-ok" in out
+
+
+# -- the confirmation names what you are deleting ----------------------------------------------------------
+
+
+def test_the_share_rm_question_shows_the_label_so_a_wrong_prefix_is_noticed(api):
+    result = runner.invoke(cli.app, ["share", "rm", L1[:8]], input="n\n")
+
+    out = plain(result.output)
+    assert "Client dashboard" in out and L1 in out and "Aborted" in out
+    assert api.deleted_links == []
+
+
+def test_the_share_rm_question_handles_a_link_with_no_label(api):
+    out = plain(runner.invoke(cli.app, ["share", "rm", L2], input="n\n").output)
+
+    assert "untitled" in out and L2 in out
+
+
+def test_a_label_with_brackets_is_shown_whole_in_the_question(api):
+    api.links[0]["label"] = "Q3 [draft]"
+
+    assert "Q3 [draft]" in plain(runner.invoke(cli.app, ["share", "rm", L1], input="n\n").output)
+
+
+def test_the_skill_reference_records_the_files_rm_exit_code_change_for_scripts():
+    """`files rm <missing> --yes` used to exit 0 for any name. A script relying on that needs to know.
+    The files section itself arrives with the complete-upload fix; until then the note lives here."""
+    import pathlib
+
+    root = pathlib.Path(cli.__file__).resolve().parents[2]
+    ref = (root / ".agents/skills/harumi-cli/references/commands.md").read_text(encoding="utf-8")
+
+    assert "--missing-ok" in ref and "files rm" in ref and "exit 0" in ref

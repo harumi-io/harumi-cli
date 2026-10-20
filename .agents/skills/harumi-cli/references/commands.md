@@ -328,6 +328,10 @@ No backend endpoint — a dashboard spec is a plain file in the project's Gitea 
   - `--run RUN_ID` / `--latest`: same dot-path check, but fetches the run's structured output from `GET /projects/{id}/runs/{run_id}/output` (S3-backed for current runs, Gitea for pre-migration runs — resolved transparently by the API) instead of a local file.
   - At most one of `--against`/`--run`/`--latest` may be passed.
 
+## `files rm` and scripts
+
+`harumi files rm <path> --yes` used to exit 0 for any path, because harumi-api answers `deleted: 1` whether or not the file exists. It now exits 1 when the file is not in the project (or is a folder), so a typo is not reported as a deletion. A cleanup script that may run twice should pass **`--missing-ok`**, which exits 0 with "was not there" for a missing file; it does not excuse a folder name. `rm` reads the project's file listing first (one request, up to 500 files) before every delete, even with `--yes`.
+
 ## `share`
 
 ```
@@ -354,7 +358,7 @@ Manages `/projects/{id}/share-links*` — a project's public, unauthenticated da
   - `--run-history`: browse past runs instead of only ever the latest.
   - `--run-control`: signed-in visitors can run now, override the kernel, and manage schedules.
 - **`update`**: `PATCH /projects/{id}/share-links/{link_id}`. Only the flags you pass are changed; `--enable`/`--disable` toggles the link without touching its permissions.
-- **`rm`**: `DELETE /projects/{id}/share-links/{link_id}`. The old URL stops working immediately. Prompts for confirmation unless `--yes`. A hard delete: there is no way to bring the link back (trashing a project removes its links for good too).
+- **`rm`**: `DELETE /projects/{id}/share-links/{link_id}`. The old URL stops working immediately. Prompts for confirmation unless `--yes`, and the question names the link by its label so a prefix that matched the wrong one is noticed. A hard delete: there is no way to bring the link back (trashing a project removes its links for good too).
 - **`rotate`**: `POST /projects/{id}/share-links/{link_id}/rotate` — invalidates the current token and mints a new one; permission flags are unchanged. Prompts for confirmation unless `--yes`.
 - **`update --password`**: prompts for a password (hidden input, server-enforced 8–200 chars), then `PUT /projects/{id}/share-links/{link_id}/password`. Changing the password invalidates every previously issued unlock session for that link — viewers must re-enter it. May be combined with the other `update` flags, or used alone.
 - **`update --no-password`**: `DELETE /projects/{id}/share-links/{link_id}/password`. That link becomes freely viewable (no password prompt).

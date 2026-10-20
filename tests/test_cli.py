@@ -1990,13 +1990,16 @@ def test_share_update_with_no_flags_fails_without_a_request(api):
 
 
 def test_share_remove_aborts_without_confirmation(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})  # read to name the link in the question
+
     result = runner.invoke(
         cli.app, ["share", "rm", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1"], input="n\n"
     )
 
     assert result.exit_code == 0, result.output
     assert "Aborted." in result.output
-    assert api.requests == []
+    assert "Client dashboard" in result.output  # the question names what is being deleted
+    assert not any(r.method == "DELETE" for r in api.requests)  # and nothing was deleted
 
 
 def test_share_remove_deletes_when_confirmed(api):
