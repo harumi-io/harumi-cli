@@ -492,11 +492,16 @@ def _hidden_alias(group: typer.Typer, old_name: str, fn, old: str, use: str) -> 
     group.command(old_name, hidden=True)(_deprecated(old, use)(fn))
 
 
-# C0 and C1 controls (terminal escapes), plus the invisible characters that change how text is
-# drawn or read: zero-width and direction marks (U+200B-U+200F), the bidirectional embeddings and
-# overrides (U+202A-U+202E), the isolates (U+2066-U+2069) and the byte-order mark (U+FEFF). Without
-# the last group a name like "Client<RLO> dashboard" can read as a different name in a delete prompt.
-_CONTROL_CHARS = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+# What is taken out of a name someone else chose (the pattern is raw: `re` reads the \x and \u escapes,
+# so the source line has no invisible characters of its own):
+#   C0 and C1 controls (terminal escapes), and the line and paragraph separators U+2028/U+2029 (below)
+#   U+00AD soft hyphen, U+061C Arabic letter mark, U+200B-U+200F zero-width and direction marks,
+#   U+202A-U+202E bidirectional embeddings and overrides, U+2060-U+2064 word joiner and invisible
+#   operators, U+2066-U+2069 isolates, U+FEFF byte-order mark.
+# Without the invisible ones a name like "Client<RLO> dashboard" can read as a different name in a delete prompt.
+_CONTROL_CHARS = re.compile(
+    r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
+)
 
 
 def _printable(text: object) -> str:
@@ -506,7 +511,8 @@ def _printable(text: object) -> str:
     runs the command on a shared project. An escape sequence in it would be run by their terminal.
     Tabs and newlines are control characters too, but harmless in a name, so they are kept as spaces.
     """
-    return _CONTROL_CHARS.sub("", str(text).replace("\t", " ").replace("\n", " "))
+    spaced = str(text).replace("\t", " ").replace("\n", " ").replace("\u2028", " ").replace("\u2029", " ")
+    return _CONTROL_CHARS.sub("", spaced)
 
 
 def _format_bytes(num_bytes: int) -> str:
@@ -3849,7 +3855,8 @@ def files_put(
         except ApiError as exc:
             _fail(_upload_refusal(exc, dest_path))
     console.print(
-        f"[bold green]Uploaded[/bold green] {local_path} -> {dest_path} ({_format_bytes(file_size)}).", soft_wrap=True
+        f"[bold green]Uploaded[/bold green] {escape(_printable(local_path))} -> {escape(_printable(dest_path))} ({_format_bytes(file_size)}).",
+        soft_wrap=True,
     )
 
 
@@ -3857,7 +3864,9 @@ class _FileNotThere(Exception):
     """`files rm --missing-ok` named a file that is not in the project: nothing to delete."""
 
 
-def _find_project_file(client: Client, project_id: str, name: str, *, missing_ok: bool = False) -> Optional[ProjectFile]:
+def _find_project_file(
+    client: Client, project_id: str, name: str, *, missing_ok: bool = False, script_hint: str = ""
+) -> Optional[ProjectFile]:
     """The listed file called `name`, or a clear failure saying it is missing or is a folder.
 
     harumi-api tells a missing file from an existing one only for downloads (a 404); a delete
@@ -3878,8 +3887,8 @@ def _find_project_file(client: Client, project_id: str, name: str, *, missing_ok
     if missing_ok:
         raise _FileNotThere()
     _fail(
-        f"No file called {escape(_printable(name))} in this project. See what is there with [bold]harumi files ls[/bold]. "
-        "In a script that may run twice, add [bold]--missing-ok[/bold]."
+        f"No file called {escape(_printable(name))} in this project. See what is there with [bold]harumi files ls[/bold]."
+        + (f" {script_hint}" if script_hint else "")
     )
 
 
@@ -3916,7 +3925,7 @@ def files_get(
     # Refuse instead, since there's no name to default to.
     default_name = remote_path.rstrip("/").rsplit("/", 1)[-1]
     if output is None and not default_name:
-        _fail(f"'{remote_path}' has no file name to save as. Pass --output, or name a file.")
+        _fail(f"'{escape(_printable(remote_path))}' has no file name to save as. Pass --output, or name a file.")
 
     dest_path = output or Path(default_name)
     try:
@@ -3927,7 +3936,7 @@ def files_get(
             _find_project_file(client, project_id, remote_path)
         raise
     client.download_file_from_presigned_url(download_url, dest_path)
-    console.print(f"Downloaded {remote_path} -> {dest_path}", soft_wrap=True)
+    console.print(f"Downloaded {escape(_printable(remote_path))} -> {escape(_printable(dest_path))}", soft_wrap=True)
 
 
 @files_app.command("rm")
@@ -3949,11 +3958,17 @@ def files_rm(
     client = _get_client(api_url=api_url, org=org)
 
     try:
-        found = _find_project_file(client, project_id, remote_path, missing_ok=missing_ok)
+        found = _find_project_file(
+            client,
+            project_id,
+            remote_path,
+            missing_ok=missing_ok,
+            script_hint="In a script that may run twice, add [bold]--missing-ok[/bold].",  # `rm` only
+        )
     except _FileNotThere:
         console.print(f"{escape(_printable(remote_path))} was not there, so there was nothing to delete.")
         return
-    what = f"'{remote_path}'" + (f" ({_format_bytes(found.size)})" if found else "")
+    what = f"'{_printable(remote_path)}'" + (f" ({_format_bytes(found.size)})" if found else "")  # shown cleaned; sent as given
     if not yes and not typer.confirm(f"Delete {what} from this project's files? This cannot be undone."):
         console.print("Aborted.")
         return

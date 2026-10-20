@@ -7,6 +7,7 @@ width of a default terminal, because an id that is cut there cannot be pasted in
 from __future__ import annotations
 
 import json
+import pathlib
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -715,3 +716,98 @@ def test_a_typed_name_with_control_characters_is_cleaned_in_every_message_that_r
     ):
         out = runner.invoke(cli.app, args).output
         assert "\x1b" not in out and "\u202e" not in out, f"{args} echoed a control character:\n{out!r}"
+
+
+# -- review round 4: the prompt and the other echoes, more invisible characters, a readable pattern --------
+
+
+@pytest.mark.parametrize(
+    "raw, clean",
+    [
+        ("arabic\u061cmark", "arabicmark"),  # Arabic letter mark: a direction mark
+        ("join\u2060er", "joiner"),  # word joiner
+        ("inv\u2061i\u2062s\u2063i\u2064ble", "invisible"),  # invisible operators
+        ("soft\u00adhyphen", "softhyphen"),
+        ("line\u2028sep", "line sep"),  # a line separator breaks a line like a newline: keep the words apart
+        ("para\u2029sep", "para sep"),
+    ],
+)
+def test_printable_also_removes_the_remaining_invisible_characters(raw, clean):
+    assert cli._printable(raw) == clean
+
+
+def test_the_pattern_is_a_raw_string_so_its_escapes_read_the_same_in_every_tool():
+    """A non-raw pattern relies on Python turning "\\x00" into a byte; a raw one hands the escapes to `re`,
+    and the source reads the same in a diff, an editor and a review."""
+    source = pathlib.Path(cli.__file__).read_bytes()
+    start = source.index(b"_CONTROL_CHARS = re.compile(")
+    statement = source[start : source.index(b"\n)\n", start) + 3]  # the whole (possibly wrapped) statement
+
+    assert b'r"[' in statement, statement
+    assert not [b for b in statement if (b < 32 and b != 10) or b == 127], "control bytes embedded in the source"
+    assert not [c for c in statement.decode("utf-8") if ord(c) > 127], "invisible characters embedded in the source"
+
+
+def test_the_delete_question_for_a_file_cleans_the_name_but_sends_the_original(api):
+    """The name shown to the person is cleaned; the name sent to the server is exactly what was given."""
+    odd = "inputs/x\u202e.csv"
+    api.files[odd] = (5, ago(days=1))
+    asked = []
+
+    import typer as _typer
+
+    real = _typer.confirm
+    cli.typer.confirm = lambda text, **k: asked.append(text) or False
+    try:
+        runner.invoke(cli.app, ["files", "rm", odd])
+    finally:
+        cli.typer.confirm = real
+
+    assert asked and "\u202e" not in asked[0] and "inputs/x.csv" in asked[0]
+
+
+def test_the_delete_sends_the_name_as_given_even_though_it_is_shown_cleaned(api):
+    odd = "inputs/x\u202e.csv"
+    api.files[odd] = (5, ago(days=1))
+
+    result = runner.invoke(cli.app, ["files", "rm", odd, "--yes"])
+
+    assert result.exit_code == 0 and api.deleted_files == [odd]  # the real name reached the API
+    assert "\u202e" not in result.output
+
+
+def test_get_cleans_the_names_it_echoes(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    odd = "inputs/g\u202e.csv"
+    api.files[odd] = (5, ago(days=1))
+
+    out = runner.invoke(cli.app, ["files", "get", odd, "-o", str(tmp_path / "out.csv")]).output
+
+    assert "\u202e" not in out and "Downloaded" in out
+
+
+def test_get_of_a_missing_file_does_not_suggest_a_flag_it_does_not_have(api, tmp_path, monkeypatch):
+    """--missing-ok belongs to `files rm`. `get` shares the lookup helper and must not borrow its hint."""
+    monkeypatch.chdir(tmp_path)
+
+    out = plain(runner.invoke(cli.app, ["files", "get", "nope.csv"]).output)
+
+    assert "No file called nope.csv" in out and "harumi files ls" in out
+    assert "--missing-ok" not in out
+
+
+def test_rm_of_a_missing_file_still_suggests_its_flag(api):
+    assert "--missing-ok" in plain(runner.invoke(cli.app, ["files", "rm", "nope.csv", "--yes"]).output)
+
+
+def test_put_cleans_the_names_in_its_success_line(api, tmp_path, monkeypatch):
+    """The remote name is typed by the user, but may be pasted from elsewhere with an escape sequence in it."""
+    monkeypatch.chdir(tmp_path)
+    local = tmp_path / "data.csv"
+    local.write_text("a,b\n1,2\n")
+    monkeypatch.setattr(Client, "create_file_upload_url", lambda self, *a, **k: type("U", (), {"url": "https://s3.test/x", "key": f"{P}/inputs/x.csv", "expires_in": 900})())
+    monkeypatch.setattr(Client, "upload_file_to_presigned_url", lambda *a, **k: None)
+
+    out = runner.invoke(cli.app, ["files", "put", str(local), "inputs/x\u202e\x1b[2J.csv"]).output
+
+    assert "\u202e" not in out and "\x1b" not in out and "Uploaded" in out
