@@ -320,7 +320,7 @@ harumi dashboard validate [PATH] [--ref REF] [--against FILE | --run RUN_ID | --
 No backend endpoint — a dashboard spec is a plain file in the project's Gitea repo (edit it in the clone and `git push harumi` like any other file). A project can have several: every `dashboard/<name>.toml` (alphabetical) plus the legacy root `dashboard.toml` (last), each an entry in the platform's dashboard picker. This command group only helps you get their contents right. Full per-type reference and folder layout: [dashboard.md](dashboard.md).
 
 - **`widgets`**: prints the current widget-type contract (required/optional keys, enum values) for all 5 types, or one with `--type`. Sourced from `harumi.dashboard.WIDGET_SCHEMAS`, a hand-maintained mirror of harumi-platform's `schema.ts` (see the `ponytail:` comment in that module) — always current with this CLI version, but can drift from the platform between CLI releases if a new widget type ships there first.
-- **`validate`**: parses each dashboard spec the same way the platform's `parseDashboardConfig` does, and reports every widget that would be **dropped** (unknown `type`, missing/invalid required key — e.g. a `valueKey` typo for `value_key`). Exits 1 if any spec drops a widget or isn't valid TOML.
+- **`validate`**: parses each dashboard spec the same way the platform's `parseDashboardConfig` does, and reports every widget that would be **dropped** (unknown `type` (the message lists the valid types and suggests the nearest one), missing/invalid required key — e.g. a `valueKey` typo for `value_key`). Exits 1 if any spec drops a widget or isn't valid TOML.
   - With no `PATH`: every `./dashboard/*.toml`, else `./dashboard.toml`. Each filename is printed as a heading when there's more than one.
   - `PATH`: just that one file, wherever it lives.
   - `--ref BRANCH`: the repo's copies instead of local files — lists the tree via `GET /repo/files`, then reads each spec via `GET /repo/file-content`. Never guesses a filename.
@@ -332,27 +332,29 @@ No backend endpoint — a dashboard spec is a plain file in the project's Gitea 
 
 ```
 harumi share list [--project ID]
-harumi share get LINK_ID [--project ID]
+harumi share get [LINK_ID] [--project ID]
 harumi share add [--label TEXT] [--app/--no-app] [--chat/--no-chat] [--run-history/--no-run-history]
                   [--run-control/--no-run-control] [--project ID]
-harumi share update LINK_ID [--label TEXT] [--enable/--disable] [--app/--no-app] [--chat/--no-chat]
+harumi share update [LINK_ID] [--label TEXT] [--enable/--disable] [--app/--no-app] [--chat/--no-chat]
                      [--run-history/--no-run-history] [--run-control/--no-run-control]
                      [--password/--no-password] [--project ID]
-harumi share rm LINK_ID [--yes] [--project ID]
-harumi share rotate LINK_ID [--yes] [--project ID]
+harumi share rm [LINK_ID] [--yes] [--project ID]
+harumi share rotate [LINK_ID] [--yes] [--project ID]
 ```
 
 Manages `/projects/{id}/share-links*` — a project's public, unauthenticated dashboard links (read-only view of the project's dashboard specs, with the same picker when there are several, + a chosen run's `output.json`; no login required to view). A project can have several links, each independently revocable, each with its own permissions and optional password.
 
-- **`list`**: `GET /projects/{id}/share-links` → `ProjectShareLinkList {links: [ProjectShareLink]}`. Prints a table with each link's id, label, `enabled`, its enabled permissions, and whether it's password protected.
-- **`get`**: same list call, filtered to one link — prints its full viewer URL (built client-side as `{platform_url}/share/{token}`, since the API doesn't know its own public origin) and every permission flag.
+- **Ids**: every command takes the full link id **or the start of it** (as long as it matches one link). `list` shows the first 8 characters, so what it prints can be pasted into the next command. A full id is sent as given with no extra lookup; a wrong one gets the API's 404 plus a pointer to `harumi share list`.
+- **No id**: at a terminal `get`, `update`, `rm` and `rotate` open a picker of the project's links. **Without a terminal (agents, CI, pipes) they never prompt**: they exit 1 listing the links and naming `LINK_ID`. `rm` and `rotate` refuse `--yes` without an id, because `--yes` removes the only question and a mis-pick would then delete or rotate a link; picking a link still asks for confirmation.
+- **`list`**: `GET /projects/{id}/share-links` → `ProjectShareLinkList {links: [ProjectShareLink]}`. A table of `id` (first 8), `label`, `state` (on/off), `visitors can` (`view only`, or any of `app`, `assistant`, `history`, `control`) and `password`. A link that is on, has **no password** and allows more than viewing is marked `!`, with a line saying anyone with the URL can use it. **The token is not printed**: it is the secret in the public URL; `get` shows the URL.
+- **`get`**: same list call, filtered to one link. For an enabled link it prints the full viewer URL (built client-side as `{platform_url}/share/{token}`, since the API doesn't know its own public origin), then in words what anyone with the link can do and whether it has a password, with a warning in the exposed case above. A disabled link says its URL does not work and how to turn it back on.
 - **`add`**: `POST /projects/{id}/share-links` → `ProjectShareLink`. Every permission flag (`--app`, `--chat`, `--run-history`, `--run-control`) defaults to off, so creating a link never silently grants more than a bare read-only, latest-run-only dashboard view.
   - `--app`: let visitors open the project's deployed Streamlit app.
   - `--chat`: read-only assistant for signed-in visitors.
   - `--run-history`: browse past runs instead of only ever the latest.
   - `--run-control`: signed-in visitors can run now, override the kernel, and manage schedules.
 - **`update`**: `PATCH /projects/{id}/share-links/{link_id}`. Only the flags you pass are changed; `--enable`/`--disable` toggles the link without touching its permissions.
-- **`rm`**: `DELETE /projects/{id}/share-links/{link_id}`. The old URL stops working immediately. Prompts for confirmation unless `--yes`.
+- **`rm`**: `DELETE /projects/{id}/share-links/{link_id}`. The old URL stops working immediately. Prompts for confirmation unless `--yes`. A hard delete: there is no way to bring the link back (trashing a project removes its links for good too).
 - **`rotate`**: `POST /projects/{id}/share-links/{link_id}/rotate` — invalidates the current token and mints a new one; permission flags are unchanged. Prompts for confirmation unless `--yes`.
 - **`update --password`**: prompts for a password (hidden input, server-enforced 8–200 chars), then `PUT /projects/{id}/share-links/{link_id}/password`. Changing the password invalidates every previously issued unlock session for that link — viewers must re-enter it. May be combined with the other `update` flags, or used alone.
 - **`update --no-password`**: `DELETE /projects/{id}/share-links/{link_id}/password`. That link becomes freely viewable (no password prompt).

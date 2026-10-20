@@ -162,7 +162,7 @@ from rich.table import Table
 from harumi import __version__, auth, interactive, quickstart
 from harumi import skills as skills_mod
 from harumi.client import Client
-from harumi.file_sync_cap import check_project_sync_cap
+from harumi.file_sync_cap import MAX_PROJECT_SYNC_FILES, MAX_PROJECT_SYNC_TOTAL_BYTES, check_project_sync_cap
 from harumi.config import (
     DEFAULT_ENVIRONMENT,
     ENVIRONMENTS,
@@ -3744,15 +3744,27 @@ def files_ls(
 
     file_list = client.list_project_files(project_id)
     if not file_list.files:
-        console.print("No files uploaded.")
+        console.print("No files uploaded yet. Add one with [bold]harumi files put <local file>[/bold].")
         return
 
-    table = Table("name", "size", "last_modified")
+    table = Table("name", "size", "modified")
+    # A path someone will copy into `files get` or `files rm` is never cut to fit.
+    table.columns[0].no_wrap = True
+    table.columns[0].overflow = "fold"
     for f in sorted(file_list.files, key=lambda f: f.name):
-        table.add_row(f.name, str(f.size), str(f.last_modified or ""))
+        table.add_row(escape(f.name), _format_bytes(f.size), _ago(f.last_modified) or "")
     console.print(table)
+
+    count, total = len(file_list.files), sum(f.size for f in file_list.files)
+    at_least = "at least " if file_list.is_truncated else ""
+    console.print(
+        f"{at_least}{count} file{'' if count == 1 else 's'}, {_format_bytes(total)} "
+        f"[dim](of {MAX_PROJECT_SYNC_FILES} files and {_format_bytes(MAX_PROJECT_SYNC_TOTAL_BYTES)} every run can use)[/dim]"
+    )
     if file_list.is_truncated:
-        console.print("[yellow]Listing is truncated; this project has more files than shown.[/yellow]")
+        console.print("[yellow]This project has more files than shown, so the figures above are a minimum.[/yellow]")
+    elif count >= MAX_PROJECT_SYNC_FILES * 0.9 or total >= MAX_PROJECT_SYNC_TOTAL_BYTES * 0.9:
+        console.print("[yellow]This project is close to the limit. Remove files you no longer need with harumi files rm.[/yellow]")
 
 
 @files_app.command("put")
@@ -3813,6 +3825,27 @@ def files_put(
     )
 
 
+def _find_project_file(client: Client, project_id: str, name: str):
+    """The listed file called `name`, or a clear failure saying it is missing or is a folder.
+
+    harumi-api tells a missing file from an existing one only for downloads (a 404); a delete
+    answers "deleted: 1" for any path. So the listing is consulted first. A truncated listing
+    cannot prove a name is absent, so then the caller goes ahead and lets the server decide.
+    Returns None in that case.
+    """
+    listing = client.list_project_files(project_id)
+    for f in listing.files:
+        if f.name == name:
+            return f
+    inside = sorted(f.name for f in listing.files if f.name.startswith(name.rstrip("/") + "/"))
+    if inside:
+        shown = ", ".join(escape(n) for n in inside[:3]) + (f" and {len(inside) - 3} more" if len(inside) > 3 else "")
+        _fail(f"{escape(name)} is a folder, not a file. It holds {shown}.")
+    if listing.is_truncated:
+        return None
+    _fail(f"No file called {escape(name)} in this project. See what is there with [bold]harumi files ls[/bold].")
+
+
 @files_app.command("get")
 @_handle_errors
 def files_get(
@@ -3834,7 +3867,13 @@ def files_get(
         _fail(f"'{remote_path}' has no file name to save as. Pass --output, or name a file.")
 
     dest_path = output or Path(default_name)
-    download_url = client.create_file_download_url(project_id, remote_path)
+    try:
+        download_url = client.create_file_download_url(project_id, remote_path)
+    except ApiError as exc:
+        if exc.status_code == 404:
+            # Only now spend a request on finding out why: a typo, or a folder name.
+            _find_project_file(client, project_id, remote_path)
+        raise
     client.download_file_from_presigned_url(download_url, dest_path)
     console.print(f"Downloaded {remote_path} -> {dest_path}", soft_wrap=True)
 
@@ -3848,16 +3887,19 @@ def files_rm(
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Delete an uploaded file."""
+    """Delete an uploaded file. This cannot be undone."""
     project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
 
-    if not yes and not typer.confirm(f"Delete '{remote_path}' from this project's files? This cannot be undone."):
+    found = _find_project_file(client, project_id, remote_path)
+    what = f"'{remote_path}'" + (f" ({_format_bytes(found.size)})" if found else "")
+    if not yes and not typer.confirm(f"Delete {what} from this project's files? This cannot be undone."):
         console.print("Aborted.")
         return
 
-    client = _get_client(api_url=api_url, org=org)
-    result = client.delete_project_file(project_id, remote_path)
-    console.print(f"[bold red]Deleted[/bold red] {result.deleted} file(s).")
+    client.delete_project_file(project_id, remote_path)
+    size = f" ({_format_bytes(found.size)})" if found else ""
+    console.print(f"[bold red]Deleted[/bold red] {escape(remote_path)}{size}.")
 
 
 # ---------------------------------------------------------------------------
@@ -4020,18 +4062,113 @@ def _share_link_url(link: ProjectShareLink) -> str:
     return f"{active_platform_url()}/share/{link.token}"
 
 
+def _share_reach(link: ProjectShareLink) -> str:
+    """What a visitor can do with this link, in words: always the latest run's dashboard, plus
+    whatever has been switched on."""
+    extras = [
+        label
+        for label, on in (
+            ("the deployed app", link.app_enabled),
+            ("the assistant", link.chat_enabled),
+            ("past runs", link.run_history_enabled),
+            ("run the project", link.run_control_enabled),
+        )
+        if on
+    ]
+    return "view the latest dashboard" + (f", and use {', '.join(extras)}" if extras else " only")
+
+
+def _share_short_reach(link: ProjectShareLink) -> str:
+    names = [
+        name
+        for name, on in (
+            ("app", link.app_enabled),
+            ("assistant", link.chat_enabled),
+            ("history", link.run_history_enabled),
+            ("control", link.run_control_enabled),
+        )
+        if on
+    ]
+    return ", ".join(names) if names else "view only"
+
+
+def _share_exposure(link: ProjectShareLink) -> str:
+    """A warning when a link that anyone can open does more than show the dashboard."""
+    if link.enabled and not link.password_set and (
+        link.app_enabled or link.chat_enabled or link.run_history_enabled or link.run_control_enabled
+    ):
+        return "no password and more than view access: anyone with the link can use it"
+    return ""
+
+
 def _print_share_link(link: ProjectShareLink) -> None:
-    state = "[bold green]enabled[/bold green]" if link.enabled else "[bold]disabled[/bold]"
-    console.print(f"Link [bold]{link.id}[/bold] ({link.label or 'untitled'}) is {state}.")
-    console.print(f"URL: {_share_link_url(link)}")
-    console.print(f"Password protected: {'yes' if link.password_set else 'no'}")
-    console.print(
-        "Permissions: "
-        f"app={'on' if link.app_enabled else 'off'}, "
-        f"assistant={'on' if link.chat_enabled else 'off'}, "
-        f"run history={'on' if link.run_history_enabled else 'off'}, "
-        f"run control={'on' if link.run_control_enabled else 'off'}"
+    label = escape(link.label) if link.label else "untitled"
+    console.print(f"Share link [bold]{escape(link.id)}[/bold] ({label})")
+    if link.enabled:
+        console.print(f"URL: {_share_link_url(link)}", soft_wrap=True)
+        console.print(f"Anyone with this link can {_share_reach(link)}.")
+        console.print(
+            "It has a [bold]password[/bold]: visitors must enter it first."
+            if link.password_set
+            else "It has [bold]no password[/bold]: it opens for anyone who has the URL."
+        )
+        warning = _share_exposure(link)
+        if warning:
+            console.print(f"[yellow]Careful: {warning}.[/yellow]")
+    else:
+        console.print(
+            "[bold]Disabled[/bold]: the URL does not work. Turn it back on with "
+            f"[bold]harumi share update {escape(link.id)} --enable[/bold]."
+        )
+        console.print("It has a password." if link.password_set else "It has no password.")
+
+
+def _pick_share_link(client: Client, project_id: str, action: str) -> Optional[str]:
+    """Choose one of the project's share links; its id, or None if the user backed out."""
+    links = client.list_share_links(project_id)
+    if not links:
+        _fail("This project has no share links. Create one with [bold]harumi share add[/bold].")
+    options = [
+        interactive.Option(
+            f"{(link.label or 'untitled')}",
+            link.id,
+            hint=f"{'on' if link.enabled else 'off'}, {_share_short_reach(link)}, "
+            f"{'password' if link.password_set else 'no password'}  {link.id}",
+        )
+        for link in links
+    ]
+    return interactive.select(  # type: ignore[return-value]
+        f"Which share link do you want to {action}?", options, flag="the LINK_ID argument"
     )
+
+
+_FULL_ID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _resolve_share_link(client: Client, project_id: str, link_id: str) -> str:
+    """The full id for what the user typed: an exact id, or the start of exactly one.
+
+    A table on a narrow terminal cuts ids, and what gets copied is often only the start. A full
+    id is used as given, with no lookup: a wrong one gets the server's 404 (see `_share_not_found`).
+    """
+    if _FULL_ID.match(link_id):
+        return link_id
+    links = client.list_share_links(project_id)
+    exact = next((link for link in links if link.id == link_id), None)
+    if exact:
+        return exact.id
+    starts = [link for link in links if link_id and link.id.startswith(link_id)]
+    if len(starts) == 1:
+        return starts[0].id
+    if len(starts) > 1:
+        _fail(f"'{escape(link_id)}' matches more than one share link. Give more of the id (see [bold]harumi share list[/bold]).")
+    _fail(f"No share link '{escape(link_id)}' on this project. See them with [bold]harumi share list[/bold].")
+
+
+def _share_not_found(exc: ApiError) -> None:
+    """Turn the API's bare 404 for a full-looking but unknown link id into a pointer."""
+    if exc.status_code == 404:
+        _fail(f"{escape(str(exc))}\nSee this project's links with [bold]harumi share list[/bold].")
 
 
 @share_app.command("list")
@@ -4047,48 +4184,51 @@ def share_list(
 
     links = client.list_share_links(project_id)
     if not links:
-        console.print("No share links found.")
+        console.print("No share links yet. Create one with [bold]harumi share add[/bold].")
         return
 
-    table = Table("id", "label", "enabled", "permissions", "password", "token")
+    # Only the start of the id is shown (8 characters, the first group of the UUID), because every
+    # `share` command accepts the start of an id and the full 36 left no room for anything else.
+    table = Table("id", "label", "state", "visitors can", "password")
+    table.columns[0].no_wrap = True
+    exposed = False
     for link in links:
-        permissions = ", ".join(
-            name
-            for name, on in (
-                ("chat", link.chat_enabled),
-                ("run_history", link.run_history_enabled),
-                ("run_control", link.run_control_enabled),
-            )
-            if on
-        )
+        warn = bool(_share_exposure(link))
+        exposed = exposed or warn
         table.add_row(
-            link.id,
-            link.label or "",
-            "yes" if link.enabled else "no",
-            permissions or "-",
+            escape(link.id[:8]),
+            escape(link.label) if link.label else "[dim]untitled[/dim]",
+            "on" if link.enabled else "[dim]off[/dim]",
+            _share_short_reach(link) + (" [yellow]![/yellow]" if warn else ""),
             "yes" if link.password_set else "no",
-            link.token,
         )
     console.print(table)
+    if exposed:
+        console.print(
+            "[yellow]![/yellow] no password and more than view access: anyone with the link can use it. "
+            "Set one with [bold]harumi share update <id> --password[/bold]."
+        )
+    console.print("[dim]Open one with harumi share get <id>.[/dim]")
 
 
 @share_app.command("get")
 @_handle_errors
 def share_get(
-    link_id: str = typer.Argument(..., help="Share link id."),
+    link_id: Optional[str] = typer.Argument(None, help="Share link id (or the start of it). Pick from a list if omitted."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
-    """Show one share link's full URL and permissions."""
+    """Show one share link: its URL, who can do what with it, and whether it has a password."""
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
-    links = client.list_share_links(project_id)
-    link = next((sl for sl in links if sl.id == link_id), None)
-    if link is None:
-        _fail(f"No share link '{link_id}' found on this project.")
-
+    if link_id is None:
+        link_id = _pick_share_link(client, project_id, "look at")
+        if link_id is None:
+            return
+    link_id = _resolve_share_link(client, project_id, link_id)
+    link = next(sl for sl in client.list_share_links(project_id) if sl.id == link_id)
     _print_share_link(link)
 
 
@@ -4145,7 +4285,7 @@ def share_add(
 @share_app.command("update")
 @_handle_errors
 def share_update(
-    link_id: str = typer.Argument(..., help="Share link id."),
+    link_id: Optional[str] = typer.Argument(None, help="Share link id (or the start of it). Pick from a list if omitted."),
     label: Optional[str] = typer.Option(None, "--label", help="Rename the link."),
     enabled: Optional[bool] = typer.Option(None, "--enable/--disable", help="Turn the link on or off. The old URL stops working immediately when disabled."),
     app: Optional[bool] = typer.Option(None, "--app/--no-app", help="Let visitors open the project's deployed Streamlit app."),
@@ -4180,6 +4320,12 @@ def share_update(
     if not body and password is None:
         _fail("No fields to update. Pass at least one flag (e.g. --label, --chat, --password).")
 
+    if link_id is None:
+        link_id = _pick_share_link(client, project_id, "change")
+        if link_id is None:
+            return
+    link_id = _resolve_share_link(client, project_id, link_id)
+
     # Ask for the password before changing anything, and apply it last: setting or
     # removing it signs out every viewer who had unlocked the link, so it must not
     # happen if the other fields were rejected.
@@ -4192,7 +4338,11 @@ def share_update(
         )
 
     if body:
-        link = client.update_share_link(project_id, link_id, body)
+        try:
+            link = client.update_share_link(project_id, link_id, body)
+        except ApiError as exc:
+            _share_not_found(exc)
+            raise
         console.print("[bold green]Updated[/bold green] share link.")
         _print_share_link(link)
 
@@ -4214,43 +4364,68 @@ def share_update(
 @share_app.command("rm")
 @_handle_errors
 def share_rm(
-    link_id: str = typer.Argument(..., help="Share link id."),
+    link_id: Optional[str] = typer.Argument(None, help="Share link id (or the start of it). Pick from a list if omitted."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Permanently delete a share link. The old URL stops working immediately."""
+    if link_id is None and yes:
+        # --yes removes the question, so nothing would stand between a slip in a list and a deleted link.
+        _fail("Say which link to delete: [bold]harumi share rm <link id> --yes[/bold]. Find the id with [bold]harumi share list[/bold].")
     project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    if link_id is None:
+        link_id = _pick_share_link(client, project_id, "delete")
+        if link_id is None:
+            return
+    link_id = _resolve_share_link(client, project_id, link_id)
 
     if not yes and not typer.confirm(f"Delete share link '{link_id}'? This cannot be undone."):
         console.print("Aborted.")
         return
 
-    client = _get_client(api_url=api_url, org=org)
-    client.delete_share_link(project_id, link_id)
-    console.print(f"[bold red]Deleted[/bold red] share link [bold]{link_id}[/bold].")
+    try:
+        client.delete_share_link(project_id, link_id)
+    except ApiError as exc:
+        _share_not_found(exc)
+        raise
+    console.print(f"[bold red]Deleted[/bold red] share link [bold]{escape(link_id)}[/bold]. Its URL no longer works.")
 
 
 @share_app.command("rotate")
 @_handle_errors
 def share_rotate(
-    link_id: str = typer.Argument(..., help="Share link id."),
+    link_id: Optional[str] = typer.Argument(None, help="Share link id (or the start of it). Pick from a list if omitted."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Invalidate a share link's current token and mint a new one. Its flags are unchanged."""
+    if link_id is None and yes:
+        _fail("Say which link to rotate: [bold]harumi share rotate <link id> --yes[/bold]. Find the id with [bold]harumi share list[/bold].")
     project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    if link_id is None:
+        link_id = _pick_share_link(client, project_id, "rotate")
+        if link_id is None:
+            return
+    link_id = _resolve_share_link(client, project_id, link_id)
 
     if not yes and not typer.confirm("Rotate this share link? The current URL will stop working immediately."):
         console.print("Aborted.")
         return
 
-    client = _get_client(api_url=api_url, org=org)
-    link = client.rotate_share_link(project_id, link_id)
-    console.print("[bold green]Rotated[/bold green] share link.")
+    try:
+        link = client.rotate_share_link(project_id, link_id)
+    except ApiError as exc:
+        _share_not_found(exc)
+        raise
+    console.print("[bold green]Rotated[/bold green] share link. Anyone using the old URL now needs the new one.")
     _print_share_link(link)
 
 

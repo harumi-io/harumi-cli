@@ -38,6 +38,7 @@ validator.
 
 from __future__ import annotations
 
+import difflib
 import json
 import math
 import sys
@@ -450,6 +451,17 @@ def widget_warnings(entry: Dict[str, Any], widget: Dict[str, Any]) -> List[Widge
     return issues
 
 
+def _valid_types_hint(type_: str, schemas: Dict[str, Any]) -> str:
+    """". Did you mean "chart"? Valid types: ..." for an unknown widget type.
+
+    Without it the message sent people to `harumi dashboard widgets` to find out what the type
+    they mistyped should have been.
+    """
+    close = difflib.get_close_matches(type_, list(schemas), n=1, cutoff=0.6)
+    guess = f' Did you mean "{close[0]}"?' if close else ""
+    return f".{guess} Valid types: {', '.join(schemas)}."
+
+
 def parse_widget_entry(entry: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[WidgetIssue]]:
     """Validate one raw `[[widgets]]` table entry. Mirrors `parseWidgetEntry`
     in schema.ts: returns either a coerced widget dict, or the (single,
@@ -461,9 +473,10 @@ def parse_widget_entry(entry: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]],
     if not isinstance(type_, str) or not isinstance(id_, str) or not isinstance(title, str):
         return None, WidgetIssue(id_ if isinstance(id_, str) else None, "missing or invalid type/id/title")
 
-    schema = widget_schemas().get(type_)
+    schemas = widget_schemas()
+    schema = schemas.get(type_)
     if schema is None:
-        return None, WidgetIssue(id_, f'widget "{id_}": unknown type "{type_}"')
+        return None, WidgetIssue(id_, f'widget "{id_}": unknown type "{type_}"{_valid_types_hint(type_, schemas)}')
 
     widget: Dict[str, Any] = {"type": type_, "id": id_, "title": title}
     for field in schema:

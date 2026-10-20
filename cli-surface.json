@@ -3838,7 +3838,7 @@
     },
     {
       "path": "share get",
-      "help": "Show one share link's full URL and permissions.",
+      "help": "Show one share link: its URL, who can do what with it, and whether it has a password.",
       "params": [
         {
           "opts": [
@@ -3847,10 +3847,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Share link id."
+          "help": "Share link id (or the start of it). Pick from a list if omitted."
         },
         {
           "opts": [
@@ -3945,10 +3945,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Share link id."
+          "help": "Share link id (or the start of it). Pick from a list if omitted."
         },
         {
           "opts": [
@@ -4013,10 +4013,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Share link id."
+          "help": "Share link id (or the start of it). Pick from a list if omitted."
         },
         {
           "opts": [
@@ -4081,10 +4081,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Share link id."
+          "help": "Share link id (or the start of it). Pick from a list if omitted."
         },
         {
           "opts": [
