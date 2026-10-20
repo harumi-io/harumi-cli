@@ -330,6 +330,12 @@ No backend endpoint — a dashboard spec is a plain file in the project's Gitea 
 
 ## `files rm` and scripts
 
+```
+harumi files rm REMOTE_PATH [--yes] [--missing-ok] [--project ID] [--api-url URL] [--org ORG]
+```
+
+*(This note moves into the `files` section when that section lands.)*
+
 `harumi files rm <path> --yes` used to exit 0 for any path, because harumi-api answers `deleted: 1` whether or not the file exists. It now exits 1 when the file is not in the project (or is a folder), so a typo is not reported as a deletion. A cleanup script that may run twice should pass **`--missing-ok`**, which exits 0 with "was not there" for a missing file; it does not excuse a folder name. `rm` reads the project's file listing first (one request, up to 500 files) before every delete, even with `--yes`.
 
 ## `share`

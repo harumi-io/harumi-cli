@@ -492,6 +492,19 @@ def _hidden_alias(group: typer.Typer, old_name: str, fn, old: str, use: str) -> 
     group.command(old_name, hidden=True)(_deprecated(old, use)(fn))
 
 
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def _printable(text: object) -> str:
+    """`text` with terminal control characters taken out, for names someone else chose.
+
+    A share link's label or a file's name is typed by whoever created it and shown to anyone who
+    runs the command on a shared project. An escape sequence in it would be run by their terminal.
+    Tabs and newlines are control characters too, but harmless in a name, so they are kept as spaces.
+    """
+    return _CONTROL_CHARS.sub("", str(text).replace("\t", " ").replace("\n", " "))
+
+
 def _format_bytes(num_bytes: int) -> str:
     if num_bytes < 1024:
         return f"{num_bytes} B"
@@ -3756,7 +3769,7 @@ def files_ls(
     table.columns[0].no_wrap = True
     table.columns[0].overflow = "fold"
     for f in sorted(file_list.files, key=lambda f: f.name):
-        table.add_row(escape(f.name), _format_bytes(f.size), _ago(f.last_modified) or "")
+        table.add_row(escape(_printable(f.name)), _format_bytes(f.size), _ago(f.last_modified) or "")
     console.print(table)
 
     count, total = len(file_list.files), sum(f.size for f in file_list.files)
@@ -4124,7 +4137,7 @@ def _share_exposure(link: ProjectShareLink) -> str:
 
 
 def _print_share_link(link: ProjectShareLink) -> None:
-    label = escape(link.label) if link.label else "untitled"
+    label = escape(_printable(link.label)) if link.label else "untitled"
     console.print(f"Share link [bold]{escape(link.id)}[/bold] ({label})")
     if link.enabled:
         console.print(f"URL: {_share_link_url(link)}", soft_wrap=True)
@@ -4152,7 +4165,7 @@ def _pick_share_link(client: Client, project_id: str, action: str) -> Optional[s
         _fail("This project has no share links. Create one with [bold]harumi share add[/bold].")
     options = [
         interactive.Option(
-            link.label or "untitled",
+            _printable(link.label) if link.label else "untitled",
             link.id,
             hint=f"{'on' if link.enabled else 'off'}, {_share_short_reach(link)}, "
             f"{'password' if link.password_set else 'no password'}  {link.id}",
@@ -4223,7 +4236,7 @@ def share_list(
         exposed = exposed or warn
         table.add_row(
             escape(link.id[:8]),
-            escape(link.label) if link.label else "[dim]untitled[/dim]",
+            escape(_printable(link.label)) if link.label else "[dim]untitled[/dim]",
             "on" if link.enabled else "[dim]off[/dim]",
             _share_short_reach(link) + (" [yellow]![/yellow]" if warn else ""),
             "yes" if link.password_set else "no",
@@ -4407,12 +4420,18 @@ def share_rm(
         link_id = _pick_share_link(client, project_id, "delete")
         if link_id is None:
             return
-    link_id = _resolve_share_link(client, project_id, link_id)
+
+    known: Optional[ProjectShareLink] = None
+    if not yes:
+        # One listing serves both the short-id match and the label in the question below.
+        known = _match_share_link(client.list_share_links(project_id), link_id)
+        link_id = known.id
+    elif not _FULL_ID.match(link_id):
+        link_id = _resolve_share_link(client, project_id, link_id)
 
     if not yes:
         # Name the link, not just its id: a prefix that matched the wrong one is then easy to spot.
-        known = next((sl for sl in client.list_share_links(project_id) if sl.id == link_id), None)
-        who = f"'{known.label or 'untitled'}' ({link_id})" if known else f"'{link_id}'"
+        who = f"'{_printable(known.label) if known and known.label else 'untitled'}' ({link_id})"
         if not typer.confirm(f"Delete share link {who}? This cannot be undone."):  # plain text: not Rich markup
             console.print("Aborted.")
             return

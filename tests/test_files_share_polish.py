@@ -576,4 +576,45 @@ def test_the_skill_reference_records_the_files_rm_exit_code_change_for_scripts()
     root = pathlib.Path(cli.__file__).resolve().parents[2]
     ref = (root / ".agents/skills/harumi-cli/references/commands.md").read_text(encoding="utf-8")
 
-    assert "--missing-ok" in ref and "files rm" in ref and "exit 0" in ref
+    section = ref[ref.index("## `files rm` and scripts") : ref.index("## `share`")]
+    assert "harumi files rm REMOTE_PATH [--yes] [--missing-ok]" in section
+    assert "exit 0" in section and "exits 1" in section and "folder name" in section
+
+
+# -- review: one listing for rm, and a label cannot drive the terminal ---------------------------------------
+
+
+def test_share_rm_lists_the_links_once_even_for_a_short_id(api):
+    runner.invoke(cli.app, ["share", "rm", L1[:8]], input="n\n")
+
+    assert api.calls.count(f"GET /api/projects/{P}/share-links") == 1, api.calls
+
+
+def test_share_rm_with_a_full_id_and_yes_still_makes_no_listing_request(api):
+    runner.invoke(cli.app, ["share", "rm", L1, "--yes"])
+
+    assert api.calls == [f"DELETE /api/projects/{P}/share-links/{L1}"]
+
+
+def test_a_label_with_terminal_control_characters_is_not_echoed_raw(api):
+    api.links[0]["label"] = "Q3\x1b[2J\x07 board"
+
+    result = runner.invoke(cli.app, ["share", "rm", L1], input="n\n")
+
+    assert "\x1b" not in result.output and "\x07" not in result.output
+    assert "Q3" in result.output and "board" in result.output
+
+
+def test_a_label_with_control_characters_is_clean_in_the_listing_too(api):
+    api.links[0]["label"] = "Q3\x1b[2J board"
+
+    assert "\x1b[2J" not in runner.invoke(cli.app, ["share", "list"]).output
+    assert "\x1b[2J" not in runner.invoke(cli.app, ["share", "get", L1]).output
+
+
+def test_a_file_name_with_terminal_control_characters_is_not_echoed_raw_by_files_ls(api):
+    api.files["inputs/evil\x1b[2J\x07.csv"] = (1, ago(days=1))
+
+    out = runner.invoke(cli.app, ["files", "ls"]).output
+
+    assert "\x1b" not in out and "\x07" not in out and "inputs/evil" in out
