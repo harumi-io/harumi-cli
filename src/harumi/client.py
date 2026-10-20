@@ -8,6 +8,7 @@ or schema change only needs to be made here.
 
 from __future__ import annotations
 
+import posixpath
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
@@ -224,20 +225,28 @@ _COMPLETE_UPLOAD_TIMEOUT = 180.0
 _QUARANTINE_PREFIX = ".quarantine/"
 
 
-def upload_is_staged(project_id: str, key: str) -> bool:
+def upload_is_staged(project_id: str, key: str, requested: Optional[str] = None) -> bool:
     """Whether `key` is a staging key that still needs `complete_file_upload`.
 
     harumi-api issues `{project}/.quarantine/<one flat name>`. A server that predates the
     quarantine change returns the file's own final key, so for it the extra call is skipped
     rather than sent to a route it does not have.
 
-    The match is deliberately looser than that exact shape. If the server moves the staging
-    area (a nested name, a prefix in front), a strict match would say "not staged", skip the
-    completion and report success for a file that never appears. So `.quarantine` as the first
-    path segment, or as the segment right after the project (wherever the project id sits at
-    the front of the key), counts. A user's own folder with that name deeper inside the
-    project (`{project}/data/.quarantine/x`) does not: on an old server that is a real file.
+    `requested` is the path the user asked for. If the key is exactly `{project}/{that path}`
+    (after the normalising the server does), it is the file's own key and final, whatever it
+    contains: `put x .quarantine/x.csv` on an older server returns `{project}/.quarantine/x.csv`,
+    which is a plain user path and must not be mistaken for staging.
+
+    Only when the key differs from the requested path does its shape matter, and then the match is
+    looser than today's exact shape: if the server moves the staging area (a nested name, a prefix),
+    a strict match would say "not staged", skip the completion and report success for a file that
+    never appears. So `.quarantine` as the first path segment, or as the segment right after the
+    project, counts. A user's own folder of that name deeper inside the project does not.
     """
+    if requested is not None:
+        own = f"{project_id}/{posixpath.normpath(requested.strip('/'))}"
+        if key == own:
+            return False
     parts = [p for p in key.split("/") if p]
     staging = _QUARANTINE_PREFIX.rstrip("/")
     for i, part in enumerate(parts[:-1]):  # the last segment is a name, never the staging folder

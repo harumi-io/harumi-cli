@@ -3809,7 +3809,7 @@ def files_put(
         project_id, dest_path, content_type, size_bytes=file_size
     )
     client.upload_file_to_presigned_url(upload_url, local_path, content_type)
-    if upload_is_staged(project_id, upload_url.key):
+    if upload_is_staged(project_id, upload_url.key, requested=dest_path):
         # The bytes are in a holding area; the file only exists once the server has checked it.
         console.print("Checking the file...")
         try:
@@ -3832,8 +3832,11 @@ def _confirm_upload_landed(client: Client, project_id: str, dest_path: str) -> N
     stored = posixpath.normpath(dest_path.strip("/"))  # how harumi-api stores the path it is given
     try:
         listing = client.list_project_files(project_id)
-    except ApiError:
-        return  # cannot tell; do not turn a good upload into an error because the check failed
+    except (ApiError, ValueError):
+        # Cannot tell: an error status, or a body that is not what a listing looks like (pydantic's
+        # ValidationError is a ValueError). The upload itself already succeeded; a safeguard that cannot
+        # run must not turn it into a failure.
+        return
     if listing.is_truncated or any(f.name == stored for f in listing.files):
         return
     _fail(

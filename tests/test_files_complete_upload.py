@@ -69,7 +69,8 @@ class Api:
 
             dest = json.loads(request.content)["path"]
             self.uploaded.append(posixpath.normpath(dest.strip("/")))  # what the server stores
-            key = self.staged_key or (f"{P}/.quarantine/3f2a-uuid" if self.staged else f"{P}/{dest}")
+            # An older server builds the key from the normalised path (harumi-api's `_sanitized_key`).
+            key = self.staged_key or (f"{P}/.quarantine/3f2a-uuid" if self.staged else f"{P}/{posixpath.normpath(dest.strip('/'))}")
             return httpx.Response(200, json={"url": f"https://s3.test/{key}", "key": key, "expires_in": 900})
         if path.endswith("/files/complete-upload"):
             self.completed.append(json.loads(request.content))
@@ -411,5 +412,72 @@ def test_the_skill_reference_documents_the_unknown_outcome_and_the_landing_check
     ref = (pathlib.Path(cli.__file__).resolve().parents[2] / ".agents/skills/harumi-cli/references/commands.md").read_text(encoding="utf-8")
     section = " ".join(ref[ref.index("## `files`") : ref.index("## `dashboard`")].split())
 
-    for needle in ("may or may not have been added", "does not appear in the project", "truncated listing", "directly follows the project id"):
+    for needle in ("may or may not have been added", "does not appear in the project", "truncated listing", "directly after the project id", "settles it first", "read-after-write"):
         assert needle in section, f"the files section does not mention {needle!r}"
+
+
+# -- review: the path the user asked for settles it ------------------------------------------------------------
+
+
+def test_a_file_the_user_named_with_a_quarantine_folder_is_a_plain_upload_on_an_older_server(api, csv):
+    """`put x .quarantine/x.csv` on a server that does not stage: the key it returns IS the path we asked
+    for. Treating the shape as staging would call a route that server lacks and report "did not arrive"
+    for a file that uploaded fine."""
+    a = api(staged=False)
+    a.listing_shows_uploads = True
+
+    result = put(csv, ".quarantine/x.csv")
+
+    assert result.exit_code == 0 and "Uploaded" in result.output, result.output
+    assert not any("complete-upload" in c for c in a.calls)
+
+
+@pytest.mark.parametrize("dest", [".quarantine/x.csv", "./.quarantine//x.csv", "/.quarantine/x.csv", "data/.quarantine/x.csv"])
+def test_the_requested_path_wins_however_it_is_spelled(api, csv, dest):
+    a = api(staged=False)
+    a.listing_shows_uploads = True
+
+    assert put(csv, dest).exit_code == 0
+    assert not any("complete-upload" in c for c in a.calls)
+
+
+def test_a_server_that_really_stages_is_still_completed_when_the_key_is_not_the_requested_path(api, csv):
+    a = api()  # staged: the key is .quarantine/<uuid>, not the path we asked for
+
+    assert put(csv, ".quarantine/x.csv").exit_code == 0
+    assert a.completed and a.completed[0]["path"] == ".quarantine/x.csv"
+
+
+def test_the_decision_function_takes_the_requested_path():
+    from harumi.client import upload_is_staged
+
+    assert not upload_is_staged("proj-1", "proj-1/.quarantine/x.csv", requested=".quarantine/x.csv")
+    assert not upload_is_staged("proj-1", "proj-1/.quarantine/x.csv", requested="./.quarantine//x.csv")  # normalised
+    assert upload_is_staged("proj-1", "proj-1/.quarantine/3f2a", requested=".quarantine/x.csv")  # differs: look at the shape
+    assert upload_is_staged("proj-1", "proj-1/.quarantine/x.csv")  # no requested path given: the shape alone, as before
+
+
+# -- the landing check must never turn a good upload into a traceback ----------------------------------------
+
+
+@pytest.mark.parametrize("body", ["<html>gateway hiccup</html>", '{"files": "not a list"}', '{"files": [{"nope": 1}]}'])
+def test_a_listing_that_is_not_what_we_expect_does_not_fail_a_good_upload(monkeypatch, csv, body):
+    a = Api(staged=False)
+    listings = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/files") and request.method == "GET":
+            listings.append(1)
+            if len(listings) > 1:
+                return httpx.Response(200, content=body.encode(), headers={"content-type": "application/json"})
+        return a.handler(request)
+
+    monkeypatch.setattr(
+        cli, "_get_client", lambda *x, **k: Client(api_url="https://api.harumi.io/api", transport=httpx.MockTransport(handler))
+    )
+
+    result = put(csv, "inputs/data.csv")
+
+    assert len(listings) == 2, "the post-upload check did not run"
+    assert result.exit_code == 0 and "Uploaded" in result.output, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
