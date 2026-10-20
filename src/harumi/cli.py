@@ -161,7 +161,7 @@ from rich.table import Table
 
 from harumi import __version__, auth, interactive, quickstart
 from harumi import skills as skills_mod
-from harumi.client import Client
+from harumi.client import Client, upload_is_staged
 from harumi.file_sync_cap import check_project_sync_cap
 from harumi.config import (
     DEFAULT_ENVIRONMENT,
@@ -3808,9 +3808,31 @@ def files_put(
         project_id, dest_path, content_type, size_bytes=file_size
     )
     client.upload_file_to_presigned_url(upload_url, local_path, content_type)
+    if upload_is_staged(project_id, upload_url.key):
+        # The bytes are in a holding area; the file only exists once the server has checked it.
+        console.print("Checking the file...")
+        try:
+            client.complete_file_upload(project_id, dest_path, upload_url.key)
+        except ApiError as exc:
+            _fail(_upload_refusal(exc, dest_path))
     console.print(
         f"[bold green]Uploaded[/bold green] {local_path} -> {dest_path} ({_format_bytes(file_size)}).", soft_wrap=True
     )
+
+
+def _upload_refusal(exc: ApiError, dest_path: str) -> str:
+    """Why an upload was not added, in words. The API gives the same text for an unsafe file and
+    for a scanner that is down, so the status picks the sentence, not the API's detail."""
+    shown = escape(dest_path)
+    if exc.status_code == 422:
+        return f"{shown} could not be verified as safe, so it was not added."
+    if exc.status_code == 413:
+        return f"{shown} is too large to be checked, so it was not added."
+    if exc.status_code == 503:
+        return f"Harumi could not check this file right now, so {shown} was not added. Try again in a few minutes."
+    if exc.status_code == 404:
+        return f"The upload of {shown} did not arrive, so it was not added. Try again."
+    return escape(str(exc))
 
 
 @files_app.command("get")
