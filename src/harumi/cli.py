@@ -1154,6 +1154,21 @@ def _run_started(run) -> str:
     return _ago(run.started or run.created_at)
 
 
+def _newest_runs_first(runs):
+    """Runs by the date the menu shows (started, else created), newest first; undated last.
+
+    Not trusting the order the API sends them in: cutting to the latest few before sorting
+    would quietly offer the wrong few if that order ever changed.
+    """
+    floor = datetime.min.replace(tzinfo=timezone.utc)
+
+    def key(r):
+        when = r.started or r.created_at or floor
+        return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+    return sorted(runs, key=key, reverse=True)
+
+
 def _run_option(r) -> interactive.Option:
     """One run as a menu row: a short id and its status, with its branch and age beside it."""
     hint = "  ".join(p for p in (r.git_branch or "", f"started {_run_started(r)}" if _run_started(r) else "") if p)
@@ -3082,7 +3097,7 @@ def _pick_runs_to_compare(client: Client, project_id: str) -> Optional[list[str]
     Only runs that succeeded are offered: one still going has no output yet, and a failed
     one never will, so choosing it could only produce an empty column.
     """
-    ready = [r for r in client.list_runs(project_id) if r.succeeded][:_COMPARE_PICKER_RUNS]
+    ready = _newest_runs_first([r for r in client.list_runs(project_id) if r.succeeded])[:_COMPARE_PICKER_RUNS]
     if len(ready) < _MIN_COMPARE_RUNS:
         _fail(
             "Comparing needs at least two runs that succeeded, and this project has "
@@ -3104,6 +3119,22 @@ def _pick_runs_to_compare(client: Client, project_id: str) -> Optional[list[str]
     return None if not others else [baseline, *others]  # type: ignore[list-item]
 
 
+def _check_compare_ids(run_ids: list[str]) -> list[str]:
+    """The ids to compare, or a message about what is wrong with them."""
+    ids = list(dict.fromkeys(run_ids))
+    if len(ids) != len(run_ids):
+        _fail(f"A run can only be compared once: one of those ids is in the list more than once. {_FIND_RUN_IDS}")
+    if len(ids) < _MIN_COMPARE_RUNS:
+        _fail(f"Comparing needs {_MIN_COMPARE_RUNS} to {_MAX_COMPARE_RUNS} runs, and the first is the baseline. {_FIND_RUN_IDS}")
+    if len(ids) > _MAX_COMPARE_RUNS:
+        _fail(f"Comparing takes at most {_MAX_COMPARE_RUNS} runs, and you gave {len(ids)}. {_FIND_RUN_IDS}")
+    if any("," in run_id for run_id in ids):
+        # The API takes the ids as one comma-separated parameter, so a comma would
+        # silently become extra ids.
+        _fail("Run ids can't contain a comma; separate them with spaces.")
+    return ids
+
+
 @app.command()
 @_handle_errors
 def compare(
@@ -3121,26 +3152,19 @@ def compare(
     the project's `\\[\\[output.kpi]]` declarations in harumi.toml. With no run ids, at
     a terminal, you pick the baseline and then the runs to compare it with.
     """
-    project_id = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-
-    if not run_ids:
+    if run_ids:
+        # Say what is wrong with the arguments before needing a project or a login: someone
+        # outside a project who mistypes should hear about the typo, not about the project.
+        ids = _check_compare_ids(run_ids)
+        project_id = _resolve_project(project)
+        client = _get_client(api_url=api_url, org=org)
+    else:
+        project_id = _resolve_project(project)
+        client = _get_client(api_url=api_url, org=org)
         picked = _pick_runs_to_compare(client, project_id)
         if picked is None:
             return  # backed out of a menu
-        run_ids = picked
-
-    ids = list(dict.fromkeys(run_ids))
-    if len(ids) != len(run_ids):
-        _fail(f"A run can only be compared once: one of those ids is in the list more than once. {_FIND_RUN_IDS}")
-    if len(ids) < _MIN_COMPARE_RUNS:
-        _fail(f"Comparing needs {_MIN_COMPARE_RUNS} to {_MAX_COMPARE_RUNS} runs, and the first is the baseline. {_FIND_RUN_IDS}")
-    if len(ids) > _MAX_COMPARE_RUNS:
-        _fail(f"Comparing takes at most {_MAX_COMPARE_RUNS} runs, and you gave {len(ids)}. {_FIND_RUN_IDS}")
-    if any("," in run_id for run_id in ids):
-        # The API takes the ids as one comma-separated parameter, so a comma would
-        # silently become extra ids.
-        _fail("Run ids can't contain a comma; separate them with spaces.")
+        ids = picked  # valid by construction: the menus take 2 to 4 distinct runs
 
     try:
         result = client.compare_runs(project_id, ids)

@@ -253,3 +253,51 @@ def test_json_output_is_untouched_by_all_of_this(server, no_terminal):
     result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", P, "--json"])
 
     assert json.loads(result.output) == COMPARISON
+
+
+# -- the arguments are checked before anything else is needed ----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "ids, said",
+    [(["only-one"], "needs 2 to 4"), (["a", "a"], "more than once"), (["a", "b", "c", "d", "e"], "at most 4"), (["a,b", "c"], "comma")],
+)
+def test_wrong_arguments_are_reported_before_asking_for_a_project_or_a_login(ids, said, monkeypatch):
+    """Outside a project, or logged out, `compare onlyone` used to say so about the arguments straight
+    away. Asking for the project first made someone fix that, and only then learn the arguments were wrong."""
+    monkeypatch.setattr(cli, "_resolve_project", lambda p: (_ for _ in ()).throw(AssertionError("asked for a project")))
+    monkeypatch.setattr(cli, "_get_client", lambda *a, **k: (_ for _ in ()).throw(AssertionError("built a client")))
+
+    result = runner.invoke(cli.app, ["compare", *ids])
+
+    assert result.exit_code == 1 and said in plain(result.output), result.output
+
+
+def test_the_picker_still_needs_the_project_and_the_client(server, no_terminal):
+    """Only the no-argument path reaches for them first; it has to, to list the runs."""
+    result = runner.invoke(cli.app, ["compare", "--project", P])
+
+    assert result.exit_code == 1 and "Pass it with" in result.output and server.compared == []
+
+
+# -- the picker does not trust the API's ordering ----------------------------------------------------------
+
+
+def test_the_latest_runs_are_chosen_by_date_not_by_the_order_they_arrived_in(server, at_terminal, monkeypatch):
+    """Cutting to 25 before sorting would offer the wrong 25 if the API's order ever changed."""
+    server.runs = [run_row(f"run-{i:02d}", when=f"2026-09-{i + 1:02d}T12:00:00Z") for i in range(30)]  # oldest first
+    offered = choose(monkeypatch, "run-29", ["run-28"])
+
+    runner.invoke(cli.app, ["compare", "--project", P])
+
+    assert len(offered["baseline"]) == 25
+    assert offered["baseline"][0] == "run-29" and offered["baseline"][-1] == "run-05"  # the newest 25, newest first
+
+
+def test_a_run_with_no_date_sorts_last_not_first(server, at_terminal, monkeypatch):
+    server.runs = [{**run_row("run-old", when="2026-01-01T00:00:00Z")}, {"id": "run-undated", "project_id": P, "status": "completed"}, run_row("run-new", when="2026-10-01T00:00:00Z")]
+    offered = choose(monkeypatch, "run-new", ["run-old"])
+
+    runner.invoke(cli.app, ["compare", "--project", P])
+
+    assert offered["baseline"] == ["run-new", "run-old", "run-undated"]
