@@ -116,12 +116,33 @@ def test_the_order_is_ask_for_a_url_upload_then_complete(api, csv):
     assert [c.rsplit("/", 1)[-1] for c in wanted] == ["upload-url", "3f2a-uuid", "complete-upload"], a.calls
 
 
-def test_uploaded_is_only_printed_once_the_server_has_accepted_the_file(api, csv):
-    api()
+def test_uploaded_is_only_printed_after_the_server_has_accepted_the_file(api, csv, monkeypatch):
+    """The success line must come *after* the completion call returns, not merely appear.
+    Recorded in one list so the order is what is asserted, not the presence of either."""
+    a = api()
+    events: list[str] = []
+    real = Client.complete_file_upload
 
-    out = plain(put(csv, "inputs/data.csv").output)
+    def completing(self, *args, **kwargs):
+        events.append("complete: asked")
+        real(self, *args, **kwargs)
+        events.append("complete: accepted")
 
-    assert "Uploaded" in out and "inputs/data.csv" in out
+    monkeypatch.setattr(Client, "complete_file_upload", completing)
+    real_print = cli.console.print
+    def spy(*x, **k):
+        text = str(x[0]) if x else ""
+        events.append("printed: Uploaded" if "Uploaded" in text else "printed: Checking" if "Checking" in text else "printed: other")
+        return real_print(*x, **k)
+
+    monkeypatch.setattr(cli.console, "print", spy)
+
+    result = put(csv, "inputs/data.csv")
+
+    assert result.exit_code == 0, result.output
+    assert events.index("complete: accepted") < next(i for i, e in enumerate(events) if e.startswith("printed: Uploaded"))
+    assert next(i for i, e in enumerate(events) if e.startswith("printed: Checking")) < events.index("complete: asked")
+    assert a.completed  # and it really was asked
 
 
 @pytest.mark.parametrize(
