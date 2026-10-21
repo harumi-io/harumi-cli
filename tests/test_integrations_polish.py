@@ -264,7 +264,7 @@ def test_schedules_add_help_states_the_minimum_interval():
 # -- secrets ------------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["a/b", "has space", "../x", "", "semi;colon"])
+@pytest.mark.parametrize("name", ["a/b", "has space", "../x", "", "semi;colon", ".", ".."])
 def test_a_secret_name_the_store_cannot_hold_is_refused_before_the_prompt(api, name):
     result = runner.invoke(cli.app, ["secrets", "set", name])  # no input: a value prompt would abort
 

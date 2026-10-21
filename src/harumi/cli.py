@@ -5285,7 +5285,7 @@ def secrets_set(
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Create or overwrite a secret. The value is prompted interactively (never a flag)."""
-    if not _SECRET_NAME_STORABLE.match(name):
+    if name in (".", "..") or not _SECRET_NAME_STORABLE.match(name):  # "." and ".." are path segments, not names
         _fail(
             f"'{escape(_printable(name))}' can't be a secret name: use letters, digits, underscores, dashes and "
             "dots, with no spaces or slashes (for example [bold]API_KEY[/bold])."
