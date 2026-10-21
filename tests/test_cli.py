@@ -1721,7 +1721,7 @@ def test_files_rm_deletes_when_confirmed(api):
 # ---------------------------------------------------------------------------
 
 SCHEDULE = {
-    "id": "sched-1",
+    "id": "5c4e1b2a-0000-4000-8000-000000000001",
     "project_id": "proj-1",
     "cron": "0 9 * * *",
     "start_at": "2026-01-22T09:00:00Z",
@@ -1739,7 +1739,7 @@ def test_schedules_list_renders_the_cron_and_branch(api):
     result = runner.invoke(cli.app, ["schedules", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "sched-1" in result.output
+    assert "5c4e1b2a" in result.output
     assert "0 9 * * *" in result.output
     assert "main" in result.output
 
@@ -1750,7 +1750,7 @@ def test_schedules_list_reports_empty(api):
     result = runner.invoke(cli.app, ["schedules", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "No schedules found." in result.output
+    assert "No schedules yet" in result.output and "harumi schedules add" in result.output
 
 
 def test_schedules_add_posts_the_cron_and_defaults_branch_to_main(api):
@@ -1793,7 +1793,7 @@ def test_schedules_add_forwards_optional_overrides(api):
 
 def test_schedules_remove_aborts_without_confirmation(api):
     result = runner.invoke(
-        cli.app, ["schedules", "rm", "sched-1", "--project", "proj-1"], input="n\n"
+        cli.app, ["schedules", "rm", "5c4e1b2a-0000-4000-8000-000000000001", "--project", "proj-1"], input="n\n"
     )
 
     assert result.exit_code == 0, result.output
@@ -1802,15 +1802,15 @@ def test_schedules_remove_aborts_without_confirmation(api):
 
 
 def test_schedules_remove_deletes_when_confirmed(api):
-    api.route("DELETE", "/api/projects/proj-1/schedules/sched-1", SCHEDULE)
+    api.route("DELETE", "/api/projects/proj-1/schedules/5c4e1b2a-0000-4000-8000-000000000001", SCHEDULE)
 
     result = runner.invoke(
-        cli.app, ["schedules", "rm", "sched-1", "--project", "proj-1", "--yes"]
+        cli.app, ["schedules", "rm", "5c4e1b2a-0000-4000-8000-000000000001", "--project", "proj-1", "--yes"]
     )
 
     assert result.exit_code == 0, result.output
     assert "Deleted" in result.output
-    assert api.paths() == ["/api/projects/proj-1/schedules/sched-1"]
+    assert api.paths() == ["/api/projects/proj-1/schedules/5c4e1b2a-0000-4000-8000-000000000001"]
 
 
 def test_schedules_get_surfaces_a_404_as_a_clean_error(api):
@@ -2861,7 +2861,7 @@ def test_compare_rejects_a_run_id_containing_a_comma(api):
 # ---------------------------------------------------------------------------
 
 MEMORY = {
-    "id": "mem-1",
+    "id": "3d7a9f10-0000-4000-8000-000000000001",
     "scope": "project",
     "project_id": "proj-1",
     "content": "Use metric units",
@@ -2889,7 +2889,7 @@ def test_memories_list_shows_scope_mode_and_content(api):
     result = runner.invoke(cli.app, ["memories", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "mem-1" in result.output
+    assert "3d7a9f10" in result.output
     assert "Use metric units" in result.output
     assert "organization" in result.output
     assert "always" in result.output
@@ -2901,7 +2901,7 @@ def test_memories_list_reports_empty(api):
     result = runner.invoke(cli.app, ["memories", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "No memories found." in result.output
+    assert "No memories yet" in result.output and "harumi memories add" in result.output
 
 
 def test_memories_list_forwards_query_and_mode_filters(api):
@@ -2934,7 +2934,7 @@ def test_memories_add_posts_content_with_cli_source(api):
     )
 
     assert result.exit_code == 0, result.output
-    assert "mem-1" in result.output
+    assert "3d7a9f10-0000-4000-8000-000000000001" in result.output
     body = api.body_for("POST", "/api/projects/proj-1/memories")
     assert body["content"] == "Use metric units"
     assert body["source"] == "cli"
@@ -2952,7 +2952,8 @@ def test_memories_add_forwards_mode(api):
     assert api.body_for("POST", "/api/projects/proj-1/memories")["retrieval_mode"] == "always"
 
 
-def test_memories_add_prompts_for_content_when_omitted(api):
+def test_memories_add_prompts_for_content_when_omitted(api, monkeypatch):
+    monkeypatch.setattr(cli.interactive, "is_interactive", lambda *a, **k: True)
     api.route("POST", "/api/projects/proj-1/memories", MEMORY, status=201)
 
     result = runner.invoke(
@@ -2964,7 +2965,7 @@ def test_memories_add_prompts_for_content_when_omitted(api):
 
 
 def test_memories_edit_with_no_flags_fails_without_calling_the_api(api):
-    result = runner.invoke(cli.app, ["memories", "edit", "mem-1", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["memories", "edit", "3d7a9f10-0000-4000-8000-000000000001", "--project", "proj-1"])
 
     assert result.exit_code == 1
     assert "No fields to update" in result.output
@@ -2972,34 +2973,34 @@ def test_memories_edit_with_no_flags_fails_without_calling_the_api(api):
 
 
 def test_memories_edit_sends_only_the_given_fields(api):
-    api.route("PATCH", "/api/projects/proj-1/memories/mem-1", MEMORY)
+    api.route("PATCH", "/api/projects/proj-1/memories/3d7a9f10-0000-4000-8000-000000000001", MEMORY)
 
     result = runner.invoke(
-        cli.app, ["memories", "edit", "mem-1", "--mode", "always", "--project", "proj-1"]
+        cli.app, ["memories", "edit", "3d7a9f10-0000-4000-8000-000000000001", "--mode", "always", "--project", "proj-1"]
     )
 
     assert result.exit_code == 0, result.output
     assert "Updated" in result.output
-    assert api.body_for("PATCH", "/api/projects/proj-1/memories/mem-1") == {
+    assert api.body_for("PATCH", "/api/projects/proj-1/memories/3d7a9f10-0000-4000-8000-000000000001") == {
         "retrieval_mode": "always"
     }
 
 
 def test_memories_edit_sends_content(api):
-    api.route("PATCH", "/api/projects/proj-1/memories/mem-1", MEMORY)
+    api.route("PATCH", "/api/projects/proj-1/memories/3d7a9f10-0000-4000-8000-000000000001", MEMORY)
 
     result = runner.invoke(
         cli.app,
-        ["memories", "edit", "mem-1", "--content", "New text", "--project", "proj-1"],
+        ["memories", "edit", "3d7a9f10-0000-4000-8000-000000000001", "--content", "New text", "--project", "proj-1"],
     )
 
     assert result.exit_code == 0, result.output
-    assert api.body_for("PATCH", "/api/projects/proj-1/memories/mem-1") == {"content": "New text"}
+    assert api.body_for("PATCH", "/api/projects/proj-1/memories/3d7a9f10-0000-4000-8000-000000000001") == {"content": "New text"}
 
 
 def test_memories_rm_aborts_without_confirmation(api):
     result = runner.invoke(
-        cli.app, ["memories", "rm", "mem-1", "--project", "proj-1"], input="n\n"
+        cli.app, ["memories", "rm", "3d7a9f10-0000-4000-8000-000000000001", "--project", "proj-1"], input="n\n"
     )
 
     assert result.exit_code == 0, result.output
@@ -3008,15 +3009,15 @@ def test_memories_rm_aborts_without_confirmation(api):
 
 
 def test_memories_rm_deletes_when_confirmed(api):
-    api.route("DELETE", "/api/projects/proj-1/memories/mem-1", MEMORY)
+    api.route("DELETE", "/api/projects/proj-1/memories/3d7a9f10-0000-4000-8000-000000000001", MEMORY)
 
     result = runner.invoke(
-        cli.app, ["memories", "rm", "mem-1", "--project", "proj-1", "--yes"]
+        cli.app, ["memories", "rm", "3d7a9f10-0000-4000-8000-000000000001", "--project", "proj-1", "--yes"]
     )
 
     assert result.exit_code == 0, result.output
     assert "Deleted" in result.output
-    assert api.paths() == ["/api/projects/proj-1/memories/mem-1"]
+    assert api.paths() == ["/api/projects/proj-1/memories/3d7a9f10-0000-4000-8000-000000000001"]
 
 
 def test_memories_rm_surfaces_a_404_as_a_clean_error(api):
@@ -3198,7 +3199,7 @@ def test_memories_add_rejects_blank_prompt_answer(api):
 @pytest.mark.parametrize("content", ["", "   ", "x" * 4001])
 def test_memories_edit_rejects_blank_or_oversized_content_without_calling_the_api(api, content):
     result = runner.invoke(
-        cli.app, ["memories", "edit", "mem-1", "--content", content, "--project", "proj-1"]
+        cli.app, ["memories", "edit", "3d7a9f10-0000-4000-8000-000000000001", "--content", content, "--project", "proj-1"]
     )
 
     assert result.exit_code == 1
@@ -3244,7 +3245,7 @@ def test_deprecated_names_are_hidden_from_help_and_the_surface():
     [
         (["projects", "delete", "p1", "--yes"], "DELETE", "/api/projects/p1", "harumi projects rm"),
         (["share", "remove", "0a1b2c3d-1111-4222-8333-444455556666", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", "harumi share rm"),
-        (["schedules", "remove", "sched-1", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/schedules/sched-1", "harumi schedules rm"),
+        (["schedules", "remove", "5c4e1b2a-0000-4000-8000-000000000001", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/schedules/5c4e1b2a-0000-4000-8000-000000000001", "harumi schedules rm"),
         (["datasources", "remove", "sales_db", "--yes", "-p", "proj-1"], "DELETE", "/api/datasources/proj-1/sales_db", "harumi datasources rm"),
         (["org", "delete", "org-1", "--yes"], "DELETE", "/api/users/organizations/org-1", "harumi org rm"),
         (["share", "rm-password", "0a1b2c3d-1111-4222-8333-444455556666", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", "share update <LINK_ID> --no-password"),
@@ -3574,3 +3575,12 @@ def test_clone_with_no_projects_points_at_new(api, git_ops, tmp_path, monkeypatc
 
     assert result.exit_code == 1
     assert "harumi new" in result.output
+
+
+def test_memories_add_reads_standard_input_when_given_a_dash(api):
+    api.route("POST", "/api/projects/proj-1/memories", MEMORY, status=201)
+
+    result = runner.invoke(cli.app, ["memories", "add", "-", "--project", "proj-1"], input="From a pipe\n")
+
+    assert result.exit_code == 0, result.output
+    assert api.body_for("POST", "/api/projects/proj-1/memories")["content"] == "From a pipe"

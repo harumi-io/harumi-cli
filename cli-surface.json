@@ -421,7 +421,7 @@
           "required": true,
           "multiple": false,
           "default": null,
-          "help": "postgresql | mysql | sqlserver | oracle"
+          "help": "One of: postgresql, mysql, sqlserver, oracle."
         },
         {
           "opts": [
@@ -865,7 +865,7 @@
           "required": true,
           "multiple": false,
           "default": null,
-          "help": "postgresql | mysql | sqlserver | oracle"
+          "help": "One of: postgresql, mysql, sqlserver, oracle."
         },
         {
           "opts": [
@@ -1063,7 +1063,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "postgresql | mysql | sqlserver | oracle"
+          "help": "One of: postgresql, mysql, sqlserver, oracle."
         },
         {
           "opts": [
@@ -1765,7 +1765,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "The memory text (1-4000 characters). Prompted for if omitted."
+          "help": "The memory text (1-4000 characters), or - to read it from standard input. Prompted for at a terminal if omitted."
         },
         {
           "opts": [
@@ -1829,10 +1829,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Memory id (see `harumi memories list`)."
+          "help": "Memory id, or the start of it. Pick from a list if omitted."
         },
         {
           "opts": [
@@ -1976,10 +1976,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Memory id (see `harumi memories list`)."
+          "help": "Memory id, or the start of it. Pick from a list if omitted."
         },
         {
           "opts": [
@@ -3265,10 +3265,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Schedule id."
+          "help": "Schedule id, or the start of it. Pick from a list if omitted."
         },
         {
           "opts": [
@@ -3363,10 +3363,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Schedule id."
+          "help": "Schedule id, or the start of it. Pick from a list if omitted."
         },
         {
           "opts": [
@@ -3431,10 +3431,10 @@
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Schedule id."
+          "help": "Schedule id, or the start of it. Pick from a list if omitted."
         },
         {
           "opts": [
