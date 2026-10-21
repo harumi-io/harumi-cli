@@ -141,13 +141,13 @@ by a clone-and-bind.
 from __future__ import annotations
 
 import base64
+import contextlib
+import difflib
 import functools
 import json
 import mimetypes
 import os
 import posixpath
-import contextlib
-import difflib
 import re
 import shlex
 import subprocess
@@ -4639,9 +4639,11 @@ _TYPE_HELP = "One of: postgresql, mysql, sqlserver, oracle."
 
 
 def _check_datasource_type(kind: Optional[str]) -> Optional[str]:
-    """Refuse a type the server cannot connect to, before asking for a password it would then discard."""
-    if kind is None or kind in _DATASOURCE_TYPES:
-        return kind
+    """The type to send: lower-cased (the server matches exactly), or a refusal before the password prompt."""
+    if kind is None:
+        return None
+    if kind.lower() in _DATASOURCE_TYPES:
+        return kind.lower()
     close = difflib.get_close_matches(kind.lower(), _DATASOURCE_TYPES, n=1, cutoff=0.5)
     hint = f" Did you mean {close[0]}?" if close else ""
     _fail(f"Unsupported database type {escape(repr(kind))}.{hint} Use one of: {', '.join(_DATASOURCE_TYPES)}.")
@@ -4798,7 +4800,7 @@ def datasources_add(
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Create a new datasource. Credentials are prompted interactively (never a flag)."""
-    _check_datasource_type(type)
+    type = _check_datasource_type(type)  # type: ignore[assignment]
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -4856,7 +4858,7 @@ def datasources_update(
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Partially update a datasource. Only provided fields are changed."""
-    _check_datasource_type(type)
+    type = _check_datasource_type(type)
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -4938,7 +4940,7 @@ def datasources_test(
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Test a connection without persisting it. Credentials are prompted interactively."""
-    _check_datasource_type(type)
+    type = _check_datasource_type(type)  # type: ignore[assignment]
     client = _get_client(api_url=api_url, org=org)
 
     tls_material = _proxy_tls_material(proxy_tls_ca_cert, proxy_tls_client_cert, proxy_tls_client_key)
@@ -5244,9 +5246,12 @@ secrets_app = typer.Typer(help="Manage project secrets (environment variables)."
 app.add_typer(secrets_app, name="secrets")
 
 
-# The same rule as the web app's secrets form. The API checks nothing: a name outside it fails inside
-# AWS as a 500 after the value has been typed, or (with a "/") quietly makes a nested parameter.
-_SECRET_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# What SSM can store under /harumi/projects/<id>/secrets/<name> without nesting: no "/" and no spaces.
+# The API checks nothing itself, so anything else fails inside AWS as a 500, after the value was typed.
+_SECRET_NAME_STORABLE = re.compile(r"^[A-Za-z0-9_.\-]+$")
+# What a shell can read as $NAME, and what the web app's form requires. A secret saved earlier under
+# something else (`my-key`) may exist, so this only warns: refusing would stop it being rotated.
+_SECRET_NAME_ENV = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @secrets_app.command("list")
@@ -5280,10 +5285,16 @@ def secrets_set(
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Create or overwrite a secret. The value is prompted interactively (never a flag)."""
-    if not _SECRET_NAME.match(name):
+    if not _SECRET_NAME_STORABLE.match(name):
         _fail(
-            f"'{escape(_printable(name))}' can't be a secret name: it becomes an environment variable, so use "
-            "letters, digits and underscores, not starting with a digit (for example [bold]API_KEY[/bold])."
+            f"'{escape(_printable(name))}' can't be a secret name: use letters, digits, underscores, dashes and "
+            "dots, with no spaces or slashes (for example [bold]API_KEY[/bold])."
+        )
+    if not _SECRET_NAME_ENV.match(name):
+        err_console.print(
+            f"[yellow]Note:[/yellow] '{escape(name)}' is not a valid environment variable name (letters, digits "
+            "and underscores, not starting with a digit), so a shell cannot read it as a variable. "
+            "Saving it anyway."
         )
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)

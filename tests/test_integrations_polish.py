@@ -264,12 +264,24 @@ def test_schedules_add_help_states_the_minimum_interval():
 # -- secrets ------------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["my-key", "9lives", "a/b", "has space", "../x", ""])
-def test_a_secret_name_that_cannot_be_an_environment_variable_is_refused_before_the_prompt(api, name):
+@pytest.mark.parametrize("name", ["a/b", "has space", "../x", "", "semi;colon"])
+def test_a_secret_name_the_store_cannot_hold_is_refused_before_the_prompt(api, name):
     result = runner.invoke(cli.app, ["secrets", "set", name])  # no input: a value prompt would abort
 
     out = plain(result.output)
-    assert result.exit_code == 1 and "environment variable" in out and "hidden" not in out
+    assert result.exit_code == 1 and "can't be a secret name" in out and "hidden" not in out
+
+
+@pytest.mark.parametrize("name", ["my-key", "9lives", "a.b"])
+def test_a_secret_name_that_is_not_an_env_var_still_saves_with_a_note(api, monkeypatch, name):
+    """It may already exist, saved when the API took anything; refusing would stop it being rotated."""
+    sent = []
+    monkeypatch.setattr(Client, "create_secret", lambda self, pid, n, value: sent.append((n, value)))
+
+    result = runner.invoke(cli.app, ["secrets", "set", name], input="v\n")
+
+    assert result.exit_code == 0 and sent == [(name, "v")]
+    assert "not a valid environment variable name" in plain(result.output)
 
 
 def test_a_good_secret_name_asks_for_the_value(api, monkeypatch):
@@ -291,3 +303,11 @@ def test_an_unknown_datasource_points_at_the_list(monkeypatch, api, args):
     result = runner.invoke(cli.app, ["datasources", args[0], "nope", *args[1:]])
 
     assert result.exit_code == 1 and "harumi datasources list" in plain(result.output)
+
+
+def test_a_datasource_type_in_the_wrong_case_is_sent_lower_cased(api):
+    result = runner.invoke(
+        cli.app, ["datasources", "add", "dw", "--type", "PostgreSQL", "--host", "h", "--port", "5432"], input="pw\n"
+    )
+
+    assert result.exit_code == 0 and api.posted[0]["type"] == "postgresql"

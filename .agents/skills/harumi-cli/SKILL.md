@@ -198,7 +198,7 @@ All `schedules` subcommands accept `--project` to override the `.harumi` binding
 
 ```bash
 harumi secrets list                 # names only, never values
-harumi secrets set <NAME>           # prompts for the value (hidden input); NAME must be a valid env var name: letters, digits, _, not starting with a digit
+harumi secrets set <NAME>           # prompts for the value (hidden input); no spaces or slashes in NAME; a name that is not a valid env var (`my-key`) saves with a note
 harumi secrets rm <NAME>
 ```
 
