@@ -34,8 +34,6 @@ _EXPECTED_WIDGET_CONTRACT = {
     "metric": ["value_key!*", "delta_key*", "format[number|currency|percent]", "unit"],
     "kpi-rail": ["items!"],
     "table": ["rows_key!*", "columns!"],
-    "detail": ["items_key!*", "id_key!", "fields"],
-    "filter": ["items_key!*", "id_key!", "label_key"],
     "treemap": ["items_key!*", "value_key!", "name_key!", "color_key", "colors", "capacity_key*"],
     "heatmap": [
         "items_key!*",
@@ -295,8 +293,6 @@ class TestParseWidgetEntry:
                 "rows_key": "rows",
                 "columns": [{"key": "name", "label": "Name"}],
             },
-            "detail": {"type": "detail", "id": "d", "title": "D", "items_key": "jobs", "id_key": "id"},
-            "filter": {"type": "filter", "id": "f", "title": "F", "items_key": "jobs", "id_key": "id"},
             "treemap": {
                 "type": "treemap",
                 "id": "tm",
