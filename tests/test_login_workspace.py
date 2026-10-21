@@ -192,7 +192,11 @@ def test_without_a_terminal_several_orgs_mean_personal_and_the_list_is_printed(
 # -- harumi org use -----------------------------------------------------------------
 
 
-def test_org_use_with_an_id_still_works_as_before():
+def test_org_use_with_an_id_still_works_as_before(memberships):
+    from harumi.models import Organization
+
+    memberships["orgs"] = [Organization(id="org-9", business_name="Nine", role="owner")]  # it is checked, then saved
+
     result = runner.invoke(cli.app, ["org", "use", "org-9"])
 
     assert result.exit_code == 0, result.output

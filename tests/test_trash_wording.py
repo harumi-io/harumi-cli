@@ -171,13 +171,22 @@ def test_cannot_be_undone_is_only_said_where_the_api_really_cannot_undo_it():
 def test_organization_deletion_still_says_it_is_permanent(monkeypatch):
     """The counter-example: the API purges an organization's projects at once and does not soft-delete it."""
     assert "org_rm" in functions_saying("cannot be undone")
-    asked = []
-    monkeypatch.setattr(cli, "_get_client", lambda *a, **k: (_ for _ in ()).throw(AssertionError("deleted without asking")))
+    asked, sent = [], []
+
+    def handler(request):
+        sent.append(f"{request.method} {request.url.path}")
+        if request.method != "GET":
+            raise AssertionError("deleted without asking")
+        return httpx.Response(200, json=[{"id": "6d1c0aa5-0000-4000-8000-0000000000a1", "business_name": "Acme", "role": "owner"}])  # looked up to name it
+
+    monkeypatch.setattr(cli, "_get_client", lambda *a, **k: Client(api_url="https://api.harumi.io/api", transport=httpx.MockTransport(handler)))
     monkeypatch.setattr(cli.typer, "confirm", lambda text, **k: asked.append(text) or False)
 
-    runner.invoke(cli.app, ["org", "rm", "org-1"])
+    runner.invoke(cli.app, ["org", "rm", "6d1c0aa5-0000-4000-8000-0000000000a1"])
 
     assert asked and "cannot be undone" in asked[0] and "organization" in asked[0]
+    assert "Acme" in asked[0] and "Every project in it is deleted" in asked[0]  # it names what goes
+    assert sent == ["GET /api/users/organizations"]  # and nothing was deleted
 
 
 # -- repo rm is a commit, so it can be undone --------------------------------------------------------------
