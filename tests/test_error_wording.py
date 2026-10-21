@@ -215,7 +215,8 @@ def test_a_reply_that_is_not_json_is_a_message_not_a_traceback(reply, response, 
 def test_a_reply_of_the_wrong_shape_says_to_upgrade_and_names_the_command(reply):
     out = said(reply(httpx.Response(200, json={"unexpected": True}), "projects", "list"))
 
-    assert "upgrade" in out.lower() and "pip install --upgrade harumi" in out or "pipx upgrade" in out or "uv tool upgrade" in out
+    assert "upgrade" in out.lower()
+    assert any(command in out for command in ("pip install --upgrade harumi", "pipx upgrade harumi", "uv tool upgrade harumi"))
 
 
 def test_a_reply_of_the_wrong_shape_names_the_field_but_never_echoes_the_value(reply):
@@ -258,10 +259,21 @@ def test_a_failed_s3_transfer_is_not_called_http_zero():
 
 
 def run_main(monkeypatch, capsys, raising, env=None):
+    # A throwaway command on the real app (main() runs `cli.app`), removed again so it cannot leak into
+    # tests that walk the command tree.
+    before = list(cli.app.registered_commands)
+
     @cli.app.command("boom-test")
     def boom():
         raise raising
 
+    try:
+        return _run_main(monkeypatch, capsys, env)
+    finally:
+        cli.app.registered_commands[:] = before
+
+
+def _run_main(monkeypatch, capsys, env):
     monkeypatch.setattr("sys.argv", ["harumi", "boom-test"])
     monkeypatch.setenv("HARUMI_NO_UPDATE_CHECK", "1")
     for k, v in (env or {}).items():
@@ -308,3 +320,53 @@ def test_the_app_turns_off_locals_in_crash_tracebacks_explicitly():
     assert len(top) == 1
     flag = next((k.value for k in top[0].keywords if k.arg == "pretty_exceptions_show_locals"), None)
     assert isinstance(flag, ast.Constant) and flag.value is False
+
+
+def test_a_gateway_page_is_not_said_to_have_been_returned_by_harumi_api(reply):
+    out = said(reply(html(502, BAD_GATEWAY)))
+
+    assert "harumi-api returned" not in out and out.count("502") == 1  # the status once, not twice
+    assert "status.harumi.io" in out
+
+
+def test_a_firewall_page_is_not_said_to_have_been_returned_by_harumi_api_either(reply):
+    out = said(reply(html(403, FIREWALL)))
+
+    assert "harumi-api returned" not in out and "web page" in out
+
+
+def test_a_validation_error_from_something_that_is_not_an_api_model_is_not_blamed_on_the_server():
+    import pydantic
+
+    class LocalSetting(pydantic.BaseModel):
+        port: int
+
+    @cli._handle_errors
+    def read_local_config():
+        LocalSetting.model_validate({"port": "not a number"})
+
+    with pytest.raises(pydantic.ValidationError):  # left to surface as what it is
+        read_local_config()
+
+
+def test_a_closed_pipe_is_quiet_not_a_bug_report(monkeypatch, capsys):
+    code, out = run_main(monkeypatch, capsys, BrokenPipeError())
+
+    # Nothing at all on stderr: the reader left on purpose (`| head`), so there is nothing to report.
+    # (BrokenPipeError is an OSError, so without its own branch it would be printed as a disk problem.)
+    assert code == 1 and out.err == ""
+
+
+def test_a_disk_problem_is_reported_as_the_machine_not_as_a_cli_bug(monkeypatch, capsys):
+    code, out = run_main(monkeypatch, capsys, OSError(28, "No space left on device", "/home/ana/.harumi/credentials.json"))
+
+    err = " ".join(out.err.split())
+    assert code == 1 and "No space left on device" in err and ".harumi/credentials.json" in err
+    assert "bug" not in err.lower() and "Something unexpected" not in err
+
+
+def test_commands_a_test_adds_do_not_outlive_it(monkeypatch, capsys):
+    names = {c.name for c in cli.app.registered_commands}
+    run_main(monkeypatch, capsys, KeyError("x"))
+
+    assert {c.name for c in cli.app.registered_commands} == names

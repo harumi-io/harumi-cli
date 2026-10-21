@@ -279,5 +279,3 @@ def guard_json(response: httpx.Response) -> httpx.Response:
 
     response.json = json  # type: ignore[method-assign]
     return response
-
-

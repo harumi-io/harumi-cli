@@ -164,7 +164,7 @@ from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
-from harumi import __version__, auth, interactive, json_out, quickstart, update
+from harumi import __version__, auth, interactive, json_out, models, quickstart, update
 from harumi import skills as skills_mod
 from harumi.client import Client, upload_is_staged
 from harumi.file_sync_cap import (
@@ -744,6 +744,10 @@ def _format_api_error(exc: ApiError) -> str:
         # A failed presigned S3 transfer: not Harumi being down, and not an HTTP status either.
         return escape(_printable(exc.detail))
     text = escape(_printable(exc.detail))
+    if exc.code == "non_api_reply":
+        # Already says what it is, with the status; claiming harumi-api "returned" it would be wrong.
+        hint_url = status_hint_url() if exc.status_code >= 500 else None
+        return text if hint_url is None else f"{text}\nCheck {hint_url} for platform status, or run [bold]harumi status[/bold]."
     # A refresh that failed says so first: it is the login's problem, whatever the command was doing.
     lead = "Could not renew your login: " if isinstance(exc, SessionRefreshError) else ""
     if exc.status_code >= 500:
@@ -760,6 +764,14 @@ def _format_api_error(exc: ApiError) -> str:
         return f"{lead}harumi-api returned HTTP {exc.status_code}: {text}"
     hint = _paywall_hint(exc.code)
     return f"{text}\n{hint}" if hint else text
+
+
+# Every model in harumi.models describes a harumi-api reply (that file is the contract with the server).
+# A ValidationError from one of them means the server's answer was not what this version expects; from
+# anything else it is a bug or bad local input, and is left to say so.
+_API_MODELS = {
+    name for name, obj in vars(models).items() if isinstance(obj, type) and issubclass(obj, pydantic.BaseModel)
+}
 
 
 def _handle_errors(fn):
@@ -784,6 +796,8 @@ def _handle_errors(fn):
         except HarumiError as exc:
             _fail(str(exc))
         except pydantic.ValidationError as exc:
+            if exc.title not in _API_MODELS:
+                raise  # not a reply from the server (a local model): blaming it, and saying to upgrade, would hide the cause
             # harumi-api answered, in a shape this version does not know (a newer or older server). Only the
             # field names are shown: the failing input can be a value the user typed or a credential.
             fields = ", ".join(sorted({".".join(str(p) for p in e["loc"]) for e in exc.errors() if e.get("loc")})) or "the reply"
@@ -6154,6 +6168,20 @@ def main() -> None:
     check.start()
     try:
         app()
+    except BrokenPipeError:
+        # `harumi ... | head`: the reader left. Not an error; point stdout at nothing so Python's exit-time
+        # flush does not complain about the closed pipe.
+        try:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        except (OSError, ValueError, AttributeError):  # stdout replaced by something with no file descriptor
+            pass
+        raise SystemExit(1) from None
+    except OSError as exc:
+        # A full or read-only disk, a permission problem on ~/.harumi: the machine, not a bug. Only the OS's
+        # own words and the path are shown, never anything the CLI was holding.
+        where = f" ({escape(str(exc.filename))})" if exc.filename else ""
+        err_console.print(f"[bold red]Error:[/bold red] {escape(exc.strerror or type(exc).__name__)}{where}")
+        raise SystemExit(1) from None
     except Exception as exc:
         # Everything a person can cause is handled where it happens (`_handle_errors`), so what reaches
         # here is a bug in the CLI. A traceback is no use to them, and its text is a risk: an

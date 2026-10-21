@@ -93,6 +93,9 @@ def wait_for_run(
                 on_poll_failure(exc)
             if failures > max_poll_failures:
                 raise WatchLostError(run_id, exc) from exc
+            if deadline is not None and time.monotonic() >= deadline:
+                # Riding out a failure must not outlive the caller's deadline (the `continue` skips the check below).
+                raise HarumiError(f"Timed out after {timeout}s waiting for run {run_id}") from exc
             time.sleep(poll_interval)
             continue
         failures = 0

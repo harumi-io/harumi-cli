@@ -555,3 +555,16 @@ def test_a_dropped_poll_is_ridden_out_at_a_terminal_too(flaky, monkeypatch):
     result = _run("--watch")
 
     assert result.exit_code == 0 and "Run completed" in result.output
+
+
+def test_riding_out_failures_does_not_outlive_the_callers_deadline(monkeypatch):
+    from harumi import execution
+    from harumi.errors import ApiUnreachableError, HarumiError
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(execution.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(execution.time, "sleep", lambda s: clock.__setitem__("now", clock["now"] + s))
+    monkeypatch.setattr(execution, "get_run", lambda *a, **k: (_ for _ in ()).throw(ApiUnreachableError("down", kind="refused")))
+
+    with pytest.raises(HarumiError, match="Timed out after 8.0s"):
+        execution.wait_for_run(None, "p", "run-1", poll_interval=5.0, timeout=8.0, max_poll_failures=50)
