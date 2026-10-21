@@ -397,7 +397,15 @@ def test_eight_characters_of_the_id_are_enough_to_delete(api):
 def test_a_short_id_prefix_cannot_name_a_member_to_remove(api):
     result = runner.invoke(cli.app, ["org", "rm-member", "zeta", "2", "--yes"])
 
-    assert result.exit_code == 1 and not any(c.startswith("DELETE") for c in api.calls)
+    out = plain(result.output)
+    assert result.exit_code == 1 and "too short" in out and "No member" not in out  # the member exists; the prefix is short
+    assert not any(c.startswith("DELETE") for c in api.calls)
+
+
+def test_a_prefix_that_matches_nobody_is_still_reported_as_no_such_member(api):
+    result = runner.invoke(cli.app, ["org", "rm-member", "zeta", "deadbeef", "--yes"])
+
+    assert result.exit_code == 1 and "No member" in plain(result.output)
 
 
 def test_two_organizations_with_the_same_name_are_refused_not_guessed(api):
@@ -419,6 +427,18 @@ def test_org_use_with_a_full_id_still_works_when_the_api_cannot_be_reached(monke
     result = runner.invoke(cli.app, ["org", "use", O3])
 
     assert result.exit_code == 0 and saved_org() == O3 and "saved as given" in plain(result.output)
+
+
+def test_org_use_offline_saves_an_upper_case_id_in_the_form_everything_else_compares(monkeypatch, api):
+    from harumi.errors import ApiUnreachableError
+
+    def down(self):
+        raise ApiUnreachableError("could not connect")
+
+    monkeypatch.setattr(Client, "list_organizations", down)
+
+    assert runner.invoke(cli.app, ["org", "use", O3.upper()]).exit_code == 0
+    assert saved_org() == O3  # so a later `org list` and `whoami` recognise it
 
 
 def test_org_use_with_a_name_cannot_be_resolved_offline_and_saves_nothing(monkeypatch, api):

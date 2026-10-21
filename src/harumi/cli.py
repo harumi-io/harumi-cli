@@ -1564,6 +1564,7 @@ def org_use(
             # could; a name or a cut id cannot be resolved without the list.
             if not _FULL_ID.match(org_id):
                 raise
+            org_id = org_id.lower()  # ids are compared as written everywhere else; a UUID is the same in either case
             label = org_id
             err_console.print("[yellow]Note:[/yellow] could not reach harumi-api to check it, so it was saved as given.")
 
@@ -5665,6 +5666,8 @@ def _find_member(members: list, typed: str, *, min_prefix: int = 1):
         return candidates[0]
     if len(candidates) > 1:
         _fail(f"'{escape(typed)}' matches more than one member. Give more of the id (see [bold]harumi org members[/bold]).")
+    if min_prefix > 1 and 0 < len(low) < min_prefix and any(str(m.user_id).lower().startswith(low) for m in members):
+        _fail(f"'{escape(typed)}' is too short to name a member for this. Use their email or at least {min_prefix} characters of their id.")
     _fail(f"No member '{escape(typed)}' in this organization. See them with [bold]harumi org members[/bold].")
 
 

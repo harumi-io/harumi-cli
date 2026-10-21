@@ -516,7 +516,7 @@ harumi org rm-member ORG [MEMBER] [--yes] [--api-url URL]
 harumi org use [ORG | --personal]
 ```
 
-**`ORG`** is the organization's name (any case) or the start of its id (for `rm` and `rm-member`, which delete for good, at least 8 characters of an id or an exact name or email); **`MEMBER`** is an email or the start of a user id. `members` and `rm` also take no `ORG`: `members` then uses the workspace you are in (a terminal picks if there is none), while `rm` never does that and always asks, since it would delete the organization you are standing in; `rm --yes` needs the name. With no `MEMBER`, a terminal gets a picker (without the owner) and anything else the list of choices.
+**`ORG`** is the organization's name (any case) or the start of its id; **`MEMBER`** is an email or the start of a user id. Where the command deletes for good (`org rm` for `ORG`, `org rm-member` for `MEMBER`) an id prefix must be at least 8 characters, so a stray `9` cannot name one; a name or an email always works. `members` and `rm` also take no `ORG`: `members` then uses the workspace you are in (a terminal picks if there is none), while `rm` never does that and always asks, since it would delete the organization you are standing in; `rm --yes` needs the name or at least 8 characters of the id. With no `MEMBER`, a terminal gets a picker (without the owner) and anything else the list of choices.
 
 `--role` is one of `admin | member | viewer`, in any case. **`owner` is refused before any request**: an organization has one owner (its creator), the server never grants it through `invite` or `role`, and moving it is a separate "transfer ownership" action the CLI does not have (use the web app).
 
