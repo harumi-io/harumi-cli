@@ -141,6 +141,8 @@ by a clone-and-bind.
 from __future__ import annotations
 
 import base64
+import contextlib
+import difflib
 import functools
 import json
 import mimetypes
@@ -159,6 +161,7 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
+from rich.text import Text
 
 from harumi import __version__, auth, interactive, quickstart
 from harumi import skills as skills_mod
@@ -516,6 +519,21 @@ def _printable(text: object) -> str:
     """
     spaced = str(text).replace("\t", " ").replace("\n", " ").replace("\u2028", " ").replace("\u2029", " ")
     return _CONTROL_CHARS.sub("", spaced)
+
+
+_FULL_ID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _cell(value: object) -> Text:
+    """A table cell showing `value` exactly, as stored.
+
+    A plain string in a Rich table is read as markup: `[/x]` raises, and `[nightly]` or the text of
+    `[link](url)` is dropped, so the table would show something the database never held. A Text is
+    not parsed. Control characters are still taken out (see `_printable`).
+    """
+    if value is None:
+        return Text("NULL", style="dim")
+    return Text(_printable(value))
 
 
 def _format_bytes(num_bytes: int) -> str:
@@ -4252,9 +4270,6 @@ def _pick_share_link(client: Client, project_id: str, action: str) -> Optional[s
     )
 
 
-_FULL_ID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-
-
 def _resolve_share_link(client: Client, project_id: str, link_id: str) -> str:
     """The full id for what the user typed: an exact id, or the start of exactly one.
 
@@ -4266,17 +4281,41 @@ def _resolve_share_link(client: Client, project_id: str, link_id: str) -> str:
     return _match_share_link(client.list_share_links(project_id), link_id).id
 
 
-def _match_share_link(links: list[ProjectShareLink], link_id: str) -> ProjectShareLink:
-    """The one link in `links` that `link_id` names, exactly or as the start of its id."""
-    exact = next((link for link in links if link.id == link_id), None)
+def _match_by_id(rows: list, typed: str, noun: str, list_cmd: str):
+    """The one row in `rows` that `typed` names, exactly or as the start of its id."""
+    exact = next((row for row in rows if row.id == typed), None)
     if exact:
         return exact
-    starts = [link for link in links if link_id and link.id.startswith(link_id)]
+    starts = [row for row in rows if typed and row.id.startswith(typed)]
     if len(starts) == 1:
         return starts[0]
     if len(starts) > 1:
-        _fail(f"'{escape(link_id)}' matches more than one share link. Give more of the id (see [bold]harumi share list[/bold]).")
-    _fail(f"No share link '{escape(link_id)}' on this project. See them with [bold]harumi share list[/bold].")
+        _fail(f"'{escape(typed)}' matches more than one {noun}. Give more of the id (see [bold]{list_cmd}[/bold]).")
+    _fail(f"No {noun} '{escape(typed)}' on this project. See them with [bold]{list_cmd}[/bold].")
+
+
+def _match_share_link(links: list[ProjectShareLink], link_id: str) -> ProjectShareLink:
+    """The one link in `links` that `link_id` names, exactly or as the start of its id."""
+    return _match_by_id(links, link_id, "share link", "harumi share list")
+
+
+@contextlib.contextmanager
+def _pointing_to(list_cmd: str):
+    """Add where to look to the API's bare 404 for something named or numbered wrongly."""
+    try:
+        yield
+    except ApiError as exc:
+        if exc.status_code == 404:
+            _fail(f"{escape(str(exc))}\nSee what exists with [bold]{list_cmd}[/bold].")
+        raise
+
+
+def _pick_row(rows: list, action: str, noun: str, add_cmd: str, label, hint, flag: str) -> Optional[str]:
+    """Choose one of `rows` at a terminal; its id, or None if the user backed out."""
+    if not rows:
+        _fail(f"This project has no {noun}s. Add one with [bold]{add_cmd}[/bold].")
+    options = [interactive.Option(_printable(label(r)), r.id, hint=f"{hint(r)}  {r.id}") for r in rows]
+    return interactive.select(f"Which {noun} do you want to {action}?", options, flag=flag)  # type: ignore[return-value]
 
 
 def _share_not_found(exc: ApiError) -> None:
@@ -4595,6 +4634,22 @@ datasources_app = typer.Typer(help="Manage project datasources (database connect
 app.add_typer(datasources_app, name="datasources")
 
 
+_DATASOURCE_TYPES = ("postgresql", "mysql", "sqlserver", "oracle")
+_TYPE_HELP = "One of: postgresql, mysql, sqlserver, oracle."
+
+
+def _check_datasource_type(kind: Optional[str]) -> Optional[str]:
+    """The type to send: lower-cased (the server matches exactly), or a refusal before the password prompt."""
+    if kind is None:
+        return None
+    if kind.lower() in _DATASOURCE_TYPES:
+        return kind.lower()
+    close = difflib.get_close_matches(kind.lower(), _DATASOURCE_TYPES, n=1, cutoff=0.5)
+    hint = f" Did you mean {close[0]}?" if close else ""
+    _fail(f"Unsupported database type {escape(repr(kind))}.{hint} Use one of: {', '.join(_DATASOURCE_TYPES)}.")
+    return kind
+
+
 def _prompt_credentials(current: str = "credentials") -> str:
     return typer.prompt(f"Enter {current} (hidden)", hide_input=True)
 
@@ -4700,7 +4755,7 @@ def datasources_list(
 
     table = Table("name", "type", "host", "database", "use_proxy")
     for ds in result.datasources:
-        table.add_row(ds.name, ds.type, ds.host or "", ds.database or "", "yes" if ds.use_proxy else "no")
+        table.add_row(_cell(ds.name), _cell(ds.type), _cell(ds.host or ""), _cell(ds.database or ""), "yes" if ds.use_proxy else "no")
     console.print(table)
 
 
@@ -4716,10 +4771,11 @@ def datasources_get(
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
-    ds = client.get_datasource(project_id, name)
+    with _pointing_to("harumi datasources list"):
+        ds = client.get_datasource(project_id, name)
     table = Table("field", "value")
     for field in ("id", "name", "type", "host", "port", "database", "username", "use_proxy", "proxy_host"):
-        table.add_row(field, str(getattr(ds, field, "") or ""))
+        table.add_row(field, _cell(getattr(ds, field, "") or ""))
     console.print(table)
 
 
@@ -4727,7 +4783,7 @@ def datasources_get(
 @_handle_errors
 def datasources_add(
     name: str = typer.Argument(..., help="Datasource name (unique per project)."),
-    type: str = typer.Option(..., "--type", help="postgresql | mysql | sqlserver | oracle"),
+    type: str = typer.Option(..., "--type", help=_TYPE_HELP),
     host: Optional[str] = typer.Option(None, "--host", help="Database host."),
     port: Optional[int] = typer.Option(None, "--port", help="Database port."),
     database: Optional[str] = typer.Option(None, "--database", help="Database name."),
@@ -4744,6 +4800,7 @@ def datasources_add(
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Create a new datasource. Credentials are prompted interactively (never a flag)."""
+    type = _check_datasource_type(type)  # type: ignore[assignment]
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -4783,7 +4840,7 @@ def datasources_add(
 def datasources_update(
     name: str = typer.Argument(..., help="Datasource name."),
     new_name: Optional[str] = typer.Option(None, "--name", help="Rename the datasource."),
-    type: Optional[str] = typer.Option(None, "--type", help="postgresql | mysql | sqlserver | oracle"),
+    type: Optional[str] = typer.Option(None, "--type", help=_TYPE_HELP),
     host: Optional[str] = typer.Option(None, "--host", help="Database host."),
     port: Optional[int] = typer.Option(None, "--port", help="Database port."),
     database: Optional[str] = typer.Option(None, "--database", help="Database name."),
@@ -4801,6 +4858,7 @@ def datasources_update(
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Partially update a datasource. Only provided fields are changed."""
+    type = _check_datasource_type(type)
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -4836,7 +4894,8 @@ def datasources_update(
     if not body:
         _fail("No fields to update. Pass at least one flag (e.g. --host, --set-credentials).")
 
-    ds = client.update_datasource(project_id, name, body)
+    with _pointing_to("harumi datasources list"):
+        ds = client.update_datasource(project_id, name, body)
     console.print(f"[bold green]Updated[/bold green] datasource [bold]{ds.name}[/bold].")
 
 
@@ -4857,14 +4916,15 @@ def datasources_rm(
         return
 
     client = _get_client(api_url=api_url, org=org)
-    ds = client.delete_datasource(project_id, name)
+    with _pointing_to("harumi datasources list"):
+        ds = client.delete_datasource(project_id, name)
     console.print(f"[bold red]Deleted[/bold red] datasource [bold]{ds.name}[/bold].")
 
 
 @datasources_app.command("test")
 @_handle_errors
 def datasources_test(
-    type: str = typer.Option(..., "--type", help="postgresql | mysql | sqlserver | oracle"),
+    type: str = typer.Option(..., "--type", help=_TYPE_HELP),
     host: str = typer.Option(..., "--host", help="Database host."),
     port: int = typer.Option(..., "--port", help="Database port."),
     database: str = typer.Option(..., "--database", help="Database name."),
@@ -4880,6 +4940,7 @@ def datasources_test(
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Test a connection without persisting it. Credentials are prompted interactively."""
+    type = _check_datasource_type(type)  # type: ignore[assignment]
     client = _get_client(api_url=api_url, org=org)
 
     tls_material = _proxy_tls_material(proxy_tls_ca_cert, proxy_tls_client_cert, proxy_tls_client_key)
@@ -4928,7 +4989,8 @@ def datasources_query(
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
-    result = client.execute_datasource_query(project_id, name, sql, limit=limit)
+    with _pointing_to("harumi datasources list"):
+        result = client.execute_datasource_query(project_id, name, sql, limit=limit)
 
     if csv:
         import csv as csv_module
@@ -4939,9 +5001,11 @@ def datasources_query(
             writer.writerows(result.data)
         console.print(f"Wrote {result.row_count} rows to {csv}")
     else:
-        table = Table(*result.columns)
+        table = Table()
+        for column in result.columns:
+            table.add_column(Text(_printable(column)))  # Table(*headers) would read a string as markup
         for row in result.data:
-            table.add_row(*(str(v) for v in row))
+            table.add_row(*(_cell(v) for v in row))
         console.print(table)
         console.print(f"[dim]{result.row_count} row(s) returned.[/dim]")
 
@@ -4960,6 +5024,22 @@ schedules_app = typer.Typer(help="Manage project cron schedules for git-ref runs
 app.add_typer(schedules_app, name="schedules")
 
 
+def _schedule_id(client: Client, project_id: str, typed: str) -> str:
+    """The full id for what the user typed: a full id as given, or the start of exactly one."""
+    if _FULL_ID.match(typed):
+        return typed
+    return _match_by_id(client.list_schedules(project_id), typed, "schedule", "harumi schedules list").id
+
+
+def _pick_schedule(client: Client, project_id: str, action: str) -> Optional[str]:
+    return _pick_row(
+        client.list_schedules(project_id), action, "schedule", "harumi schedules add",
+        label=lambda sc: f"{sc.cron}  {sc.git_branch}",
+        hint=lambda sc: sc.command or "the project's command",
+        flag="the SCHEDULE_ID argument",
+    )
+
+
 @schedules_app.command("list")
 @_handle_errors
 def schedules_list(
@@ -4973,18 +5053,21 @@ def schedules_list(
 
     schedules = client.list_schedules(project_id)
     if not schedules:
-        console.print("No schedules found.")
+        console.print('No schedules yet. Add one with [bold]harumi schedules add --cron "0 9 * * *"[/bold].')
         return
 
-    table = Table("id", "cron", "git_branch", "command", "kernel_spec", "last_executed_at")
-    for s in schedules:
+    # Only the first 8 characters of the id: get, update and rm accept the start of an id, and the
+    # whole id left no room for the rest. The kernel is in `schedules get`.
+    table = Table("id", "cron (UTC)", "branch", "last run", "command")
+    table.columns[0].no_wrap = True
+    table.columns[1].no_wrap = True
+    for sc in schedules:
         table.add_row(
-            s.id,
-            s.cron,
-            s.git_branch,
-            s.command or "",
-            s.kernel_spec,
-            str(s.last_executed_at or ""),
+            _cell(sc.id[:8]),
+            _cell(sc.cron),
+            _cell(sc.git_branch),
+            _cell(sc.last_executed_at.strftime("%Y-%m-%d %H:%M") if sc.last_executed_at else "never"),
+            _cell(sc.command or "the project's command"),
         )
     console.print(table)
 
@@ -4992,7 +5075,7 @@ def schedules_list(
 @schedules_app.command("get")
 @_handle_errors
 def schedules_get(
-    schedule_id: str = typer.Argument(..., help="Schedule id."),
+    schedule_id: Optional[str] = typer.Argument(None, help="Schedule id, or the start of it. Pick from a list if omitted."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -5001,7 +5084,12 @@ def schedules_get(
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
-    s = client.get_schedule(project_id, schedule_id)
+    if schedule_id is None:
+        schedule_id = _pick_schedule(client, project_id, "show")
+        if schedule_id is None:
+            return
+    with _pointing_to("harumi schedules list"):
+        s = client.get_schedule(project_id, _schedule_id(client, project_id, schedule_id))
     table = Table("field", "value")
     for field in (
         "id",
@@ -5016,7 +5104,7 @@ def schedules_get(
         "status",
         "last_executed_at",
     ):
-        table.add_row(field, str(getattr(s, field, "") or ""))
+        table.add_row(field, _cell(getattr(s, field, "") or ""))
     console.print(table)
 
 
@@ -5038,7 +5126,8 @@ def schedules_add(
     """Create a new cron schedule for a project.
 
     Cron is validated server-side (croniter) — an invalid expression returns
-    a clear 400 error. The cron is interpreted in UTC.
+    a clear 400 error. The cron is interpreted in UTC, and a schedule cannot
+    fire more often than every 5 minutes.
     """
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
@@ -5071,7 +5160,7 @@ def schedules_add(
 @schedules_app.command("update")
 @_handle_errors
 def schedules_update(
-    schedule_id: str = typer.Argument(..., help="Schedule id."),
+    schedule_id: Optional[str] = typer.Argument(None, help="Schedule id, or the start of it. Pick from a list if omitted."),
     cron: Optional[str] = typer.Option(None, "--cron", help='Raw 5-field cron expression, interpreted in UTC (e.g. "0 9 * * *").'),
     start_at: Optional[str] = typer.Option(None, "--start-at", help="ISO-8601 datetime."),
     git_branch: Optional[str] = typer.Option(None, "--git-branch", help="Branch to run on each fire."),
@@ -5109,28 +5198,43 @@ def schedules_update(
     if not body:
         _fail("No fields to update. Pass at least one flag (e.g. --cron, --start-at).")
 
-    schedule = client.update_schedule(project_id, schedule_id, body)
+    if schedule_id is None:
+        schedule_id = _pick_schedule(client, project_id, "update")
+        if schedule_id is None:
+            return
+    with _pointing_to("harumi schedules list"):
+        schedule = client.update_schedule(project_id, _schedule_id(client, project_id, schedule_id), body)
     console.print(f"[bold green]Updated[/bold green] schedule [bold]{schedule.id}[/bold].")
 
 
 @schedules_app.command("rm")
 @_handle_errors
 def schedules_rm(
-    schedule_id: str = typer.Argument(..., help="Schedule id."),
+    schedule_id: Optional[str] = typer.Argument(None, help="Schedule id, or the start of it. Pick from a list if omitted."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Delete a cron schedule. This is the only way to stop it firing — there is no pause/enable flag."""
+    if schedule_id is None and yes:
+        # --yes removes the question, so nothing would stand between a slip in a list and a deleted schedule.
+        _fail("Say which schedule to delete: [bold]harumi schedules rm <schedule id> --yes[/bold]. Find the id with [bold]harumi schedules list[/bold].")
     project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
 
-    if not yes and not typer.confirm(f"Delete schedule '{schedule_id}'? This cannot be undone."):
+    if schedule_id is None:
+        schedule_id = _pick_schedule(client, project_id, "delete")
+        if schedule_id is None:
+            return
+    schedule_id = _schedule_id(client, project_id, schedule_id)
+
+    if not yes and not typer.confirm(f"Delete schedule '{schedule_id}'? This cannot be undone."):  # plain text: not markup
         console.print("Aborted.")
         return
 
-    client = _get_client(api_url=api_url, org=org)
-    schedule = client.delete_schedule(project_id, schedule_id)
+    with _pointing_to("harumi schedules list"):
+        schedule = client.delete_schedule(project_id, schedule_id)
     console.print(f"[bold red]Deleted[/bold red] schedule [bold]{schedule.id}[/bold].")
 
 
@@ -5140,6 +5244,14 @@ def schedules_rm(
 
 secrets_app = typer.Typer(help="Manage project secrets (environment variables).")
 app.add_typer(secrets_app, name="secrets")
+
+
+# What SSM can store under /harumi/projects/<id>/secrets/<name> without nesting: no "/" and no spaces.
+# The API checks nothing itself, so anything else fails inside AWS as a 500, after the value was typed.
+_SECRET_NAME_STORABLE = re.compile(r"^[A-Za-z0-9_.\-]+$")
+# What a shell can read as $NAME, and what the web app's form requires. A secret saved earlier under
+# something else (`my-key`) may exist, so this only warns: refusing would stop it being rotated.
+_SECRET_NAME_ENV = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @secrets_app.command("list")
@@ -5155,12 +5267,12 @@ def secrets_list(
 
     secrets = client.list_secrets(project_id)
     if not secrets:
-        console.print("No secrets found.")
+        console.print("No secrets yet. Add one with [bold]harumi secrets set API_KEY[/bold].")
         return
 
     table = Table("name")
-    for s in secrets:
-        table.add_row(s.name)
+    for secret in secrets:
+        table.add_row(_cell(secret.name))
     console.print(table)
 
 
@@ -5173,6 +5285,17 @@ def secrets_set(
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Create or overwrite a secret. The value is prompted interactively (never a flag)."""
+    if name in (".", "..") or not _SECRET_NAME_STORABLE.match(name):  # "." and ".." are path segments, not names
+        _fail(
+            f"'{escape(_printable(name))}' can't be a secret name: use letters, digits, underscores, dashes and "
+            "dots, with no spaces or slashes (for example [bold]API_KEY[/bold])."
+        )
+    if not _SECRET_NAME_ENV.match(name):
+        err_console.print(
+            f"[yellow]Note:[/yellow] '{escape(name)}' is not a valid environment variable name (letters, digits "
+            "and underscores, not starting with a digit), so a shell cannot read it as a variable. "
+            "Saving it anyway."
+        )
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -5198,7 +5321,8 @@ def secrets_rm(
         return
 
     client = _get_client(api_url=api_url, org=org)
-    client.delete_secret(project_id, name)
+    with _pointing_to("harumi secrets list"):
+        client.delete_secret(project_id, name)
     console.print(f"[bold red]Deleted[/bold red] secret [bold]{name}[/bold].")
 
 
@@ -5237,6 +5361,46 @@ def _memory_preview(content: str) -> str:
     return flat[: _MEMORY_PREVIEW_CHARS - 1] + "…"
 
 
+def _memory_id(client: Client, project_id: str, typed: str) -> str:
+    """The full id of the memory `typed` names (an id, or the start of one)."""
+    if _FULL_ID.match(typed):
+        return typed
+    return _match_by_id(client.list_memories(project_id), typed, "memory", "harumi memories list").id
+
+
+@contextlib.contextmanager
+def _memory_errors(client: Client, project_id: str, memory_id: str):
+    """Turn the API's 404 into the real reason.
+
+    The listing includes the workspace's memories, which can be read here but not changed, and the
+    API answers 404 for them as it does for an id that does not exist. Only on a 404 do we look
+    which of the two it is, so a change that works costs no extra request.
+    """
+    try:
+        yield
+    except ApiError as exc:
+        if exc.status_code != 404:
+            raise
+        known = next((m for m in client.list_memories(project_id) if m.id == memory_id), None)
+        if known is not None and known.scope != "project":
+            where = "personal workspace" if known.scope == "user" else "organization"
+            _fail(
+                f"That memory belongs to your {where}, not to this project, so it can't be changed here. "
+                "Change it in the workspace's own settings in the web app."
+            )
+        _fail(f"{escape(str(exc))}\nSee what exists with [bold]harumi memories list[/bold].")
+
+
+def _pick_memory(client: Client, project_id: str, action: str) -> Optional[str]:
+    rows = [m for m in client.list_memories(project_id) if m.scope == "project"]
+    return _pick_row(
+        rows, action, "memory", 'harumi memories add "..."',
+        label=lambda m: _memory_preview(m.content),
+        hint=lambda m: m.retrieval_mode,
+        flag="the MEMORY_ID argument",
+    )
+
+
 _MODE_HELP = "'always' loads the memory into every chat; 'on_demand' (default) only when retrieved."
 
 
@@ -5260,17 +5424,18 @@ def memories_list(
 
     memories = client.list_memories(project_id, query=query, retrieval_mode=mode)
     if not memories:
-        console.print("No memories found.")
+        console.print('No memories yet. Add one with [bold]harumi memories add "..."[/bold].')
         return
 
     table = Table("id", "scope", "mode", "content", "updated")
+    table.columns[0].no_wrap = True
     for m in memories:
         table.add_row(
-            m.id,
-            m.scope,
-            m.retrieval_mode,
-            escape(_memory_preview(m.content)),
-            str(m.updated_at or ""),
+            _cell(m.id[:8]),  # the start of the id: edit and rm accept it
+            _cell(m.scope),
+            _cell(m.retrieval_mode),
+            _cell(_memory_preview(m.content)),
+            _cell(m.updated_at.strftime("%Y-%m-%d") if m.updated_at else ""),
         )
     console.print(table)
 
@@ -5278,7 +5443,7 @@ def memories_list(
 @memories_app.command("add")
 @_handle_errors
 def memories_add(
-    content: Optional[str] = typer.Argument(None, help="The memory text (1-4000 characters). Prompted for if omitted."),
+    content: Optional[str] = typer.Argument(None, help="The memory text (1-4000 characters), or - to read it from standard input. Prompted for at a terminal if omitted."),
     mode: str = typer.Option("on_demand", "--mode", help=_MODE_HELP),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
@@ -5288,7 +5453,14 @@ def memories_add(
     _check_memory_mode(mode)
     project_id = _resolve_project(project)
 
-    if content is None:
+    if content == "-":
+        content = sys.stdin.read().strip()  # explicit, so a command run with no input never waits on a pipe
+    elif content is None:
+        if not interactive.is_interactive():
+            _fail(
+                'Pass the memory text: [bold]harumi memories add "Always report cost in USD."[/bold] '
+                "(or [bold]-[/bold] to read it from standard input)."
+            )
         content = typer.prompt("Memory")
     _check_memory_content(content)
 
@@ -5300,7 +5472,7 @@ def memories_add(
 @memories_app.command("edit")
 @_handle_errors
 def memories_edit(
-    memory_id: str = typer.Argument(..., help="Memory id (see `harumi memories list`)."),
+    memory_id: Optional[str] = typer.Argument(None, help="Memory id, or the start of it. Pick from a list if omitted."),
     content: Optional[str] = typer.Option(None, "--content", help="New memory text."),
     mode: Optional[str] = typer.Option(None, "--mode", help="New retrieval mode: 'always' or 'on_demand'."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
@@ -5317,28 +5489,44 @@ def memories_edit(
         _check_memory_content(content)
 
     client = _get_client(api_url=api_url, org=org)
-    memory = client.update_memory(project_id, memory_id, content=content, retrieval_mode=mode)
+    if memory_id is None:
+        memory_id = _pick_memory(client, project_id, "edit")
+        if memory_id is None:
+            return
+    memory_id = _memory_id(client, project_id, memory_id)
+    with _memory_errors(client, project_id, memory_id):
+        memory = client.update_memory(project_id, memory_id, content=content, retrieval_mode=mode)
     console.print(f"[bold green]Updated[/bold green] memory [bold]{memory.id}[/bold].")
 
 
 @memories_app.command("rm")
 @_handle_errors
 def memories_rm(
-    memory_id: str = typer.Argument(..., help="Memory id (see `harumi memories list`)."),
+    memory_id: Optional[str] = typer.Argument(None, help="Memory id, or the start of it. Pick from a list if omitted."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Delete a project memory."""
+    if memory_id is None and yes:
+        # --yes removes the question, so nothing would stand between a slip in a list and a deleted memory.
+        _fail("Say which memory to delete: [bold]harumi memories rm <memory id> --yes[/bold]. Find the id with [bold]harumi memories list[/bold].")
     project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
 
-    if not yes and not typer.confirm(f"Delete memory '{memory_id}'? This cannot be undone."):
+    if memory_id is None:
+        memory_id = _pick_memory(client, project_id, "delete")
+        if memory_id is None:
+            return
+    memory_id = _memory_id(client, project_id, memory_id)
+
+    if not yes and not typer.confirm(f"Delete memory '{memory_id}'? This cannot be undone."):  # plain text: not markup
         console.print("Aborted.")
         return
 
-    client = _get_client(api_url=api_url, org=org)
-    memory = client.delete_memory(project_id, memory_id)
+    with _memory_errors(client, project_id, memory_id):
+        memory = client.delete_memory(project_id, memory_id)
     console.print(f"[bold red]Deleted[/bold red] memory [bold]{memory.id}[/bold].")
 
 

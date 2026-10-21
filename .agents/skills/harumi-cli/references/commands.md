@@ -408,7 +408,7 @@ harumi datasources query NAME --sql "SELECT ..." [--limit N] [--csv PATH] [--pro
 
 **Credentials are always prompted, never a flag.** `add`, `update --set-credentials`, and `test` each prompt with `typer.prompt(hide_input=True)`. This is deliberate — secrets must never land in shell history, process listings, or `--help` output. The server stores credentials in AWS SSM (SecureString) and never returns them; `get`/`list` responses have no credential field.
 
-**`type`** must be one of `postgresql | mysql | sqlserver | oracle`.
+**`type`** must be one of `postgresql | mysql | sqlserver | oracle`. Anything else is refused before the password prompt, with a "did you mean" for a near miss (`postgres` -> `postgresql`).
 
 **Proxy mTLS.** A datasource only reachable through the mTLS proxy needs `--use-proxy` together with the complete set: `--proxy-host`, `--proxy-port`, and all three of `--proxy-tls-ca-cert`, `--proxy-tls-client-cert`, `--proxy-tls-client-key`. Those three take **file paths**, not inline values, so a PEM never lands in shell history; the CLI reads each file and sends the contents, which the server stores in the same SSM bundle as the password. `--proxy-server-name` defaults to `vpnproxy.harumi.io` server-side. `add` and `test` reject an incomplete set locally, before prompting for credentials, listing each missing flag. `update` sends only the certs you pass, so any one of them can be rotated on its own without resupplying the others.
 
@@ -433,17 +433,19 @@ Real, project-scoped endpoints (`/projects/{project_id}/schedules`).
 
 ```
 harumi schedules list [--project ID] [--api-url URL] [--org ORG]
-harumi schedules get SCHEDULE_ID [--project ID]
+harumi schedules get [SCHEDULE_ID] [--project ID]
 harumi schedules add --cron CRON --git-branch BRANCH [--start-at ISO] [--git-commit SHA]
                      [--command C] [--kernel K] [--output-format F] [--email-to E] [--project ID]
-harumi schedules update SCHEDULE_ID [--cron CRON] [--start-at ISO] [--git-branch B] [--git-commit SHA]
+harumi schedules update [SCHEDULE_ID] [--cron CRON] [--start-at ISO] [--git-branch B] [--git-commit SHA]
                         [--command C] [--kernel K] [--output-format F] [--email-to E] [--project ID]
-harumi schedules rm SCHEDULE_ID [--yes] [--project ID]
+harumi schedules rm [SCHEDULE_ID] [--yes] [--project ID]
 ```
 
 `--project` on every subcommand overrides the `.harumi` binding.
 
-**`--cron`** is a raw 5-field cron expression (e.g. `"0 9 * * *"`), **interpreted in UTC**. The CLI does not validate it — the server validates with `croniter` and returns **400 Invalid cron expression** on a bad value. There is no calendar/builder UX; pass the cron string directly.
+**Ids.** `list` shows the first 8 characters of each id; `get`, `update` and `rm` take that or the full id. With no id, a terminal gets a picker and anything else gets the list of choices and the argument to pass. `rm --yes` needs the id (it never picks for you).
+
+**`--cron`** is a raw 5-field cron expression (e.g. `"0 9 * * *"`), **interpreted in UTC**. The CLI does not validate it — the server validates with `croniter` and returns **400 Invalid cron expression** on a bad value, and 400 if it would fire more often than every 5 minutes. There is no calendar/builder UX; pass the cron string directly.
 
 **`--start-at`** is an ISO-8601 datetime; defaults to "now" (UTC) if omitted on `add`.
 
@@ -477,17 +479,17 @@ Project memories: notes the project's chat remembers. Backed by `/projects/{id}/
 
 ```
 harumi memories list [--query TEXT] [--mode always|on_demand] [--project ID] [--api-url URL] [--org ORG]
-harumi memories add [CONTENT] [--mode always|on_demand] [--project ID]
-harumi memories edit MEMORY_ID [--content TEXT] [--mode always|on_demand] [--project ID]
-harumi memories rm MEMORY_ID [--yes] [--project ID]
+harumi memories add [CONTENT|-] [--mode always|on_demand] [--project ID]
+harumi memories edit [MEMORY_ID] [--content TEXT] [--mode always|on_demand] [--project ID]
+harumi memories rm [MEMORY_ID] [--yes] [--project ID]
 harumi skills library [--category C] [--query TEXT] [--api-url URL] [--org ORG]
 harumi skills add SLUG [--force] [--api-url URL] [--org ORG]
 ```
 
-- **`list`**: `GET /projects/{id}/memories?q=&retrieval_mode=` → a table of `id`, `scope`, `mode`, `content` (truncated) and `updated`. The list also carries memories inherited from the project's organization or the owner's personal workspace (`scope` is `organization` or `user`); those are read-only through the project routes.
-- **`add`**: `POST /projects/{id}/memories` with `{content, source: "cli", retrieval_mode}`. `content` is 1-4000 characters; `--mode` defaults to `on_demand`. If `CONTENT` is omitted it is prompted for.
+- **`list`**: `GET /projects/{id}/memories?q=&retrieval_mode=` → a table of `id` (the first 8 characters; `edit` and `rm` accept the start of an id), `scope`, `mode`, `content` (truncated) and `updated`. The list also carries memories inherited from the project's organization or the owner's personal workspace (`scope` is `organization` or `user`); those are read-only through the project routes.
+- **`add`**: `POST /projects/{id}/memories` with `{content, source: "cli", retrieval_mode}`. `content` is 1-4000 characters; `--mode` defaults to `on_demand`. `CONTENT` of `-` reads standard input. If it is omitted, a terminal is prompted and anything else is told to pass it.
 - **`edit`**: `PATCH /projects/{id}/memories/{memory_id}` with only the fields given. At least one of `--content` / `--mode` is required, otherwise the CLI fails before calling the API.
-- **`rm`**: `DELETE /projects/{id}/memories/{memory_id}`, prompting for confirmation unless `--yes`.
+- **`rm`**: `DELETE /projects/{id}/memories/{memory_id}`, prompting for confirmation unless `--yes`. With no id a terminal gets a picker of the project's own memories; `--yes` needs the id. A workspace memory (scope `organization` or `user`) is named as such instead of reported as not found.
 - **`skills library`**: `GET /skill-library` → the platform's preset skills (`slug`, `name`, `category`, `version`, `description`). `--category` matches exactly; `--query` is a case-insensitive substring of name, description or tags.
 - **`skills add SLUG`**: needs a bound clone. `GET /skill-library/{slug}`, then writes `<clone>/skills/<slug>/SKILL.md` with `source: harumi/<slug>` and `version: N` set in the frontmatter (replacing any the preset had), exactly as the platform's Install button does. Refuses when that file exists unless `--force`: if the existing file's `source:` is `harumi/<slug>` it says the preset is already installed, otherwise that the folder belongs to a different skill. It writes the file only and prints the `git add / commit / push harumi` line; the project's assistant loads skills from the live branch.
 - A project's *own* skills are plain files at `skills/<slug>/SKILL.md`: create, edit and delete them in the clone with your editor and git. There is no command for that on purpose.

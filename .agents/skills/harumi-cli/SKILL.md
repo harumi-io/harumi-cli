@@ -178,15 +178,15 @@ All `datasources` subcommands accept `--project` to override the `.harumi` bindi
 
 ```bash
 harumi schedules list                                       # table of schedules for the bound project
-harumi schedules get <SCHEDULE_ID>                           # detail view
+harumi schedules get [SCHEDULE_ID]                           # detail view; the id, or the start of it (what `list` shows); omit it to pick
 harumi schedules add --cron "0 9 * * *" --git-branch main [--start-at ISO] [--kernel ...] [--email-to ...]
-harumi schedules update <SCHEDULE_ID> --cron "0 */6 * * *"
-harumi schedules rm <SCHEDULE_ID>
+harumi schedules update [SCHEDULE_ID] --cron "0 */6 * * *"
+harumi schedules rm [SCHEDULE_ID]                            # `--yes` needs the id: it never picks for you
 ```
 
 Key semantics:
 
-- **Cron is a raw 5-field expression, interpreted in UTC.** The CLI does not validate it client-side — the server validates with `croniter` and returns a clear 400 on a bad expression. Don't try to build a calendar/human-friendly UI; just pass the cron string.
+- **Cron is a raw 5-field expression, interpreted in UTC, and may not fire more often than every 5 minutes.** The CLI does not validate it client-side — the server validates with `croniter` and returns a clear 400 on a bad expression or a too-short interval. Don't try to build a calendar/human-friendly UI; just pass the cron string.
 - **No pause/enable flag exists.** The only way to stop a schedule from firing is `harumi schedules rm`.
 - **No separate "run now" for a schedule.** Immediate execution is already covered by `harumi run` (git-ref based); schedules only control recurring runs.
 
@@ -198,7 +198,7 @@ All `schedules` subcommands accept `--project` to override the `.harumi` binding
 
 ```bash
 harumi secrets list                 # names only, never values
-harumi secrets set <NAME>           # prompts for the value (hidden input)
+harumi secrets set <NAME>           # prompts for the value (hidden input); no spaces or slashes in NAME; a name that is not a valid env var (`my-key`) saves with a note
 harumi secrets rm <NAME>
 ```
 
@@ -208,12 +208,12 @@ harumi secrets rm <NAME>
 
 ```bash
 harumi memories list [--query TEXT] [--mode always|on_demand]   # includes read-only memories inherited from the org / personal workspace
-harumi memories add "Use metric units" [--mode always]          # omit the text to be prompted
-harumi memories edit <MEMORY_ID> [--content TEXT] [--mode always|on_demand]
-harumi memories rm <MEMORY_ID>
+harumi memories add "Use metric units" [--mode always]          # `-` reads the text from stdin; with neither, you are prompted at a terminal and told to pass it otherwise
+harumi memories edit [MEMORY_ID] [--content TEXT] [--mode always|on_demand]   # id, or the start of it; omit it to pick
+harumi memories rm [MEMORY_ID]                                 # `--yes` needs the id
 ```
 
-- Inherited rows (scope `organization` or `user`) are listed but can't be edited or removed here.
+- Inherited rows (scope `organization` or `user`) are listed but can't be edited or removed here; trying says so and points at the workspace's settings.
 - `edit` needs at least one of `--content` / `--mode`.
 
 ### Project skills
