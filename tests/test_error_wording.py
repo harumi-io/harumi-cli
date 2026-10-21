@@ -8,6 +8,8 @@ transport that raises the exceptions httpx really raises.
 
 from __future__ import annotations
 
+import errno
+
 import httpx
 import pytest
 from typer.testing import CliRunner
@@ -358,7 +360,7 @@ def test_a_closed_pipe_is_quiet_not_a_bug_report(monkeypatch, capsys):
 
 
 def test_a_disk_problem_is_reported_as_the_machine_not_as_a_cli_bug(monkeypatch, capsys):
-    code, out = run_main(monkeypatch, capsys, OSError(28, "No space left on device", "/home/ana/.harumi/credentials.json"))
+    code, out = run_main(monkeypatch, capsys, OSError(errno.ENOSPC, "No space left on device", "/home/ana/.harumi/credentials.json"))
 
     err = " ".join(out.err.split())
     assert code == 1 and "No space left on device" in err and ".harumi/credentials.json" in err
@@ -372,22 +374,24 @@ def test_commands_a_test_adds_do_not_outlive_it(monkeypatch, capsys):
     assert {c.name for c in cli.app.registered_commands} == names
 
 
-@pytest.mark.parametrize("error", [BrokenPipeError(), OSError(28, "No space left on device", "/x"), OSError(104, "Connection reset by peer")])
+@pytest.mark.parametrize("error", [BrokenPipeError(), OSError(errno.ENOSPC, "No space left on device", "/x"), OSError(errno.ECONNRESET, "Connection reset by peer")])
 def test_debug_mode_gives_the_traceback_for_an_oserror_too(monkeypatch, capsys, error):
     with pytest.raises(OSError):
         run_main(monkeypatch, capsys, error, env={"HARUMI_DEBUG": "1"})
 
 
-@pytest.mark.parametrize("error", [OSError(104, "Connection reset by peer"), OSError(0, "ssl handshake")])
+@pytest.mark.parametrize("error", [OSError(errno.ECONNRESET, "Connection reset by peer"), OSError(0, "ssl handshake")])
 def test_a_network_oserror_is_not_passed_off_as_a_disk_problem(monkeypatch, capsys, error):
     code, out = run_main(monkeypatch, capsys, error)
 
     err = " ".join(out.err.split())
-    assert code == 1 and "Something unexpected went wrong" in err and "OSError" in err
+    # The class is named, whatever the platform makes of the errno: OSError(104, ...) is a plain OSError
+    # on macOS but a ConnectionResetError on Linux.
+    assert code == 1 and "Something unexpected went wrong" in err and type(error).__name__ in err
     assert "reset by peer" not in err  # the text of an unexpected error is not printed
 
 
-@pytest.mark.parametrize("number", [13, 1, 2, 30, 28])
+@pytest.mark.parametrize("number", [errno.EACCES, errno.EPERM, errno.ENOENT, errno.EROFS, errno.ENOSPC])
 def test_disk_and_permission_errors_are_reported_as_the_machine(monkeypatch, capsys, number):
     code, out = run_main(monkeypatch, capsys, OSError(number, "the OS's words", "/home/ana/.harumi/x"))
 
