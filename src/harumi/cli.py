@@ -163,7 +163,7 @@ from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
-from harumi import __version__, auth, interactive, quickstart
+from harumi import __version__, auth, interactive, json_out, quickstart
 from harumi import skills as skills_mod
 from harumi.client import Client, upload_is_staged
 from harumi.file_sync_cap import (
@@ -522,6 +522,55 @@ def _printable(text: object) -> str:
 
 
 _FULL_ID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+_JSON = typer.Option(False, "--json", help="Print JSON on stdout instead of a table, for scripts.")
+
+
+# The stream `--json` documents are written to. Normally sys.stdout; while a command's talk is
+# redirected to stderr (below) it is the real stdout, remembered here.
+_json_stream: list = []
+
+
+def _data_on_stdout(fn):
+    """With --json, a command's talk (progress, hints, failure summaries) goes to stderr.
+
+    stdout then carries the one document and nothing else, so `harumi run --watch --json | jq` works
+    and a CI log still shows what happened. Done by pointing sys.stdout at stderr for the call: the
+    Rich console follows sys.stdout when it has no file of its own, so nothing private is touched and
+    nothing needs restoring by hand. The document itself goes to the stream remembered in `_json_stream`.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not kwargs.get("as_json"):
+            return fn(*args, **kwargs)
+        _json_stream.append(sys.stdout)
+        try:
+            with contextlib.redirect_stdout(sys.stderr):
+                return fn(*args, **kwargs)
+        finally:
+            _json_stream.pop()
+
+    return wrapper
+
+
+def _run_record(run_id: Optional[str], status: str, *, watched: bool, run=None) -> dict:
+    """What `run --json` prints. `succeeded` is None until the run has finished (not watched)."""
+    return {
+        "run_id": run_id,
+        "status": status,
+        "exit_code": run.exit_code if run is not None else None,
+        "succeeded": run.succeeded if run is not None else None,
+        "took_seconds": _run_duration(run) if run is not None else None,
+        "error": run.error if run is not None else None,
+        "watched": watched,
+    }
+
+
+def _emit_json(data: object) -> None:
+    """The document, and nothing else, on stdout. typer.echo, not the Rich console: no wrapping or colour."""
+    typer.echo(json_out.dumps(data), file=_json_stream[-1] if _json_stream else None)
 
 
 def _cell(value: object) -> Text:
@@ -1066,12 +1115,22 @@ def status() -> None:
 @app.command()
 @_handle_errors
 def whoami(
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Show the logged-in user: email, name and organization."""
     client = _get_client(api_url=api_url, org=org)
     profile = client.get_profile()
+    if as_json:
+        org_id, org_name = _workspace_lookup(client)
+        _emit_json({
+            "id": profile.id, "email": profile.email, "first_name": profile.first_name, "last_name": profile.last_name,
+            "bio": profile.bio, "organization": json_out.workspace(org_id, org_name),
+            # Named only when it is not production, as everywhere else: clients are never shown it.
+            "environment": None if client.config.environment == DEFAULT_ENVIRONMENT else client.config.environment,
+        })
+        return
     console.print(
         f"[bold]{profile.email or '?'}[/bold]  (id: {profile.id or '?'})  "
         + (f"[dim]env: {client.config.environment}[/dim]" if client.config.environment != DEFAULT_ENVIRONMENT else "")
@@ -1086,21 +1145,27 @@ def whoami(
             console.print(f"{label}: {escape(_printable(value))}")
 
 
-def _workspace_name(client: Client) -> Optional[str]:
-    """The saved organization as a name, for display; its id, with a pointer, if it can't be found.
+def _workspace_lookup(client: Client) -> tuple[Optional[str], Optional[str]]:
+    """(id, name) of the saved organization; the name is None if it can't be found.
 
     A lookup that fails (offline, or the account no longer belongs to it) must not break `whoami`:
     its job is to say who you are, and an id is still better than nothing.
     """
     org_id = client.config.org_id
     if not org_id:
-        return None
+        return None, None
     try:
         known = next((o for o in client.list_organizations() if o.id == org_id), None)
     except ApiError:
-        return org_id
-    if known:
-        return known.business_name
+        return org_id, None
+    return org_id, (known.business_name if known else None)
+
+
+def _workspace_name(client: Client) -> Optional[str]:
+    """The saved organization as a name, for display; its id, with a pointer, if it can't be found."""
+    org_id, name = _workspace_lookup(client)
+    if org_id is None or name:
+        return name
     return f"{org_id} (you no longer belong to it; choose another with harumi org use)"
 
 
@@ -1354,6 +1419,7 @@ def usage(
     org: Optional[str] = typer.Option(
         None, "--org", help="Show an organization's pooled allowance instead of your personal one."
     ),
+    as_json: bool = _JSON,
 ) -> None:
     """Show your (or --org's) plan, weekly and monthly usage, and overage.
 
@@ -1363,6 +1429,16 @@ def usage(
     client = _get_client(api_url=api_url, org=org)
     org_id = client.config.org_id
     ent, workspace = _workspace_entitlement(client, org_id)
+    if as_json:
+        name = workspace.name if workspace else None
+        where = json_out.workspace(org_id, name)
+        if ent is not None and ent.paywall_enabled and workspace is not None and not workspace.active:
+            # No plan: the human view stops here too, and there is no usage to report.
+            reason = workspace.reason or ("org_not_subscribed" if org_id else "no_subscription")  # as the table says
+            _emit_json({"workspace": where, "active": False, "reason": reason})
+            return
+        _emit_json({"workspace": where, "active": True, **json_out.usage(client.get_credit_usage())})
+        return
     if org_id:
         org_name = (workspace.name if workspace else None) or org_id
         where = f"organization [bold]{escape(org_name)}[/bold]"
@@ -1740,6 +1816,7 @@ def skills_add(
 @app.command()
 @_handle_errors
 def specs(
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
@@ -1749,6 +1826,9 @@ def specs(
     """
     client = _get_client(api_url=api_url, org=org)
     specs_ = client.get_specs()
+    if as_json:
+        _emit_json([json_out.spec(k) for k in specs_])
+        return
     if not specs_:
         console.print("No kernels are available to this workspace.")
         return
@@ -1775,12 +1855,16 @@ def specs(
 @app.command()
 @_handle_errors
 def blueprints(
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """List project blueprints. Pass a blueprint's slug as `new --blueprint`."""
     client = _get_client(api_url=api_url, org=org)
     items = client.list_blueprints()
+    if as_json:
+        _emit_json([json_out.blueprint(b) for b in items])
+        return
     if not items:
         console.print("No blueprints found.")
         return
@@ -2599,6 +2683,7 @@ def projects_create(
 @projects_app.command("list")
 @_handle_errors
 def projects_list(
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
     limit: Optional[int] = typer.Option(
@@ -2608,6 +2693,12 @@ def projects_list(
     """List your projects, most recently updated first."""
     client = _get_client(api_url=api_url, org=org)
     projects, total = client.list_projects_with_total()
+    if as_json:
+        ordered = _recent_first(projects)
+        _emit_json([json_out.project(p) for p in (ordered[:limit] if limit else ordered)])
+        if len(projects) < total:
+            err_console.print(f"[yellow]Showing {len(projects)} of {total} projects; the rest could not be fetched.[/yellow]")
+        return
     if not projects:
         console.print("No projects found.")
         return
@@ -2638,16 +2729,22 @@ def projects_list(
 @_handle_errors
 def projects_get(
     project_id: Optional[str] = typer.Argument(None, help="Project id. Pick from a list if omitted."),
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Show a project: its name, where it lives, and how to open it."""
     client = _get_client(api_url=api_url, org=org)
     if project_id is None:
+        if as_json:  # a menu would be written into the document
+            _fail("Pass the project id: [bold]harumi projects get <id> --json[/bold]. Find it with [bold]harumi projects list[/bold].")
         project_id = _pick_project(client, action="show")
         if project_id is None:
             return
     p = client.get_project(project_id)
+    if as_json:
+        _emit_json(json_out.project(p))
+        return
     names = _workspace_names(client) if p.customer_id else {}
     facts = Table.grid(padding=(0, 2))
     facts.add_column(style="dim")
@@ -2751,12 +2848,16 @@ def projects_rm(
 
 @app.command()
 @_handle_errors
+@_data_on_stdout
 def run(
     branch: Optional[str] = typer.Option(None, "--branch", "-b", help="Run a specific branch."),
     commit: Optional[str] = typer.Option(None, "--commit", help="Run a specific commit SHA."),
     command: Optional[str] = typer.Option(None, "--command", "-c", help="Override the harumi.toml command."),
     kernel: Optional[str] = typer.Option(None, "--kernel", "-k", help="Kernel to run on (see `harumi specs`), overriding harumi.toml."),
     watch: bool = typer.Option(False, "--watch", "-w", help="Block until the run finishes."),
+    as_json: bool = typer.Option(
+        False, "--json", help="Print the result as JSON on stdout (progress goes to stderr). Exits 1 if a watched run fails."
+    ),
     output_dir: Optional[Path] = typer.Option(
         None,
         "--output-dir",
@@ -2860,6 +2961,8 @@ def run(
         console.print(f"Queued run [bold]{run_id}[/bold]" if run_id else "Queued.")
 
         if not watch:
+            if as_json:
+                _emit_json(_run_record(run_id, response.status or "queued", watched=False))
             if run_id:
                 console.print(
                     f"[dim]Check on it with [bold]harumi runs get {run_id}[/bold], "
@@ -2869,9 +2972,13 @@ def run(
 
         if not run_id:
             console.print("[yellow]No run id returned; cannot watch this run.[/yellow]")
+            if as_json:
+                _emit_json(_run_record(None, response.status or "queued", watched=False))
             return
 
         result = _watch_run(client, project_id, run_id)
+        if as_json:
+            _emit_json(_run_record(run_id, result.status, watched=True, run=result))
         if result.succeeded:
             took = _duration(_run_duration(result))
             console.print(
@@ -3007,10 +3114,11 @@ app.add_typer(runs_app, name="runs")
 @_handle_errors
 def runs_list(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
     limit: Optional[int] = typer.Option(
-        None, "--limit", "-n", min=1, help=f"How many of the latest runs to show (default {RUNS_SHOWN}). Use --all for every run."
+        None, "--limit", "-n", min=1, help=f"How many of the latest runs to show (default {RUNS_SHOWN}). Use --all for every run. With --json it is every run unless you pass this."
     ),
     all_: bool = typer.Option(False, "--all", help="Show every run, however many there are."),
 ) -> None:
@@ -3022,6 +3130,10 @@ def runs_list(
     client = _get_client(api_url=api_url, org=org)
 
     runs = client.list_runs(project_id)
+    if as_json:
+        # The table shows the latest 25 to stay readable; a script asked for data, so it gets every run unless --limit says otherwise.
+        _emit_json([json_out.run(r) for r in (runs[:limit] if limit else runs)])
+        return
     if not runs:
         console.print("No runs found.")
         return
@@ -3050,6 +3162,7 @@ def runs_list(
 def runs_get(
     run_id: Optional[str] = typer.Argument(None, help="Run id. Defaults to the project's latest run."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
@@ -3060,6 +3173,9 @@ def runs_get(
     r = client.get_run(project_id, run_id) if run_id else client.get_latest_run(project_id)
     if r is None:
         _fail("This project has no runs yet. Start one with [bold]harumi run --watch[/bold].")
+        return
+    if as_json:
+        _emit_json(json_out.run(r, detail=True))
         return
 
     status = _status_markup(r.status) + (f" (exit code {r.exit_code})" if r.exit_code is not None else "")
@@ -3823,6 +3939,7 @@ app.add_typer(files_app, name="files")
 @_handle_errors
 def files_ls(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
@@ -3831,6 +3948,10 @@ def files_ls(
     client = _get_client(api_url=api_url, org=org)
 
     file_list = client.list_project_files(project_id)
+    if as_json:
+        # An object, not an array: a listing can be cut, and a script has to be able to tell.
+        _emit_json({"files": [json_out.file(f) for f in sorted(file_list.files, key=lambda f: f.name)], "is_truncated": file_list.is_truncated})
+        return
     if not file_list.files:
         console.print("No files uploaded yet. Add one with [bold]harumi files put <local file>[/bold].")
         return
@@ -4368,6 +4489,7 @@ def _share_not_found(exc: ApiError) -> None:
 @_handle_errors
 def share_list(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
@@ -4376,6 +4498,9 @@ def share_list(
     client = _get_client(api_url=api_url, org=org)
 
     links = client.list_share_links(project_id)
+    if as_json:
+        _emit_json([json_out.share(link) for link in links])  # no token: it is the secret in the public URL
+        return
     if not links:
         console.print("No share links yet. Create one with [bold]harumi share add[/bold].")
         return
@@ -4409,6 +4534,7 @@ def share_list(
 def share_get(
     link_id: Optional[str] = typer.Argument(None, help="Share link id (or the start of it). Pick from a list if omitted."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
@@ -4417,12 +4543,19 @@ def share_get(
     client = _get_client(api_url=api_url, org=org)
 
     if link_id is None:
+        if as_json:
+            _fail("Pass the link id: [bold]harumi share get <id> --json[/bold]. Find it with [bold]harumi share list[/bold].")
         link_id = _pick_share_link(client, project_id, "look at")
         if link_id is None:
             return
     # `get` needs the link itself, so it lists once and matches here (a full id too: a typo in
     # one hex digit must read as "no such link", not crash).
-    _print_share_link(_match_share_link(client.list_share_links(project_id), link_id))
+    link = _match_share_link(client.list_share_links(project_id), link_id)
+    if as_json:
+        # The one place a script gets the token: it asked for this link by id, as `share get` shows its URL.
+        _emit_json({**json_out.share(link), "token": link.token, "url": _share_link_url(link)})
+        return
+    _print_share_link(link)
 
 
 _IO_CONTROL_OPTION = typer.Option(
@@ -4781,6 +4914,7 @@ def _reject_orphan_proxy_flags(
 @_handle_errors
 def datasources_list(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
@@ -4789,6 +4923,9 @@ def datasources_list(
     client = _get_client(api_url=api_url, org=org)
 
     result = client.list_datasources(project_id)
+    if as_json:
+        _emit_json([json_out.datasource(d) for d in result.datasources])
+        return
     if not result.datasources:
         console.print("No datasources found.")
         return
@@ -4804,6 +4941,7 @@ def datasources_list(
 def datasources_get(
     name: str = typer.Argument(..., help="Datasource name."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
@@ -4813,6 +4951,9 @@ def datasources_get(
 
     with _pointing_to("harumi datasources list"):
         ds = client.get_datasource(project_id, name)
+    if as_json:
+        _emit_json(json_out.datasource(ds))
+        return
     table = Table("field", "value")
     for field in ("id", "name", "type", "host", "port", "database", "username", "use_proxy", "proxy_host"):
         table.add_row(field, _cell(getattr(ds, field, "") or ""))
@@ -5084,6 +5225,7 @@ def _pick_schedule(client: Client, project_id: str, action: str) -> Optional[str
 @_handle_errors
 def schedules_list(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
@@ -5092,6 +5234,9 @@ def schedules_list(
     client = _get_client(api_url=api_url, org=org)
 
     schedules = client.list_schedules(project_id)
+    if as_json:
+        _emit_json([json_out.schedule(sc) for sc in schedules])
+        return
     if not schedules:
         console.print('No schedules yet. Add one with [bold]harumi schedules add --cron "0 9 * * *"[/bold].')
         return
@@ -5117,6 +5262,7 @@ def schedules_list(
 def schedules_get(
     schedule_id: Optional[str] = typer.Argument(None, help="Schedule id, or the start of it. Pick from a list if omitted."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
@@ -5125,11 +5271,16 @@ def schedules_get(
     client = _get_client(api_url=api_url, org=org)
 
     if schedule_id is None:
+        if as_json:
+            _fail("Pass the schedule id: [bold]harumi schedules get <id> --json[/bold]. Find it with [bold]harumi schedules list[/bold].")
         schedule_id = _pick_schedule(client, project_id, "show")
         if schedule_id is None:
             return
     with _pointing_to("harumi schedules list"):
         s = client.get_schedule(project_id, _schedule_id(client, project_id, schedule_id))
+    if as_json:
+        _emit_json(json_out.schedule(s))
+        return
     table = Table("field", "value")
     for field in (
         "id",
@@ -5298,6 +5449,7 @@ _SECRET_NAME_ENV = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 @_handle_errors
 def secrets_list(
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
@@ -5306,6 +5458,9 @@ def secrets_list(
     client = _get_client(api_url=api_url, org=org)
 
     secrets = client.list_secrets(project_id)
+    if as_json:
+        _emit_json([json_out.secret(sec) for sec in secrets])
+        return
     if not secrets:
         console.print("No secrets yet. Add one with [bold]harumi secrets set API_KEY[/bold].")
         return
@@ -5450,6 +5605,7 @@ def memories_list(
     query: Optional[str] = typer.Option(None, "--query", "-q", help="Full-text search over memory content."),
     mode: Optional[str] = typer.Option(None, "--mode", help="Only 'always' or only 'on_demand' memories."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
@@ -5463,6 +5619,9 @@ def memories_list(
     client = _get_client(api_url=api_url, org=org)
 
     memories = client.list_memories(project_id, query=query, retrieval_mode=mode)
+    if as_json:
+        _emit_json([json_out.memory(m) for m in memories])
+        return
     if not memories:
         console.print('No memories yet. Add one with [bold]harumi memories add "..."[/bold].')
         return
@@ -5694,11 +5853,15 @@ _ORG_ARG = typer.Argument(None, help="Organization name, or the start of its id.
 @org_app.command("list")
 @_handle_errors
 def org_list(
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """List organizations you belong to."""
     client = _get_client(api_url=api_url)
     orgs = client.list_organizations()
+    if as_json:
+        _emit_json([json_out.organization(o) for o in orgs])
+        return
     if not orgs:
         console.print("You don't belong to any organization. Create one with [bold]harumi org create \"Name\"[/bold].")
         return
@@ -5779,12 +5942,18 @@ def org_rm(
 @_handle_errors
 def org_members(
     organization: Optional[str] = _ORG_ARG,
+    as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """List an organization's members."""
     client = _get_client(api_url=api_url)
+    if as_json and organization is None and not Config.load().org_id:
+        _fail("Pass the organization: [bold]harumi org members <name> --json[/bold]. See yours with [bold]harumi org list[/bold].")
     org_id, name = _org_choice(client, organization, "list the members of")
     members = client.list_organization_members(org_id)
+    if as_json:
+        _emit_json([json_out.member(m) for m in members])
+        return
     if not members:
         console.print("No members found.")
         return

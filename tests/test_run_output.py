@@ -344,3 +344,76 @@ def test_a_failed_token_refresh_is_never_blamed_on_the_project(monkeypatch, refr
     assert result.exit_code == 1
     assert "Could not renew your login" in out
     assert "harumi check" not in out, "blamed the project for a login problem"
+
+
+# -- --json: the result as data, for a pipeline ------------------------------------------------------------
+
+try:  # click 8.1 mixes stderr into the output unless told not to; 8.2 removed the switch
+    split_runner = CliRunner(mix_stderr=False)  # type: ignore[call-arg]
+except TypeError:
+    split_runner = CliRunner()
+
+
+def _run_json(*args):
+    return split_runner.invoke(cli.app, ["run", "--json", *args])
+
+
+def test_run_json_prints_the_run_id_as_data_and_the_talk_on_stderr(backend):
+    backend([{"status": "queued"}])
+
+    result = _run_json()
+
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "run_id": "run-1", "status": "queued", "exit_code": None, "succeeded": None, "took_seconds": None, "error": None, "watched": False,
+    }
+    assert "Queued run run-1" in result.stderr and "Queued" not in result.stdout
+
+
+def test_a_watched_run_json_reports_the_verdict_and_exits_zero(backend):
+    backend([{"status": "queued"}, {"status": "running"}, {"status": "completed", "exit_code": 0, "output_url": "s3://x"}])
+
+    result = _run_json("--watch")
+
+    done = json.loads(result.stdout)  # the whole of stdout: no progress line before or after it
+    assert result.exit_code == 0 and done["succeeded"] is True and done["status"] == "completed" and done["exit_code"] == 0 and done["watched"] is True
+    assert "Run completed" in result.stderr
+
+
+def test_a_failed_watched_run_json_still_exits_one_and_says_why_as_data(backend):
+    backend([{"status": "queued"}, {"status": "failed", "exit_code": 2, "error": "solver crashed"}])
+
+    result = _run_json("--watch")
+
+    done = json.loads(result.stdout)
+    assert result.exit_code == 1 and done["succeeded"] is False and done["exit_code"] == 2 and done["error"] == "solver crashed"
+    assert "Run failed" in result.stderr
+
+
+def test_a_refused_run_json_prints_no_document(backend):
+    backend([{"status": "queued"}], execute=(400, {"detail": "harumi.toml is invalid"}))
+
+    result = _run_json()
+
+    assert result.exit_code == 1 and result.stdout == "" and "harumi.toml is invalid" in " ".join(result.stderr.split())
+
+
+def test_the_next_command_prints_to_stdout_again_after_a_json_run(backend):
+    backend([{"status": "queued"}])
+    _run_json()
+
+    result = split_runner.invoke(cli.app, ["run"])
+
+    assert "Queued run run-1" in result.stdout  # the redirect to stderr did not outlive the command
+
+
+def test_a_json_run_that_dies_early_still_restores_stdout(backend, monkeypatch):
+    import sys
+
+    backend([{"status": "queued"}])
+    monkeypatch.setattr(cli, "is_dirty", lambda: (_ for _ in ()).throw(cli.GitError("git broke")))
+    before = sys.stdout
+
+    result = _run_json()
+
+    assert result.exit_code == 1 and sys.stdout is before and cli._json_stream == []

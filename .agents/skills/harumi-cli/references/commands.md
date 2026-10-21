@@ -31,6 +31,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [memories and skills](#memories-and-skills)
 - [agent-skills](#agent-skills)
 - [org](#org)
+- [Scripts and CI (`--json`)](#scripts-and-ci---json)
 - [Config & credential files](#config--credential-files)
 - [Troubleshooting](#troubleshooting)
 - [Python library (`Client`) alternative](#python-library-client-alternative)
@@ -105,26 +106,26 @@ harumi profile set [--first-name N] [--last-name N] [--bio TEXT] [--api-url URL]
 ## `usage`
 
 ```
-harumi usage [--org ORG] [--api-url URL]
+harumi usage [--org ORG] [--json] [--api-url URL]
 ```
 
-Shows the plan, the weekly and monthly allowance as a percentage used (with when each resets), and overage. `--org` shows an organization's pooled allowance instead of your personal one. States it can print: `no active plan` with the reason and what to do; `Harumi team, unlimited`; `no limit` for a window the plan does not cap; `Overage: not available on this plan`, `off`, `on` (dollars spent of the cap) or `paused` (an invoice is unpaid). When a limit is reached it ends with the billing link, and offers overage only if the plan has it. A plan the CLI has no label for is shown as words (`trial` becomes `Trial`). It exits 1 with the usual platform-down message when the API fails. This is the same allowance a `402` from `run` or chat is about.
+`--json` prints `{workspace, active, plan_code, tier, weekly_used_pct, monthly_used_pct, weekly_resets_at, monthly_resets_at, overage_*, ...}`; with no plan it is `{workspace, active: false, reason}`. Shows the plan, the weekly and monthly allowance as a percentage used (with when each resets), and overage. `--org` shows an organization's pooled allowance instead of your personal one. States it can print: `no active plan` with the reason and what to do; `Harumi team, unlimited`; `no limit` for a window the plan does not cap; `Overage: not available on this plan`, `off`, `on` (dollars spent of the cap) or `paused` (an invoice is unpaid). When a limit is reached it ends with the billing link, and offers overage only if the plan has it. A plan the CLI has no label for is shown as words (`trial` becomes `Trial`). It exits 1 with the usual platform-down message when the API fails. This is the same allowance a `402` from `run` or chat is about.
 
 ## `specs`
 
 ```
-harumi specs [--api-url URL] [--org ORG]
+harumi specs [--json] [--api-url URL] [--org ORG]
 ```
 
-Lists kernel specs from `GET /sandbox/specs` as a table of `name`, `cpu`, `memory`, `gpu` (yes/no), `plan` (`any` = every plan includes it, `paid` = it needs a subscription) and `label`. `name` is what you pass to `run --kernel` and `schedules add/update --kernel`; it is never shortened, whatever the terminal width. It ends with a line saying how to use one. An empty list prints `No kernels are available to this workspace.`
+`--json` is an array of `{name, display_name, language, description, cpu, memory, gpu, subscription_required}`. Lists kernel specs from `GET /sandbox/specs` as a table of `name`, `cpu`, `memory`, `gpu` (yes/no), `plan` (`any` = every plan includes it, `paid` = it needs a subscription) and `label`. `name` is what you pass to `run --kernel` and `schedules add/update --kernel`; it is never shortened, whatever the terminal width. It ends with a line saying how to use one. An empty list prints `No kernels are available to this workspace.`
 
 ## `blueprints`
 
 ```
-harumi blueprints [--api-url URL] [--org ORG]
+harumi blueprints [--json] [--api-url URL] [--org ORG]
 ```
 
-Lists project blueprints (`slug`, `name`, `description`) from `GET /blueprints`. Pass a blueprint's `slug` as `new --blueprint`.
+`--json` is an array of those three fields. Lists project blueprints (`slug`, `name`, `description`) from `GET /blueprints`. Pass a blueprint's `slug` as `new --blueprint`.
 
 ## `projects`
 
@@ -230,7 +231,7 @@ Interactive entry point for a confused or new user. It checks that you are logge
 
 ```
 harumi run [--branch B] [--commit SHA] [--command C] [--kernel K]
-           [--watch]
+           [--watch] [--json]
            [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
@@ -243,6 +244,7 @@ Requires the directory (or a parent) to be bound — via `harumi new`, `harumi i
 | `--command, -c` | Override the command in `harumi.toml`. |
 | `--kernel, -k` | Override the kernel spec (e.g. `or_python_small`, `gurobi_python_medium`). |
 | `--watch, -w` | Block until the run reaches a terminal status. |
+| `--json` | Print the result as one JSON document on stdout; progress and the failure summary go to stderr. See [Scripts and CI](#scripts-and-ci---json). |
 
 `run` prints `Running project <id> on branch <ref>` and then `Queued run <run-id>` (the run id is the UUID on that line; the internal execution-log id is no longer printed). With `--watch`: at a terminal one live line shows the status and the elapsed time; piped or logged it prints one line each time the status *changes*. Ctrl-C stops watching, never the run: it exits 130 and prints how to follow or cancel it. A succeeded run ends with `Run completed in 1m 12s.` and `harumi runs download <run-id>`; a failed, cancelled or timed-out run exits 1 and prints the cause first (error, exit code, the last 20 lines of stderr and how many were left out) and `harumi runs get <run-id>` for everything. If the server refuses the run for a reason about the project (HTTP 400, 404, 409 or 422), the message ends with `Run harumi check`. (`--output-dir` is deprecated: it still downloads, with a warning.)
 
@@ -529,6 +531,29 @@ harumi org use [ORG | --personal]
 - **`role`**: `PUT /users/organizations/{id}/users/{user_id}` with `{role}`.
 - **`rm-member`**: `DELETE /users/organizations/{id}/users/{user_id}`, prompting for confirmation unless `--yes`.
 - **`use`**: `ORG` is checked against your organizations first (name or start of an id, saved as the real id), so a name or an organization you do not belong to is refused instead of being saved. With no argument opens a menu of your organizations plus "Personal workspace" (at a terminal; otherwise it lists the choices and fails). `--personal` clears the saved org. Persists `org_id` in `~/.harumi/config.json` (per environment); every later request sends it as `X-Organization`. The header scopes the *read* endpoints (`projects list`); creation reads the workspace from the request body, so `new` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway. It needs the network to check the choice (and a login); if harumi-api cannot be reached at all, a full id is still saved as given, with a note. Replaces `config set-org`.
+
+## Scripts and CI (`--json`)
+
+Every command that reads data takes `--json`: `projects list|get`, `runs list|get`, `files ls`, `share list|get`, `datasources list|get`, `schedules list|get`, `secrets list`, `memories list`, `org list|members`, `specs`, `blueprints`, `usage`, `whoami`, and `compare` (which prints the API's response unchanged). `run --json` is below.
+
+```bash
+harumi run --watch --json | jq -e '.succeeded'      # exit 1 if the run failed or the JSON says it did not succeed
+harumi runs list --json | jq -r '.[] | select(.status=="failed") | .id'
+```
+
+**The contract**
+
+- **stdout is exactly one JSON document**, nothing before or after it: an array for a list, an object for one item. No table, no hint line, no colour, never wrapped.
+- **An empty list is `[]`**, not a sentence.
+- **Errors are unchanged**: a message on stderr, exit 1, empty stdout. A warning (a project list that could not be fully fetched) is on stderr too, so the document stays valid.
+- **Ids are whole, timestamps are ISO 8601, text is exactly as stored.** Output is ASCII-only JSON, so a control character in a value cannot reach your terminal.
+- **Fields are listed by name** (`src/harumi/json_out.py`), not dumped from the API, so nothing internal appears: a file's storage key and a run's signed output URL are left out (`runs get` has `has_output`; `harumi runs download` fetches it), `secrets list` is names only, and `share list` has no token. `share get <id> --json` is the one place the token and URL appear, as `share get` shows them.
+- **No menus.** A command that would pick from a list at a terminal (`projects get`, `share get`, `schedules get`, `org members` with no workspace) says to pass the id instead of opening one.
+- **`runs list --json` is every run**, unlike the table's latest 25; `--limit N` still caps it. `files ls --json` is an object, `{"files": [...], "is_truncated": bool}`, because a listing can be cut and a script has to be able to tell.
+
+**`run --json`** prints `{"run_id", "status", "exit_code", "succeeded", "took_seconds", "error", "watched"}`. Without `--watch` it is printed once the run is queued (`status: "queued"`, `succeeded: null`); with `--watch`, once it finishes. The exit code does not change: `run --watch` exits 1 when the run does not succeed, with or without `--json`.
+
+**Exit codes:** 0 success, 1 any failure (including a watched run that failed), 2 a usage error. Menus are off whenever stdin or stdout is not a terminal, under `CI`, with `TERM=dumb`, or with `HARUMI_NO_INTERACTIVE=1`; a command that needs a choice then fails and lists the choices.
 
 ## Config & credential files
 

@@ -228,4 +228,6 @@ def test_the_reference_describes_the_new_behaviour_not_the_old():
     specs = reference_section("## `specs`", "## `blueprints`")
 
     assert "never prompts" in compare and "RUN_ID" in compare and "harumi runs download" in compare
-    assert "subscription_required" not in specs and "display_name" not in specs  # the old column names
+    # The old *table* column names. `--json` keeps the API's field names for a script, and says so.
+    table_text = specs.split("`--json`", 1)[0] + specs.split("Lists kernel specs", 1)[-1]
+    assert "subscription_required" not in table_text and "display_name" not in table_text
