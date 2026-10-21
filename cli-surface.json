@@ -2183,7 +2183,7 @@
       "params": [
         {
           "opts": [
-            "organization_id"
+            "organization"
           ],
           "secondary_opts": [],
           "kind": "argument",
@@ -2191,7 +2191,7 @@
           "required": true,
           "multiple": false,
           "default": null,
-          "help": "Organization id."
+          "help": "Organization name, or the start of its id."
         },
         {
           "opts": [
@@ -2215,7 +2215,7 @@
           "required": false,
           "multiple": false,
           "default": "member",
-          "help": "owner | admin | member | viewer"
+          "help": "admin | member | viewer"
         },
         {
           "opts": [
@@ -2255,15 +2255,15 @@
       "params": [
         {
           "opts": [
-            "organization_id"
+            "organization"
           ],
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Organization id."
+          "help": "Organization name, or the start of its id. Defaults to the workspace you are in; a terminal picks if neither."
         },
         {
           "opts": [
@@ -2285,7 +2285,7 @@
       "params": [
         {
           "opts": [
-            "organization_id"
+            "organization"
           ],
           "secondary_opts": [],
           "kind": "argument",
@@ -2293,7 +2293,7 @@
           "required": true,
           "multiple": false,
           "default": null,
-          "help": "Organization id."
+          "help": "Organization name, or the start of its id."
         },
         {
           "opts": [
@@ -2323,19 +2323,19 @@
     },
     {
       "path": "org rm",
-      "help": "Delete an organization.",
+      "help": "Delete an organization, its projects and its subscription.",
       "params": [
         {
           "opts": [
-            "organization_id"
+            "organization"
           ],
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "Organization id."
+          "help": "Organization name, or the start of its id. Defaults to the workspace you are in; a terminal picks if neither."
         },
         {
           "opts": [
@@ -2370,7 +2370,7 @@
       "params": [
         {
           "opts": [
-            "organization_id"
+            "organization"
           ],
           "secondary_opts": [],
           "kind": "argument",
@@ -2378,19 +2378,19 @@
           "required": true,
           "multiple": false,
           "default": null,
-          "help": "Organization id."
+          "help": "Organization name, or the start of its id."
         },
         {
           "opts": [
-            "user_id"
+            "member"
           ],
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "User id."
+          "help": "Member's email, or the start of their id. Pick from a list if omitted."
         },
         {
           "opts": [
@@ -2425,7 +2425,7 @@
       "params": [
         {
           "opts": [
-            "organization_id"
+            "organization"
           ],
           "secondary_opts": [],
           "kind": "argument",
@@ -2433,19 +2433,19 @@
           "required": true,
           "multiple": false,
           "default": null,
-          "help": "Organization id."
+          "help": "Organization name, or the start of its id."
         },
         {
           "opts": [
-            "user_id"
+            "member"
           ],
           "secondary_opts": [],
           "kind": "argument",
           "type": "str",
-          "required": true,
+          "required": false,
           "multiple": false,
           "default": null,
-          "help": "User id."
+          "help": "Member's email, or the start of their id. Pick from a list if omitted."
         },
         {
           "opts": [
@@ -2457,7 +2457,7 @@
           "required": true,
           "multiple": false,
           "default": null,
-          "help": "owner | admin | member | viewer"
+          "help": "admin | member | viewer"
         },
         {
           "opts": [
@@ -2487,7 +2487,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Organization id to work in. Pick from a list if omitted."
+          "help": "Organization name, or the start of its id. Pick from a list if omitted."
         },
         {
           "opts": [
@@ -2529,7 +2529,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "New last name."
+          "help": "New last name. \"\" clears it."
         },
         {
           "opts": [
@@ -2541,7 +2541,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "New bio text."
+          "help": "New bio text. \"\" clears it."
         },
         {
           "opts": [

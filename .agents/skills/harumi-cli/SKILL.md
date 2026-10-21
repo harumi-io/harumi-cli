@@ -235,17 +235,17 @@ Not to be confused with `harumi agent-skills install`, which installs the bundle
 ```bash
 harumi org list
 harumi org create <BUSINESS_NAME>
-harumi org rename <ORG_ID> <NEW_NAME>
-harumi org rm <ORG_ID>
-harumi org members <ORG_ID>
-harumi org invite <ORG_ID> --email a@b.com --role member
-harumi org role <ORG_ID> <USER_ID> --role admin
-harumi org rm-member <ORG_ID> <USER_ID>
-harumi org use <ORG_ID>                # persist the org sent as X-Organization
+harumi org rename <ORG> <NEW_NAME>      # <ORG> is a name or the start of an id, not a UUID you have to copy
+harumi org rm [ORG]                     # asks, naming what goes with it; --yes needs the name
+harumi org members [ORG]                # defaults to the workspace you are in
+harumi org invite <ORG> --email a@b.com --role member   # admin | member | viewer; owner is refused
+harumi org role <ORG> [MEMBER] --role admin             # MEMBER is an email or the start of an id
+harumi org rm-member <ORG> [MEMBER]
+harumi org use <ORG>                   # a name or the start of an id; persists the org sent as X-Organization (checked first)
 harumi org use --personal              # back to the personal workspace (no argument at a terminal: a menu)
 
 harumi whoami                          # profile, environment and active org
-harumi profile set --first-name Ana --bio "..."
+harumi profile set --first-name Ana --bio "..."    # --last-name "" / --bio "" clear them
 ```
 
 ## Config & environments

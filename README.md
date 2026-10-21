@@ -66,7 +66,7 @@ harumi dashboard validate --latest
 - `harumi schedules` — CRUD cron schedules that trigger git-ref runs.
 - `harumi secrets` — CRUD project-scoped environment variables.
 - `harumi memories` — list/add/edit/remove the project's memories. (Project skills are files in the repo under `skills/<slug>/SKILL.md`; run `harumi skills` for how to edit them.)
-- `harumi org` — CRUD organizations and manage their members.
+- `harumi org` — manage organizations and their members, by name or email.
 - `harumi profile` — view/update your account profile.
 
 Run `harumi --help` or any subcommand with `--help` for the full flag reference, or see the [command reference](.agents/skills/harumi-cli/references/commands.md) for endpoint-level detail.

@@ -649,6 +649,13 @@ def _format_api_error(exc: ApiError) -> str:
         if hint_url is None:
             return escape(str(exc))
         return f"{escape(str(exc))}\nCheck {hint_url} for platform status, or run [bold]harumi status[/bold]."
+    if exc.code == "mfa_required":
+        # The API wants a fresh authenticator code for this action. The CLI signs in by email code and
+        # has no way to ask for one, so retrying here cannot work: say where it can be done.
+        return (
+            f"{escape(exc.detail)}\n"
+            "The CLI can't ask for your authenticator code. Do this in the web app, where you can enter it."
+        )
     if exc.status_code != 402:
         # `_fail` prints through Rich markup, and server text can hold `[/x]`-style brackets.
         return escape(str(exc))
@@ -1073,10 +1080,28 @@ def whoami(
     for label, value in (
         ("Name", name),
         ("Bio", profile.bio),
-        ("Organization", client.config.org_id),
+        ("Organization", _workspace_name(client)),
     ):
         if value:
-            console.print(f"{label}: {escape(str(value))}")
+            console.print(f"{label}: {escape(_printable(value))}")
+
+
+def _workspace_name(client: Client) -> Optional[str]:
+    """The saved organization as a name, for display; its id, with a pointer, if it can't be found.
+
+    A lookup that fails (offline, or the account no longer belongs to it) must not break `whoami`:
+    its job is to say who you are, and an id is still better than nothing.
+    """
+    org_id = client.config.org_id
+    if not org_id:
+        return None
+    try:
+        known = next((o for o in client.list_organizations() if o.id == org_id), None)
+    except ApiError:
+        return org_id
+    if known:
+        return known.business_name
+    return f"{org_id} (you no longer belong to it; choose another with harumi org use)"
 
 
 @app.command("whats-new")
@@ -1454,17 +1479,20 @@ def profile_show(
 @_handle_errors
 def profile_set(
     first_name: Optional[str] = typer.Option(None, "--first-name", help="New first name."),
-    last_name: Optional[str] = typer.Option(None, "--last-name", help="New last name."),
-    bio: Optional[str] = typer.Option(None, "--bio", help="New bio text."),
+    last_name: Optional[str] = typer.Option(None, "--last-name", help='New last name. "" clears it.'),
+    bio: Optional[str] = typer.Option(None, "--bio", help='New bio text. "" clears it.'),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
     """Update your account profile. Only provided fields are changed."""
     body: dict = {}
-    if first_name:
-        body["first_name"] = first_name
-    if last_name:
-        body["last_name"] = last_name
+    if first_name is not None:
+        if not first_name.strip():
+            _fail("A first name can't be empty. Pass the name you want, e.g. [bold]--first-name Ana[/bold].")
+        body["first_name"] = first_name.strip()
+    # Optional on the server, so an empty value is a real request to clear it, not "not given".
+    if last_name is not None:
+        body["last_name"] = last_name.strip()
     if bio is not None:
         body["bio"] = bio
 
@@ -1473,7 +1501,7 @@ def profile_set(
 
     client = _get_client(api_url=api_url, org=org)
     p = client.update_profile(body)
-    console.print(f"[bold green]Updated[/bold green] profile for [bold]{p.email}[/bold].")
+    console.print(f"[bold green]Updated[/bold green] profile for [bold]{escape(str(p.email))}[/bold].")
 
 
 # ---------------------------------------------------------------------------
@@ -1487,7 +1515,7 @@ app.add_typer(config_app, name="config", hidden=True)
 @_handle_errors
 def org_use(
     org_id: Optional[str] = typer.Argument(
-        None, help="Organization id to work in. Pick from a list if omitted."
+        None, help="Organization name, or the start of its id. Pick from a list if omitted."
     ),
     personal: bool = typer.Option(
         False, "--personal", help="Work in your personal workspace instead of an organization."
@@ -1526,10 +1554,13 @@ def org_use(
         org_id = str(picked)
         label = next((o.business_name for o in orgs if o.id == org_id), org_id)
     else:
-        label = org_id
+        # What was typed may be a name or the start of an id. Saving it as typed would send an
+        # organization that does not exist with every later request, and nothing would say why.
+        found = _find_org(_get_client().list_organizations(), org_id)
+        org_id, label = found.id, found.business_name
 
     config.save_org_id(org_id)
-    console.print(f"Workspace set to organization [bold]{escape(label)}[/bold].")
+    console.print(f"Workspace set to organization [bold]{escape(_printable(label))}[/bold].")
 
 
 config_app.command("set-org")(_deprecated("harumi config set-org", "harumi org use <ORG_ID>")(org_use))
@@ -5541,6 +5572,105 @@ app.add_typer(org_app, name="org")
 org_app.command("use")(org_use)
 
 
+_ORG_ROLES = ("admin", "member", "viewer")  # "owner" is the creator's alone; see `_check_org_role`
+
+
+def _check_org_role(role: str) -> str:
+    """The role to send: lower-cased, and one the server will take, or a refusal before any request."""
+    wanted = role.strip().lower()
+    if wanted == "owner":
+        _fail(
+            "The owner role can't be given: an organization has one owner, the person who created it. "
+            "Transfer ownership from the organization's settings in the web app."
+        )
+    if wanted in _ORG_ROLES:
+        return wanted
+    close = difflib.get_close_matches(wanted, _ORG_ROLES, n=1, cutoff=0.5)
+    hint = f" Did you mean {close[0]}?" if close else ""
+    _fail(f"Unknown role {escape(repr(role))}.{hint} Use one of: {', '.join(_ORG_ROLES)}.")
+    return wanted
+
+
+def _find_org(orgs: list, typed: str):
+    """The one organization `typed` names: its exact name (any case), or the start of its id."""
+    low = typed.strip().lower()
+    by_name = [o for o in orgs if o.business_name.lower() == low]
+    if len(by_name) == 1:
+        return by_name[0]
+    candidates = by_name or [o for o in orgs if low and o.id.lower().startswith(low)]
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        names = ", ".join(f"{_printable(o.business_name)} ({o.id[:8]})" for o in candidates)
+        _fail(f"'{escape(typed)}' matches more than one organization: {escape(names)}. Use more of the id.")
+    _fail(f"You don't belong to an organization '{escape(typed)}'. See yours with [bold]harumi org list[/bold].")
+
+
+def _org_choice(client: Client, typed: Optional[str], action: str, *, destructive: bool = False) -> tuple[str, str]:
+    """(id, name) of the organization to act on.
+
+    Given, it is looked up by name or id start. Not given, it is the workspace you are in; failing
+    that a terminal gets a picker and anything else the list of choices. A destructive action never
+    falls back to the current workspace, because that would delete whatever you happen to be in.
+    """
+    orgs = client.list_organizations()
+    if typed is not None:
+        found = _find_org(orgs, typed)
+        return found.id, found.business_name
+    if not orgs:
+        _fail("You don't belong to any organization. Create one with [bold]harumi org create \"Name\"[/bold].")
+    current = None if destructive else Config.load().org_id
+    known = next((o for o in orgs if o.id == current), None)
+    if known:
+        return known.id, known.business_name
+    picked = interactive.select(
+        f"Which organization do you want to {action}?",
+        [interactive.Option(_printable(o.business_name), o.id, hint=f"{o.role_name or o.role or ''}  {o.id[:8]}") for o in orgs],
+        flag="the ORGANIZATION argument",
+    )
+    if picked is None:
+        raise typer.Exit(code=0)
+    chosen = next(o for o in orgs if o.id == picked)
+    return chosen.id, chosen.business_name
+
+
+def _member_label(m) -> str:
+    name = " ".join(part for part in (m.first_name, m.last_name) if part)
+    return _printable(m.email or name or m.user_id)
+
+
+def _find_member(members: list, typed: str):
+    """The one member `typed` names: an email (any case), or the start of a user id."""
+    low = typed.strip().lower()
+    by_email = [m for m in members if (m.email or "").lower() == low]
+    candidates = by_email or [m for m in members if low and str(m.user_id).lower().startswith(low)]
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        _fail(f"'{escape(typed)}' matches more than one member. Give more of the id (see [bold]harumi org members[/bold]).")
+    _fail(f"No member '{escape(typed)}' in this organization. See them with [bold]harumi org members[/bold].")
+
+
+def _member_choice(client: Client, org_id: str, typed: Optional[str], action: str):
+    members = client.list_organization_members(org_id)
+    if typed is not None:
+        return _find_member(members, typed)
+    changeable = [m for m in members if m.role != "owner"]  # the owner can be neither demoted nor removed
+    if not changeable:
+        _fail("There is nobody else in this organization.")
+    picked = interactive.select(
+        f"Which member do you want to {action}?",
+        [interactive.Option(_member_label(m), str(m.user_id), hint=f"{m.role}{', invited' if m.pending else ''}  {str(m.user_id)[:8]}") for m in changeable],
+        flag="the MEMBER argument",
+    )
+    if picked is None:
+        raise typer.Exit(code=0)
+    return next(m for m in changeable if str(m.user_id) == picked)
+
+
+_ORG_ARG = typer.Argument(None, help="Organization name, or the start of its id. Defaults to the workspace you are in; a terminal picks if neither.")
+
+
 @org_app.command("list")
 @_handle_errors
 def org_list(
@@ -5550,13 +5680,18 @@ def org_list(
     client = _get_client(api_url=api_url)
     orgs = client.list_organizations()
     if not orgs:
-        console.print("No organizations found.")
+        console.print("You don't belong to any organization. Create one with [bold]harumi org create \"Name\"[/bold].")
         return
 
-    table = Table("id", "business_name", "role")
+    table = Table("id", "name", "role")
+    table.columns[0].no_wrap = True
     for o in orgs:
-        table.add_row(o.id, o.business_name, o.role or o.role_name or "")
+        table.add_row(_cell(o.id), _cell(o.business_name), _cell(o.role_name or o.role or ""))
     console.print(table)
+    current = Config.load().org_id
+    known = next((o for o in orgs if o.id == current), None)
+    where = escape(_printable(known.business_name)) if known else "your personal workspace"
+    console.print(f"[dim]Working in: {where}. Change it with[/dim] [bold]harumi org use[/bold]")
 
 
 @org_app.command("create")
@@ -5568,102 +5703,138 @@ def org_create(
     """Create a new organization."""
     client = _get_client(api_url=api_url)
     org = client.create_organization(business_name)
-    console.print(f"[bold green]Created[/bold green] organization [bold]{org.business_name}[/bold] (id={org.id}).")
+    console.print(f"[bold green]Created[/bold green] organization [bold]{escape(_printable(org.business_name))}[/bold].")
+    console.print(f"Work in it with [bold]harumi org use {org.id}[/bold], and add people with [bold]harumi org invite[/bold].")
 
 
 @org_app.command("rename")
 @_handle_errors
 def org_rename(
-    organization_id: str = typer.Argument(..., help="Organization id."),
+    organization: str = typer.Argument(..., help="Organization name, or the start of its id."),
     business_name: str = typer.Argument(..., help="New organization name."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """Rename an organization."""
     client = _get_client(api_url=api_url)
-    org = client.update_organization(organization_id, business_name)
-    console.print(f"[bold green]Renamed[/bold green] organization to [bold]{org.business_name}[/bold].")
+    org_id, _ = _org_choice(client, organization, "rename")
+    org = client.update_organization(org_id, business_name)
+    console.print(f"[bold green]Renamed[/bold green] organization to [bold]{escape(_printable(org.business_name))}[/bold].")
 
 
 @org_app.command("rm")
 @_handle_errors
 def org_rm(
-    organization_id: str = typer.Argument(..., help="Organization id."),
+    organization: Optional[str] = _ORG_ARG,
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
-    """Delete an organization. This cannot be undone."""
-    if not yes and not typer.confirm(f"Delete organization '{organization_id}'? This cannot be undone."):
+    """Delete an organization, its projects and its subscription. This cannot be undone."""
+    if organization is None and yes:
+        # --yes removes the question, so nothing would stand between a slip in a list and a deleted organization.
+        _fail("Say which organization to delete: [bold]harumi org rm <name> --yes[/bold]. See yours with [bold]harumi org list[/bold].")
+    client = _get_client(api_url=api_url)
+    org_id, name = _org_choice(client, organization, "delete", destructive=True)
+
+    if not yes and not typer.confirm(  # plain text: not Rich markup
+        f"Delete organization '{_printable(name)}'? Every project in it is deleted, its subscription is cancelled "
+        "and its members lose access. This cannot be undone."
+    ):
         console.print("Aborted.")
         return
 
-    client = _get_client(api_url=api_url)
-    client.delete_organization(organization_id)
-    console.print(f"[bold red]Deleted[/bold red] organization [bold]{organization_id}[/bold].")
+    client.delete_organization(org_id)
+    console.print(f"[bold red]Deleted[/bold red] organization [bold]{escape(_printable(name))}[/bold].")
+    config = Config.load()
+    if config.org_id == org_id:
+        # The saved workspace is gone: requests would carry an id that no longer exists.
+        config.clear_org_id()
+        console.print("You were working in it, so you are now in your [bold]personal workspace[/bold].")
 
 
 @org_app.command("members")
 @_handle_errors
 def org_members(
-    organization_id: str = typer.Argument(..., help="Organization id."),
+    organization: Optional[str] = _ORG_ARG,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """List an organization's members."""
     client = _get_client(api_url=api_url)
-    members = client.list_organization_members(organization_id)
+    org_id, name = _org_choice(client, organization, "list the members of")
+    members = client.list_organization_members(org_id)
     if not members:
         console.print("No members found.")
         return
 
-    table = Table("user_id", "email", "role", "pending")
+    table = Table("member", "email", "role", "id")
+    table.columns[3].no_wrap = True
     for m in members:
-        table.add_row(m.user_id, m.email or "", m.role, "yes" if m.pending else "")
+        full = " ".join(part for part in (m.first_name, m.last_name) if part)
+        table.add_row(
+            _cell(full or ""),
+            _cell(m.email or ""),
+            _cell(m.role + (" (invited)" if m.pending else "")),
+            _cell(str(m.user_id)[:8]),
+        )
     console.print(table)
+    console.print(f"[dim]{escape(_printable(name))}. Change a role or remove someone by email or id.[/dim]")
 
 
 @org_app.command("invite")
 @_handle_errors
 def org_invite(
-    organization_id: str = typer.Argument(..., help="Organization id."),
+    organization: str = typer.Argument(..., help="Organization name, or the start of its id."),
     email: str = typer.Option(..., "--email", help="Email of the person to invite."),
-    role: str = typer.Option("member", "--role", help="owner | admin | member | viewer"),
+    role: str = typer.Option("member", "--role", help="admin | member | viewer"),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """Invite a member to an organization."""
+    role = _check_org_role(role)
     client = _get_client(api_url=api_url)
-    member = client.invite_organization_member(organization_id, email, role)
-    console.print(f"[bold green]Invited[/bold green] {email} as [bold]{member.role}[/bold].")
+    org_id, _ = _org_choice(client, organization, "invite someone to")
+    member = client.invite_organization_member(org_id, email, role)
+    console.print(f"[bold green]Invited[/bold green] {escape(email)} as [bold]{member.role}[/bold].")
 
 
 @org_app.command("role")
 @_handle_errors
 def org_role(
-    organization_id: str = typer.Argument(..., help="Organization id."),
-    user_id: str = typer.Argument(..., help="User id."),
-    role: str = typer.Option(..., "--role", help="owner | admin | member | viewer"),
+    organization: str = typer.Argument(..., help="Organization name, or the start of its id."),
+    member: Optional[str] = typer.Argument(None, help="Member's email, or the start of their id. Pick from a list if omitted."),
+    role: str = typer.Option(..., "--role", help="admin | member | viewer"),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """Change a member's role."""
+    role = _check_org_role(role)
     client = _get_client(api_url=api_url)
-    member = client.update_organization_member_role(organization_id, user_id, role)
-    console.print(f"[bold green]Updated[/bold green] role to [bold]{member.role}[/bold].")
+    org_id, _ = _org_choice(client, organization, "change a member of")
+    target = _member_choice(client, org_id, member, "change")
+    with _pointing_to("harumi org members"):
+        updated = client.update_organization_member_role(org_id, str(target.user_id), role)
+    console.print(f"[bold green]Updated[/bold green] {escape(_member_label(target))} to [bold]{updated.role}[/bold].")
 
 
 @org_app.command("rm-member")
 @_handle_errors
 def org_rm_member(
-    organization_id: str = typer.Argument(..., help="Organization id."),
-    user_id: str = typer.Argument(..., help="User id."),
+    organization: str = typer.Argument(..., help="Organization name, or the start of its id."),
+    member: Optional[str] = typer.Argument(None, help="Member's email, or the start of their id. Pick from a list if omitted."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """Remove a member from an organization."""
-    if not yes and not typer.confirm(f"Remove user '{user_id}' from the organization?"):
+    if member is None and yes:
+        _fail("Say who to remove: [bold]harumi org rm-member <organization> <email> --yes[/bold]. See them with [bold]harumi org members[/bold].")
+    client = _get_client(api_url=api_url)
+    org_id, org_name = _org_choice(client, organization, "remove someone from")
+    target = _member_choice(client, org_id, member, "remove")
+
+    if not yes and not typer.confirm(f"Remove {_member_label(target)} from '{_printable(org_name)}'?"):  # plain text: not markup
         console.print("Aborted.")
         return
 
-    client = _get_client(api_url=api_url)
-    client.remove_organization_member(organization_id, user_id)
-    console.print(f"[bold red]Removed[/bold red] user [bold]{user_id}[/bold].")
+    with _pointing_to("harumi org members"):
+        client.remove_organization_member(org_id, str(target.user_id))
+    console.print(f"[bold red]Removed[/bold red] {escape(_member_label(target))}.")
 
 
 # ---------------------------------------------------------------------------

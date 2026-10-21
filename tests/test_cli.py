@@ -3254,6 +3254,7 @@ def test_deprecated_names_are_hidden_from_help_and_the_surface():
 )
 def test_a_deprecated_name_still_runs_and_names_its_replacement(api, argv, method, route, use):
     api.route(method, route, [] if argv[0] == "repo" else {**SHARE_LINK, "id": "x", "name": "x"})
+    api.route("GET", "/api/users/organizations", [{"id": "org-1", "business_name": "Acme", "role": "owner"}])  # `org rm` names what it deletes
 
     result = runner.invoke(cli.app, argv)
 
@@ -3265,6 +3266,7 @@ def test_a_deprecated_name_still_runs_and_names_its_replacement(api, argv, metho
 
 
 def test_org_remove_is_now_org_rm_member_and_org_delete_is_org_rm(api):
+    api.route("GET", "/api/users/organizations", [{"id": "org-1", "business_name": "Acme", "role": "owner"}])
     api.route("DELETE", "/api/users/organizations/org-1", None)
 
     removed = runner.invoke(cli.app, ["org", "rm", "org-1", "--yes"])
@@ -3274,12 +3276,18 @@ def test_org_remove_is_now_org_rm_member_and_org_delete_is_org_rm(api):
     assert "deprecated" not in removed.output
     # `org rm` takes one argument; the old two-argument form is a usage error, not a silent org delete.
     assert stale.exit_code != 0
-    assert api.paths() == ["/api/users/organizations/org-1"]
+    # The organization is looked up first so the question can name it, then deleted: once.
+    assert api.paths() == ["/api/users/organizations", "/api/users/organizations/org-1"]
 
 
-def test_org_use_persists_the_org_and_the_old_config_name_still_works():
+def test_org_use_persists_the_org_and_the_old_config_name_still_works(api):
     from harumi.config import Config
 
+    # The id is checked against your organizations before it is saved, so they have to exist.
+    api.route("GET", "/api/users/organizations", [
+        {"id": "org-9", "business_name": "Nine", "role": "owner"},
+        {"id": "org-10", "business_name": "Ten", "role": "owner"},
+    ])
     new = runner.invoke(cli.app, ["org", "use", "org-9"])
     assert new.exit_code == 0, new.output
     assert Config.load().org_id == "org-9"

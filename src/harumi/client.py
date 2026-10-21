@@ -203,9 +203,37 @@ class ApiClient:
                 raise ApiError(0, f"Transfer interrupted: {exc}") from exc
 
 
+_HIDDEN_LOC = {"body", "query", "path", "header", "cookie"}
+
+
+def _detail_text(detail: object) -> tuple[str, Optional[str]]:
+    """The message harumi-api sent, as text, and its machine-readable `code` if it sent one.
+
+    `detail` is a string for most errors, but a dict for a second-factor refusal
+    (`{"code": "mfa_required", "message": ...}`) and a list for a validation error. Printing
+    those as they come shows a Python repr, and the validation list echoes back the input that
+    failed (`input`), which can be a password or a token. Only the field and the reason are kept.
+    """
+    if isinstance(detail, dict):
+        code = detail.get("code") if isinstance(detail.get("code"), str) else None
+        message = detail.get("message") or detail.get("detail")
+        return (str(message) if message else str(code or "")), code
+    if isinstance(detail, list):
+        parts = []
+        for item in detail:
+            if not isinstance(item, dict):
+                parts.append(str(item))
+                continue
+            where = ".".join(str(x) for x in item.get("loc", []) if str(x) not in _HIDDEN_LOC)
+            msg = str(item.get("msg", "invalid value"))
+            parts.append(f"{where}: {msg}" if where else msg)
+        return "; ".join(parts), None
+    return str(detail), None
+
+
 def _raise_for_status(response: httpx.Response, streamed: bool = False) -> None:
     if response.status_code >= 400:
-        detail = "" if streamed else response.text
+        detail: object = "" if streamed else response.text
         code = None
         if not streamed:
             try:
@@ -217,7 +245,9 @@ def _raise_for_status(response: httpx.Response, streamed: bool = False) -> None:
                     code = body["code"]
             except Exception:
                 pass
-        raise ApiError(response.status_code, str(detail) or response.reason_phrase, code=code)
+        text, detail_code = _detail_text(detail)
+        code = code or detail_code
+        raise ApiError(response.status_code, text or response.reason_phrase, code=code)
 
 
 # harumi-api scans an uploaded file for up to `clamav_scan_timeout_seconds` (120) before it answers.

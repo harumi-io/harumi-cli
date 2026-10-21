@@ -100,7 +100,7 @@ Staging is only offered to `@harumi.io` emails as a convenience; the real access
 harumi profile set [--first-name N] [--last-name N] [--bio TEXT] [--api-url URL] [--org ORG]
 ```
 
-`set` sends only the flags you pass as a partial update (`PUT /users/profile`); errors locally with "No fields to update" if none are given.
+`set` sends only the flags you pass as a partial update (`POST /users/profile`); errors locally with "No fields to update" if none are given, and with an empty `--first-name` (the profile requires one). `--last-name ""` and `--bio ""` clear those fields.
 
 ## `usage`
 
@@ -507,26 +507,28 @@ Copies the bundled `harumi-cli` and `harumi-cli-setup` skills onto this machine 
 ```
 harumi org list [--api-url URL]
 harumi org create BUSINESS_NAME [--api-url URL]
-harumi org rename ORG_ID BUSINESS_NAME [--api-url URL]
-harumi org rm ORG_ID [--yes] [--api-url URL]
-harumi org members ORG_ID [--api-url URL]
-harumi org invite ORG_ID --email EMAIL [--role ROLE] [--api-url URL]
-harumi org role ORG_ID USER_ID --role ROLE [--api-url URL]
-harumi org rm-member ORG_ID USER_ID [--yes] [--api-url URL]
-harumi org use [ORG_ID | --personal]
+harumi org rename ORG NEW_NAME [--api-url URL]
+harumi org rm [ORG] [--yes] [--api-url URL]
+harumi org members [ORG] [--api-url URL]
+harumi org invite ORG --email EMAIL [--role ROLE] [--api-url URL]
+harumi org role ORG [MEMBER] --role ROLE [--api-url URL]
+harumi org rm-member ORG [MEMBER] [--yes] [--api-url URL]
+harumi org use [ORG | --personal]
 ```
 
-`--role` is one of `owner | admin | member | viewer`.
+**`ORG`** is the organization's name (any case) or the start of its id; **`MEMBER`** is an email or the start of a user id. `members` and `rm` also take no `ORG`: `members` then uses the workspace you are in (a terminal picks if there is none), while `rm` never does that and always asks, since it would delete the organization you are standing in; `rm --yes` needs the name. With no `MEMBER`, a terminal gets a picker (without the owner) and anything else the list of choices.
 
-- **`list`**: `GET /users/organizations`.
+`--role` is one of `admin | member | viewer`, in any case. **`owner` is refused before any request**: an organization has one owner (its creator), the server never grants it through `invite` or `role`, and moving it is a separate "transfer ownership" action the CLI does not have (use the web app).
+
+- **`list`**: `GET /users/organizations`; ends with the workspace you are working in.
 - **`create`**: `POST /users/organizations` with `{business_name}`.
-- **`rename`**: `PUT /users/organizations/{id}` with `{business_name}`.
-- **`rm`**: `DELETE /users/organizations/{id}`, prompting for confirmation unless `--yes`. **Permanent**: unlike projects, an organization is not soft-deleted (harumi-api purges its projects at once and cancels its subscription), so this is the one delete here with no way back.
-- **`members`**: `GET /users/organizations/{id}/users`.
+- **`rename`**: `PATCH /users/organizations/{id}` with `{business_name}`.
+- **`rm`**: `DELETE /users/organizations/{id}`, prompting for confirmation unless `--yes`. **Permanent**: unlike projects, an organization is not soft-deleted (harumi-api purges its projects at once and cancels its subscription), so this is the one delete here with no way back. The question names the organization and what goes with it. If it was the workspace you were working in, the saved choice is cleared and you are back in your personal workspace. Only the owner can delete it; a 403 `mfa_required` (the organization requires a fresh authenticator code) is reported as "do this in the web app", as the CLI cannot ask for one.
+- **`members`**: `GET /users/organizations/{id}/users`; a table of name, email, role (`(invited)` while pending) and the first 8 characters of the user id.
 - **`invite`**: `POST /users/organizations/{id}/users` with `{email, role}`.
 - **`role`**: `PUT /users/organizations/{id}/users/{user_id}` with `{role}`.
 - **`rm-member`**: `DELETE /users/organizations/{id}/users/{user_id}`, prompting for confirmation unless `--yes`.
-- **`use`**: with no argument opens a menu of your organizations plus "Personal workspace" (at a terminal; otherwise it lists the choices and fails). `--personal` clears the saved org. Persists `org_id` in `~/.harumi/config.json` (per environment); every later request sends it as `X-Organization`. The header scopes the *read* endpoints (`projects list`); creation reads the workspace from the request body, so `new` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway. No network call. Replaces `config set-org`.
+- **`use`**: `ORG` is checked against your organizations first (name or start of an id, saved as the real id), so a name or an organization you do not belong to is refused instead of being saved. With no argument opens a menu of your organizations plus "Personal workspace" (at a terminal; otherwise it lists the choices and fails). `--personal` clears the saved org. Persists `org_id` in `~/.harumi/config.json` (per environment); every later request sends it as `X-Organization`. The header scopes the *read* endpoints (`projects list`); creation reads the workspace from the request body, so `new` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway. No network call. Replaces `config set-org`.
 
 ## Config & credential files
 
