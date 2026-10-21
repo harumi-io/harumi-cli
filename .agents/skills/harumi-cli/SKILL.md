@@ -248,6 +248,10 @@ harumi whoami                          # profile, environment and active org
 harumi profile set --first-name Ana --bio "..."    # --last-name "" / --bio "" clear them
 ```
 
+## Scripts and CI
+
+Read commands take `--json`: stdout is one JSON document and nothing else (an array for a list, `[]` when empty), errors stay on stderr with exit 1. `harumi run --watch --json` prints `{"run_id","status","exit_code","succeeded",...}` and still exits 1 if the run fails. Prefer it to parsing a table; the contract and the list of commands are in [references/commands.md](references/commands.md#scripts-and-ci---json).
+
 ## Config & environments
 
 There are two built-in environments, selectable in the CLI:

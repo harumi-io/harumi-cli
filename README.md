@@ -69,6 +69,8 @@ harumi dashboard validate --latest
 - `harumi org` — manage organizations and their members, by name or email.
 - `harumi profile` — view/update your account profile.
 
+In scripts and CI, read commands take `--json` (one JSON document on stdout, nothing else); `harumi run --watch --json` gives the result as data and exits 1 if the run fails. See [Scripts and CI](.agents/skills/harumi-cli/references/commands.md#scripts-and-ci---json).
+
 Run `harumi --help` or any subcommand with `--help` for the full flag reference, or see the [command reference](.agents/skills/harumi-cli/references/commands.md) for endpoint-level detail.
 
 ## Execution model
