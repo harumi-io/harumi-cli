@@ -408,10 +408,12 @@ def test_the_next_command_prints_to_stdout_again_after_a_json_run(backend):
 
 
 def test_a_json_run_that_dies_early_still_restores_stdout(backend, monkeypatch):
+    import sys
+
     backend([{"status": "queued"}])
     monkeypatch.setattr(cli, "is_dirty", lambda: (_ for _ in ()).throw(cli.GitError("git broke")))
-    assert cli.console._file is None  # unset: it follows sys.stdout
+    before = sys.stdout
 
     result = _run_json()
 
-    assert result.exit_code == 1 and cli.console._file is None
+    assert result.exit_code == 1 and sys.stdout is before and cli._json_stream == []

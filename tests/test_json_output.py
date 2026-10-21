@@ -323,3 +323,18 @@ def test_usage_without_a_plan_says_so_as_data(api, monkeypatch):
     monkeypatch.setattr(api, "handler", no_plan)
 
     assert j(api, "usage") == {"workspace": None, "active": False, "reason": "no_subscription"}
+
+
+@pytest.mark.parametrize("org_id, expected", [(None, "no_subscription"), (ORG, "org_not_subscribed")])
+def test_usage_without_a_plan_gives_the_cause_the_table_would_even_when_the_server_sends_none(api, monkeypatch, org_id, expected):
+    orig = api.handler
+    ent = {"paywall_enabled": True, "personal": {"active": False, "tier": "none"}, "organizations": [{"customer_id": ORG, "name": "Acme", "active": False, "tier": "none"}]}
+
+    def no_plan(request):
+        return httpx.Response(200, json=ent) if request.url.path.endswith("/billing/entitlement/me") else orig(request)
+
+    monkeypatch.setattr(api, "handler", no_plan)
+    if org_id:
+        config.Config.load().save_org_id(org_id)
+
+    assert j(api, "usage")["reason"] == expected

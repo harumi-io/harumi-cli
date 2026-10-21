@@ -3243,7 +3243,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "How many of the latest runs to show (default 25). Use --all for every run."
+          "help": "How many of the latest runs to show (default 25). Use --all for every run. With --json it is every run unless you pass this."
         },
         {
           "opts": [

@@ -527,26 +527,30 @@ _FULL_ID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F
 _JSON = typer.Option(False, "--json", help="Print JSON on stdout instead of a table, for scripts.")
 
 
+# The stream `--json` documents are written to. Normally sys.stdout; while a command's talk is
+# redirected to stderr (below) it is the real stdout, remembered here.
+_json_stream: list = []
+
+
 def _data_on_stdout(fn):
     """With --json, a command's talk (progress, hints, failure summaries) goes to stderr.
 
     stdout then carries the one document and nothing else, so `harumi run --watch --json | jq` works
-    and a CI log still shows what happened. Restored afterwards, whatever the command did.
+    and a CI log still shows what happened. Done by pointing sys.stdout at stderr for the call: the
+    Rich console follows sys.stdout when it has no file of its own, so nothing private is touched and
+    nothing needs restoring by hand. The document itself goes to the stream remembered in `_json_stream`.
     """
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if not kwargs.get("as_json"):
             return fn(*args, **kwargs)
-        # `console.file` is not a setting but a lookup: unset, it follows whatever sys.stdout is at the
-        # moment. Restoring what it resolved to would pin the console to this call's stream, so what
-        # is put back is the unset state itself (`_file`).
-        saved = console._file
-        console.file = sys.stderr
+        _json_stream.append(sys.stdout)
         try:
-            return fn(*args, **kwargs)
+            with contextlib.redirect_stdout(sys.stderr):
+                return fn(*args, **kwargs)
         finally:
-            console._file = saved
+            _json_stream.pop()
 
     return wrapper
 
@@ -566,7 +570,7 @@ def _run_record(run_id: Optional[str], status: str, *, watched: bool, run=None) 
 
 def _emit_json(data: object) -> None:
     """The document, and nothing else, on stdout. typer.echo, not the Rich console: no wrapping or colour."""
-    typer.echo(json_out.dumps(data))
+    typer.echo(json_out.dumps(data), file=_json_stream[-1] if _json_stream else None)
 
 
 def _cell(value: object) -> Text:
@@ -1430,7 +1434,8 @@ def usage(
         where = json_out.workspace(org_id, name)
         if ent is not None and ent.paywall_enabled and workspace is not None and not workspace.active:
             # No plan: the human view stops here too, and there is no usage to report.
-            _emit_json({"workspace": where, "active": False, "reason": workspace.reason})
+            reason = workspace.reason or ("org_not_subscribed" if org_id else "no_subscription")  # as the table says
+            _emit_json({"workspace": where, "active": False, "reason": reason})
             return
         _emit_json({"workspace": where, "active": True, **json_out.usage(client.get_credit_usage())})
         return
@@ -3113,7 +3118,7 @@ def runs_list(
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
     limit: Optional[int] = typer.Option(
-        None, "--limit", "-n", min=1, help=f"How many of the latest runs to show (default {RUNS_SHOWN}). Use --all for every run."
+        None, "--limit", "-n", min=1, help=f"How many of the latest runs to show (default {RUNS_SHOWN}). Use --all for every run. With --json it is every run unless you pass this."
     ),
     all_: bool = typer.Option(False, "--all", help="Show every run, however many there are."),
 ) -> None:
