@@ -177,12 +177,12 @@ def test_organization_deletion_still_says_it_is_permanent(monkeypatch):
         sent.append(f"{request.method} {request.url.path}")
         if request.method != "GET":
             raise AssertionError("deleted without asking")
-        return httpx.Response(200, json=[{"id": "org-1", "business_name": "Acme", "role": "owner"}])  # looked up to name it
+        return httpx.Response(200, json=[{"id": "6d1c0aa5-0000-4000-8000-0000000000a1", "business_name": "Acme", "role": "owner"}])  # looked up to name it
 
     monkeypatch.setattr(cli, "_get_client", lambda *a, **k: Client(api_url="https://api.harumi.io/api", transport=httpx.MockTransport(handler)))
     monkeypatch.setattr(cli.typer, "confirm", lambda text, **k: asked.append(text) or False)
 
-    runner.invoke(cli.app, ["org", "rm", "org-1"])
+    runner.invoke(cli.app, ["org", "rm", "6d1c0aa5-0000-4000-8000-0000000000a1"])
 
     assert asked and "cannot be undone" in asked[0] and "organization" in asked[0]
     assert "Acme" in asked[0] and "Every project in it is deleted" in asked[0]  # it names what goes

@@ -1556,8 +1556,16 @@ def org_use(
     else:
         # What was typed may be a name or the start of an id. Saving it as typed would send an
         # organization that does not exist with every later request, and nothing would say why.
-        found = _find_org(_get_client().list_organizations(), org_id)
-        org_id, label = found.id, found.business_name
+        try:
+            found = _find_org(_get_client().list_organizations(), org_id)
+            org_id, label = found.id, found.business_name
+        except ApiUnreachableError:
+            # Offline (or the API is down). A full id is unambiguous, so it can still be saved, as it always
+            # could; a name or a cut id cannot be resolved without the list.
+            if not _FULL_ID.match(org_id):
+                raise
+            label = org_id
+            err_console.print("[yellow]Note:[/yellow] could not reach harumi-api to check it, so it was saved as given.")
 
     config.save_org_id(org_id)
     console.print(f"Workspace set to organization [bold]{escape(_printable(label))}[/bold].")
@@ -5591,18 +5599,27 @@ def _check_org_role(role: str) -> str:
     return wanted
 
 
-def _find_org(orgs: list, typed: str):
-    """The one organization `typed` names: its exact name (any case), or the start of its id."""
+_DESTRUCTIVE_MIN_PREFIX = 8  # a first UUID group: enough that a slip or a stray "9" names nothing
+
+
+def _find_org(orgs: list, typed: str, *, min_prefix: int = 1):
+    """The one organization `typed` names: its exact name (any case), or the start of its id.
+
+    `min_prefix` is how much of an id counts as naming it. A permanent delete asks for a whole first
+    group of the UUID, so `harumi org rm 9 --yes` cannot match the one organization starting with 9.
+    """
     low = typed.strip().lower()
     by_name = [o for o in orgs if o.business_name.lower() == low]
     if len(by_name) == 1:
         return by_name[0]
-    candidates = by_name or [o for o in orgs if low and o.id.lower().startswith(low)]
+    candidates = by_name or [o for o in orgs if len(low) >= min_prefix and o.id.lower().startswith(low)]
     if len(candidates) == 1:
         return candidates[0]
     if len(candidates) > 1:
         names = ", ".join(f"{_printable(o.business_name)} ({o.id[:8]})" for o in candidates)
         _fail(f"'{escape(typed)}' matches more than one organization: {escape(names)}. Use more of the id.")
+    if min_prefix > 1 and 0 < len(low) < min_prefix and any(o.id.lower().startswith(low) for o in orgs):
+        _fail(f"'{escape(typed)}' is too short to name an organization for this. Use its name or at least {min_prefix} characters of its id.")
     _fail(f"You don't belong to an organization '{escape(typed)}'. See yours with [bold]harumi org list[/bold].")
 
 
@@ -5615,7 +5632,7 @@ def _org_choice(client: Client, typed: Optional[str], action: str, *, destructiv
     """
     orgs = client.list_organizations()
     if typed is not None:
-        found = _find_org(orgs, typed)
+        found = _find_org(orgs, typed, min_prefix=_DESTRUCTIVE_MIN_PREFIX if destructive else 1)
         return found.id, found.business_name
     if not orgs:
         _fail("You don't belong to any organization. Create one with [bold]harumi org create \"Name\"[/bold].")
@@ -5639,11 +5656,11 @@ def _member_label(m) -> str:
     return _printable(m.email or name or m.user_id)
 
 
-def _find_member(members: list, typed: str):
-    """The one member `typed` names: an email (any case), or the start of a user id."""
+def _find_member(members: list, typed: str, *, min_prefix: int = 1):
+    """The one member `typed` names: an email (any case), or the start of a user id (`min_prefix` long)."""
     low = typed.strip().lower()
     by_email = [m for m in members if (m.email or "").lower() == low]
-    candidates = by_email or [m for m in members if low and str(m.user_id).lower().startswith(low)]
+    candidates = by_email or [m for m in members if len(low) >= min_prefix and str(m.user_id).lower().startswith(low)]
     if len(candidates) == 1:
         return candidates[0]
     if len(candidates) > 1:
@@ -5651,10 +5668,10 @@ def _find_member(members: list, typed: str):
     _fail(f"No member '{escape(typed)}' in this organization. See them with [bold]harumi org members[/bold].")
 
 
-def _member_choice(client: Client, org_id: str, typed: Optional[str], action: str):
+def _member_choice(client: Client, org_id: str, typed: Optional[str], action: str, *, destructive: bool = False):
     members = client.list_organization_members(org_id)
     if typed is not None:
-        return _find_member(members, typed)
+        return _find_member(members, typed, min_prefix=_DESTRUCTIVE_MIN_PREFIX if destructive else 1)
     changeable = [m for m in members if m.role != "owner"]  # the owner can be neither demoted nor removed
     if not changeable:
         _fail("There is nobody else in this organization.")
@@ -5744,11 +5761,15 @@ def org_rm(
 
     client.delete_organization(org_id)
     console.print(f"[bold red]Deleted[/bold red] organization [bold]{escape(_printable(name))}[/bold].")
-    config = Config.load()
-    if config.org_id == org_id:
-        # The saved workspace is gone: requests would carry an id that no longer exists.
-        config.clear_org_id()
-        console.print("You were working in it, so you are now in your [bold]personal workspace[/bold].")
+    try:
+        config = Config.load()
+        if config.org_id == org_id:
+            # The saved workspace is gone: requests would carry an id that no longer exists.
+            config.clear_org_id()
+            console.print("You were working in it, so you are now in your [bold]personal workspace[/bold].")
+    except OSError as exc:
+        # The organization is already deleted; a config file we cannot write must not read as a failed delete.
+        err_console.print(f"[yellow]Note:[/yellow] could not update your saved workspace ({escape(str(exc))}). Run [bold]harumi org use --personal[/bold].")
 
 
 @org_app.command("members")
@@ -5826,7 +5847,7 @@ def org_rm_member(
         _fail("Say who to remove: [bold]harumi org rm-member <organization> <email> --yes[/bold]. See them with [bold]harumi org members[/bold].")
     client = _get_client(api_url=api_url)
     org_id, org_name = _org_choice(client, organization, "remove someone from")
-    target = _member_choice(client, org_id, member, "remove")
+    target = _member_choice(client, org_id, member, "remove", destructive=True)
 
     if not yes and not typer.confirm(f"Remove {_member_label(target)} from '{_printable(org_name)}'?"):  # plain text: not markup
         console.print("Aborted.")

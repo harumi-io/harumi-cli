@@ -3247,14 +3247,14 @@ def test_deprecated_names_are_hidden_from_help_and_the_surface():
         (["share", "remove", "0a1b2c3d-1111-4222-8333-444455556666", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", "harumi share rm"),
         (["schedules", "remove", "5c4e1b2a-0000-4000-8000-000000000001", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/schedules/5c4e1b2a-0000-4000-8000-000000000001", "harumi schedules rm"),
         (["datasources", "remove", "sales_db", "--yes", "-p", "proj-1"], "DELETE", "/api/datasources/proj-1/sales_db", "harumi datasources rm"),
-        (["org", "delete", "org-1", "--yes"], "DELETE", "/api/users/organizations/org-1", "harumi org rm"),
+        (["org", "delete", "6d1c0aa5-0000-4000-8000-0000000000a1", "--yes"], "DELETE", "/api/users/organizations/6d1c0aa5-0000-4000-8000-0000000000a1", "harumi org rm"),
         (["share", "rm-password", "0a1b2c3d-1111-4222-8333-444455556666", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", "share update <LINK_ID> --no-password"),
         (["repo", "ls", "-p", "proj-1"], "GET", "/api/projects/proj-1/repo/files", "git ls-files"),
     ],
 )
 def test_a_deprecated_name_still_runs_and_names_its_replacement(api, argv, method, route, use):
     api.route(method, route, [] if argv[0] == "repo" else {**SHARE_LINK, "id": "x", "name": "x"})
-    api.route("GET", "/api/users/organizations", [{"id": "org-1", "business_name": "Acme", "role": "owner"}])  # `org rm` names what it deletes
+    api.route("GET", "/api/users/organizations", [{"id": "6d1c0aa5-0000-4000-8000-0000000000a1", "business_name": "Acme", "role": "owner"}])  # `org rm` names what it deletes
 
     result = runner.invoke(cli.app, argv)
 
@@ -3266,18 +3266,18 @@ def test_a_deprecated_name_still_runs_and_names_its_replacement(api, argv, metho
 
 
 def test_org_remove_is_now_org_rm_member_and_org_delete_is_org_rm(api):
-    api.route("GET", "/api/users/organizations", [{"id": "org-1", "business_name": "Acme", "role": "owner"}])
-    api.route("DELETE", "/api/users/organizations/org-1", None)
+    api.route("GET", "/api/users/organizations", [{"id": "6d1c0aa5-0000-4000-8000-0000000000a1", "business_name": "Acme", "role": "owner"}])
+    api.route("DELETE", "/api/users/organizations/6d1c0aa5-0000-4000-8000-0000000000a1", None)
 
-    removed = runner.invoke(cli.app, ["org", "rm", "org-1", "--yes"])
-    stale = runner.invoke(cli.app, ["org", "rm", "org-1", "user-1", "--yes"])
+    removed = runner.invoke(cli.app, ["org", "rm", "6d1c0aa5-0000-4000-8000-0000000000a1", "--yes"])
+    stale = runner.invoke(cli.app, ["org", "rm", "6d1c0aa5-0000-4000-8000-0000000000a1", "user-1", "--yes"])
 
     assert removed.exit_code == 0, removed.output
     assert "deprecated" not in removed.output
     # `org rm` takes one argument; the old two-argument form is a usage error, not a silent org delete.
     assert stale.exit_code != 0
     # The organization is looked up first so the question can name it, then deleted: once.
-    assert api.paths() == ["/api/users/organizations", "/api/users/organizations/org-1"]
+    assert api.paths() == ["/api/users/organizations", "/api/users/organizations/6d1c0aa5-0000-4000-8000-0000000000a1"]
 
 
 def test_org_use_persists_the_org_and_the_old_config_name_still_works(api):

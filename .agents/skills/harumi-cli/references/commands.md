@@ -516,7 +516,7 @@ harumi org rm-member ORG [MEMBER] [--yes] [--api-url URL]
 harumi org use [ORG | --personal]
 ```
 
-**`ORG`** is the organization's name (any case) or the start of its id; **`MEMBER`** is an email or the start of a user id. `members` and `rm` also take no `ORG`: `members` then uses the workspace you are in (a terminal picks if there is none), while `rm` never does that and always asks, since it would delete the organization you are standing in; `rm --yes` needs the name. With no `MEMBER`, a terminal gets a picker (without the owner) and anything else the list of choices.
+**`ORG`** is the organization's name (any case) or the start of its id (for `rm` and `rm-member`, which delete for good, at least 8 characters of an id or an exact name or email); **`MEMBER`** is an email or the start of a user id. `members` and `rm` also take no `ORG`: `members` then uses the workspace you are in (a terminal picks if there is none), while `rm` never does that and always asks, since it would delete the organization you are standing in; `rm --yes` needs the name. With no `MEMBER`, a terminal gets a picker (without the owner) and anything else the list of choices.
 
 `--role` is one of `admin | member | viewer`, in any case. **`owner` is refused before any request**: an organization has one owner (its creator), the server never grants it through `invite` or `role`, and moving it is a separate "transfer ownership" action the CLI does not have (use the web app).
 
@@ -528,7 +528,7 @@ harumi org use [ORG | --personal]
 - **`invite`**: `POST /users/organizations/{id}/users` with `{email, role}`.
 - **`role`**: `PUT /users/organizations/{id}/users/{user_id}` with `{role}`.
 - **`rm-member`**: `DELETE /users/organizations/{id}/users/{user_id}`, prompting for confirmation unless `--yes`.
-- **`use`**: `ORG` is checked against your organizations first (name or start of an id, saved as the real id), so a name or an organization you do not belong to is refused instead of being saved. With no argument opens a menu of your organizations plus "Personal workspace" (at a terminal; otherwise it lists the choices and fails). `--personal` clears the saved org. Persists `org_id` in `~/.harumi/config.json` (per environment); every later request sends it as `X-Organization`. The header scopes the *read* endpoints (`projects list`); creation reads the workspace from the request body, so `new` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway. No network call. Replaces `config set-org`.
+- **`use`**: `ORG` is checked against your organizations first (name or start of an id, saved as the real id), so a name or an organization you do not belong to is refused instead of being saved. With no argument opens a menu of your organizations plus "Personal workspace" (at a terminal; otherwise it lists the choices and fails). `--personal` clears the saved org. Persists `org_id` in `~/.harumi/config.json` (per environment); every later request sends it as `X-Organization`. The header scopes the *read* endpoints (`projects list`); creation reads the workspace from the request body, so `new` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway. It needs the network to check the choice (and a login); if harumi-api cannot be reached at all, a full id is still saved as given, with a note. Replaces `config set-org`.
 
 ## Config & credential files
 

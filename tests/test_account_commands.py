@@ -200,6 +200,7 @@ def test_names_with_brackets_are_shown_as_they_are(api):
     assert "Acme Labs [beta]" in out
     assert runner.invoke(cli.app, ["org", "create", "Lab [/x]"]).exit_code == 0
     assert runner.invoke(cli.app, ["org", "rename", "zeta", "Zeta [/y]"]).exit_code == 0
+    assert api.calls[-1] == f"PATCH /api/users/organizations/{O3}"
 
 
 def test_creating_an_organization_says_how_to_work_in_it(api):
@@ -306,7 +307,7 @@ def test_deleting_another_organization_leaves_your_workspace_alone(api):
     config.Config.load().save_org_id(O3)
 
     assert runner.invoke(cli.app, ["org", "rm", "acme logistics", "--yes"]).exit_code == 0
-    assert saved_org() == O3
+    assert saved_org() == O3 and api.calls[-1] == f"DELETE /api/users/organizations/{O1}"  # the one named, not another
 
 
 def test_a_refused_delete_does_not_touch_the_saved_workspace(api):
@@ -375,3 +376,83 @@ def test_org_use_refuses_an_organization_you_do_not_belong_to_and_saves_nothing(
 
 def test_org_use_with_an_ambiguous_start_of_an_id_saves_nothing(api):
     assert runner.invoke(cli.app, ["org", "use", "0a1b"]).exit_code == 1 and saved_org() is None
+
+
+# -- short ids on a permanent delete, ambiguity, and the edges -----------------------------------------------
+
+
+@pytest.mark.parametrize("typed", ["9", "9f", "0a1b2c3"])
+def test_a_short_id_prefix_cannot_name_an_organization_to_delete(api, typed):
+    result = runner.invoke(cli.app, ["org", "rm", typed, "--yes"])
+
+    assert result.exit_code == 1 and "too short" in plain(result.output)
+    assert not any(c.startswith("DELETE") for c in api.calls)
+
+
+def test_eight_characters_of_the_id_are_enough_to_delete(api):
+    assert runner.invoke(cli.app, ["org", "rm", "9f8e7d6c", "--yes"]).exit_code == 0
+    assert api.calls[-1] == f"DELETE /api/users/organizations/{O3}"
+
+
+def test_a_short_id_prefix_cannot_name_a_member_to_remove(api):
+    result = runner.invoke(cli.app, ["org", "rm-member", "zeta", "2", "--yes"])
+
+    assert result.exit_code == 1 and not any(c.startswith("DELETE") for c in api.calls)
+
+
+def test_two_organizations_with_the_same_name_are_refused_not_guessed(api):
+    api.orgs.append({"id": "5e5e5e5e-0000-4000-8000-000000000000", "business_name": "Zeta", "role": "member"})
+
+    result = runner.invoke(cli.app, ["org", "members", "zeta"])
+
+    assert result.exit_code == 1 and "more than one" in plain(result.output) and not any("/users" in c and "/organizations/" in c for c in api.calls)
+
+
+def test_org_use_with_a_full_id_still_works_when_the_api_cannot_be_reached(monkeypatch, api):
+    from harumi.errors import ApiUnreachableError
+
+    def down(self):
+        raise ApiUnreachableError("could not connect")
+
+    monkeypatch.setattr(Client, "list_organizations", down)
+
+    result = runner.invoke(cli.app, ["org", "use", O3])
+
+    assert result.exit_code == 0 and saved_org() == O3 and "saved as given" in plain(result.output)
+
+
+def test_org_use_with_a_name_cannot_be_resolved_offline_and_saves_nothing(monkeypatch, api):
+    from harumi.errors import ApiUnreachableError
+
+    def down(self):
+        raise ApiUnreachableError("could not connect")
+
+    monkeypatch.setattr(Client, "list_organizations", down)
+
+    assert runner.invoke(cli.app, ["org", "use", "zeta"]).exit_code == 1 and saved_org() is None
+
+
+def test_a_failure_updating_the_saved_workspace_after_a_delete_is_a_note_not_a_traceback(api, monkeypatch):
+    def broken(self):
+        raise OSError("read-only file system")
+
+    config.Config.load().save_org_id(O1)
+    monkeypatch.setattr(config.Config, "clear_org_id", broken)
+
+    result = runner.invoke(cli.app, ["org", "rm", "acme logistics", "--yes"])
+
+    out = plain(result.output)
+    assert result.exit_code == 0 and "Deleted" in out and "could not update your saved workspace" in out
+
+
+def test_a_last_name_is_stripped(api):
+    assert runner.invoke(cli.app, ["profile", "set", "--last-name", "  Souza  "]).exit_code == 0
+    assert api.sent[-1] == {"last_name": "Souza"}
+
+
+def test_an_error_dict_with_no_message_still_prints_something_readable(api):
+    api.fail = (403, {"code": "something_else"})
+
+    out = plain(runner.invoke(cli.app, ["org", "rm", "zeta", "--yes"]).output)
+
+    assert "something_else" in out and "{'" not in out
