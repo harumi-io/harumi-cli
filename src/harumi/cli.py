@@ -143,6 +143,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import difflib
+import errno
 import functools
 import json
 import mimetypes
@@ -154,7 +155,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import NoReturn, Optional
 
 import httpx
 import pydantic
@@ -6160,6 +6161,28 @@ _hidden_alias(org_app, "delete", org_rm, "harumi org delete", "harumi org rm")
 _hidden_alias(org_app, "remove", org_rm_member, "harumi org remove", "harumi org rm-member")
 
 
+# errno values that say the problem is a local file or disk (full, read-only, no permission, missing), as
+# opposed to an OSError that merely shares the base class: a reset connection, an SSL failure.
+_LOCAL_FILE_ERRNOS = {errno.ENOSPC, errno.EROFS, errno.EACCES, errno.EPERM, errno.ENOENT, errno.EDQUOT}
+
+
+def _report_crash(exc: BaseException) -> NoReturn:
+    """What a person sees when the CLI itself breaks, in place of a traceback.
+
+    Everything a person can cause is handled where it happens (`_handle_errors`), so what reaches here is a
+    bug. A traceback is no use to them, and the exception's text is a risk: it can carry a URL with a token
+    in it. So: that it is a bug, the kind, and where to report it. HARUMI_DEBUG=1 gives the traceback.
+    """
+    err_console.print(
+        f"[bold red]Error:[/bold red] Something unexpected went wrong in harumi ({type(exc).__name__}). "
+        "This is a bug in the CLI, not something you did.\n"
+        f"Please report it at https://github.com/harumi-io/harumi-cli/issues with the command you ran and "
+        f"harumi {__version__}. Run it again with [bold]HARUMI_DEBUG=1[/bold] for the full details "
+        "(look them over before sharing: they can contain file paths)."
+    )
+    raise SystemExit(1) from None
+
+
 def main() -> None:
     from harumi.update import UpdateCheck
 
@@ -6168,35 +6191,24 @@ def main() -> None:
     check.start()
     try:
         app()
-    except BrokenPipeError:
-        # `harumi ... | head`: the reader left. Not an error; point stdout at nothing so Python's exit-time
-        # flush does not complain about the closed pipe.
-        try:
-            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
-        except (OSError, ValueError, AttributeError):  # stdout replaced by something with no file descriptor
-            pass
-        raise SystemExit(1) from None
-    except OSError as exc:
-        # A full or read-only disk, a permission problem on ~/.harumi: the machine, not a bug. Only the OS's
-        # own words and the path are shown, never anything the CLI was holding.
-        where = f" ({escape(str(exc.filename))})" if exc.filename else ""
-        err_console.print(f"[bold red]Error:[/bold red] {escape(exc.strerror or type(exc).__name__)}{where}")
-        raise SystemExit(1) from None
     except Exception as exc:
-        # Everything a person can cause is handled where it happens (`_handle_errors`), so what reaches
-        # here is a bug in the CLI. A traceback is no use to them, and its text is a risk: an
-        # exception message can carry a URL with a token in it. Say that it is a bug, what kind, and
-        # where to report it. HARUMI_DEBUG=1 gives the full traceback for the report.
         if os.environ.get("HARUMI_DEBUG"):
-            raise
-        err_console.print(
-            f"[bold red]Error:[/bold red] Something unexpected went wrong in harumi ({type(exc).__name__}). "
-            "This is a bug in the CLI, not something you did.\n"
-            f"Please report it at https://github.com/harumi-io/harumi-cli/issues with the command you ran and "
-            f"harumi {__version__}. Run it again with [bold]HARUMI_DEBUG=1[/bold] for the full details "
-            "(look them over before sharing: they can contain file paths)."
-        )
-        raise SystemExit(1) from None
+            raise  # whatever it is, a bug report wants the traceback
+        if isinstance(exc, BrokenPipeError):
+            # `harumi ... | head`: the reader left. Not an error; point stdout at nothing so Python's
+            # exit-time flush does not complain about the closed pipe.
+            try:
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            except (OSError, ValueError, AttributeError):  # stdout replaced by something with no file descriptor
+                pass
+            raise SystemExit(1) from None
+        if isinstance(exc, OSError) and exc.errno in _LOCAL_FILE_ERRNOS:
+            # A full or read-only disk, a permission problem on ~/.harumi: the machine, not a bug. Only the
+            # OS's own words and the path are shown, never anything the CLI was holding.
+            where = f" ({escape(str(exc.filename))})" if exc.filename else ""
+            err_console.print(f"[bold red]Error:[/bold red] {escape(exc.strerror or type(exc).__name__)}{where}")
+            raise SystemExit(1) from None
+        _report_crash(exc)
     finally:
         # Runs after the command (including after `typer.Exit`/SystemExit), so a
         # notice never lands in the middle of a command's own output.

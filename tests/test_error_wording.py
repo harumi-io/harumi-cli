@@ -370,3 +370,26 @@ def test_commands_a_test_adds_do_not_outlive_it(monkeypatch, capsys):
     run_main(monkeypatch, capsys, KeyError("x"))
 
     assert {c.name for c in cli.app.registered_commands} == names
+
+
+@pytest.mark.parametrize("error", [BrokenPipeError(), OSError(28, "No space left on device", "/x"), OSError(104, "Connection reset by peer")])
+def test_debug_mode_gives_the_traceback_for_an_oserror_too(monkeypatch, capsys, error):
+    with pytest.raises(OSError):
+        run_main(monkeypatch, capsys, error, env={"HARUMI_DEBUG": "1"})
+
+
+@pytest.mark.parametrize("error", [OSError(104, "Connection reset by peer"), OSError(0, "ssl handshake")])
+def test_a_network_oserror_is_not_passed_off_as_a_disk_problem(monkeypatch, capsys, error):
+    code, out = run_main(monkeypatch, capsys, error)
+
+    err = " ".join(out.err.split())
+    assert code == 1 and "Something unexpected went wrong" in err and "OSError" in err
+    assert "reset by peer" not in err  # the text of an unexpected error is not printed
+
+
+@pytest.mark.parametrize("number", [13, 1, 2, 30, 28])
+def test_disk_and_permission_errors_are_reported_as_the_machine(monkeypatch, capsys, number):
+    code, out = run_main(monkeypatch, capsys, OSError(number, "the OS's words", "/home/ana/.harumi/x"))
+
+    err = " ".join(out.err.split())
+    assert code == 1 and "the OS's words" in err and "Something unexpected" not in err
