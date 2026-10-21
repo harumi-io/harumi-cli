@@ -13,7 +13,7 @@ For the full flag-by-flag reference and troubleshooting table, see [references/c
 
 ## VPN requirement
 
-The staging endpoints (`api.dev.harumi.io`, `git.dev.harumi.io`) are internal ALBs — anything on the `staging` environment (login, `harumi new`/`import`/`clone`/`link`, git push, runs) only works over VPN. Surface a clear network error if the user isn't on VPN.
+The staging endpoints (`api.dev.harumi.io`, `git.dev.harumi.io`) are internal ALBs — anything on the `staging` environment (login, `harumi new`/`import`/`clone`/`link`, git push, runs) only works over VPN. On `staging` a failed connection already asks "Is the VPN connected?" (production users are never asked); surface that to the user if they aren't on VPN.
 
 ## Preflight
 

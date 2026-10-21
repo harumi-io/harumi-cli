@@ -417,3 +417,141 @@ def test_a_json_run_that_dies_early_still_restores_stdout(backend, monkeypatch):
     result = _run_json()
 
     assert result.exit_code == 1 and sys.stdout is before and cli._json_stream == []
+
+
+# -- a flaky connection while watching ---------------------------------------------------------------------
+
+
+class Flaky(Backend):
+    """A backend whose polls fail on a script: an exception to raise, or a status to answer with."""
+
+    def __init__(self, states, faults, **kw):
+        super().__init__(states, **kw)
+        self.faults = list(faults)
+        self.polls = 0
+
+    def handler(self, request):
+        if "/runs/run-1" in request.url.path and request.method == "GET":
+            self.polls += 1
+            if self.faults:
+                fault = self.faults.pop(0)
+                if isinstance(fault, Exception):
+                    raise fault
+                if fault is not None:  # None = a healthy poll
+                    return httpx.Response(fault, text="<html>gateway</html>", headers={"content-type": "text/html"})
+        return super().handler(request)
+
+
+@pytest.fixture
+def flaky(monkeypatch):
+    holder = {}
+
+    def make(states, faults, **kw):
+        holder["b"] = Flaky(states, faults, **kw)
+        monkeypatch.setattr(
+            cli,
+            "_get_client",
+            lambda *a, **k: Client(api_url="https://api.harumi.io/api", transport=httpx.MockTransport(holder["b"].handler)),
+        )
+        return holder["b"]
+
+    return make
+
+
+DOWN = httpx.ConnectError("[Errno 61] Connection refused", request=httpx.Request("GET", "https://api.harumi.io/api/x"))
+DONE = [{"status": "queued"}, {"status": "completed", "exit_code": 0, "output_url": "s3://x"}]
+
+
+def test_a_dropped_poll_does_not_end_the_watch(flaky):
+    b = flaky(DONE, [DOWN])
+
+    result = _run("--watch")
+
+    assert result.exit_code == 0 and "Run completed" in result.output
+    assert b.polls >= 3  # the failed one was retried
+
+
+def test_a_gateway_error_during_the_watch_is_ridden_out_too(flaky):
+    flaky(DONE, [503, 502])
+
+    assert _run("--watch").exit_code == 0
+
+
+def test_an_outage_is_mentioned_once_not_once_per_poll(flaky):
+    flaky(DONE, [DOWN, DOWN, DOWN])
+
+    out = " ".join(_run("--watch").output.split())
+
+    assert out.count("run keeps going") == 1
+
+
+def test_failures_that_are_never_in_a_row_never_add_up(flaky):
+    long_run = [{"status": "queued"}] + [{"status": "running"}] * 6 + [{"status": "completed", "exit_code": 0, "output_url": "s3://x"}]
+    flaky(long_run, [DOWN, DOWN, None, DOWN, DOWN, None, DOWN, DOWN, None, DOWN, DOWN, None])
+
+    assert _run("--watch").exit_code == 0  # eight failures in all (the limit is four), never more than two together
+
+
+def test_a_long_outage_ends_the_watch_and_says_the_run_is_still_going(flaky):
+    b = flaky(DONE, [DOWN] * 20)
+
+    result = _run("--watch")
+
+    out = " ".join(result.output.split())
+    assert result.exit_code == 1
+    assert "still going" in out and "harumi runs get run-1" in out
+    assert 4 <= b.polls <= 10  # it tried for a while, and did not retry forever
+
+
+def test_a_long_outage_in_json_mode_says_the_outcome_is_unknown(flaky):
+    flaky(DONE, [DOWN] * 20)
+
+    result = _run_json("--watch")
+
+    done = json.loads(result.stdout)
+    assert result.exit_code == 1 and done["run_id"] == "run-1" and done["status"] == "unknown" and done["succeeded"] is None
+    assert "still going" in " ".join(result.stderr.split())
+
+
+def test_an_error_that_retrying_cannot_fix_ends_the_watch_at_once(flaky):
+    b = flaky(DONE, [404, 404, 404])
+
+    result = _run("--watch")
+
+    assert result.exit_code == 1 and b.polls == 1  # a 404 is not a blip
+    assert "still going" not in result.output
+
+
+def test_a_request_to_start_a_run_that_timed_out_says_to_look_before_running_again(backend, monkeypatch):
+    backend([{"status": "queued"}])
+    boom = httpx.ReadTimeout("timed out", request=httpx.Request("POST", "https://api.harumi.io/api/projects/proj-bound/execute"))
+
+    def handler(request):
+        raise boom
+
+    monkeypatch.setattr(cli, "_get_client", lambda *a, **k: Client(api_url="https://api.harumi.io/api", transport=httpx.MockTransport(handler)))
+
+    out = " ".join(_run().output.split())
+
+    assert "may have" in out and "To see whether a run was queued: harumi runs list" in out
+
+
+def test_a_refused_connection_when_starting_a_run_cannot_have_queued_one(backend, monkeypatch):
+    backend([{"status": "queued"}])
+
+    def handler(request):
+        raise httpx.ConnectError("[Errno 61] Connection refused", request=request)
+
+    monkeypatch.setattr(cli, "_get_client", lambda *a, **k: Client(api_url="https://api.harumi.io/api", transport=httpx.MockTransport(handler)))
+
+    assert "may have" not in " ".join(_run().output.split())
+
+
+def test_a_dropped_poll_is_ridden_out_at_a_terminal_too(flaky, monkeypatch):
+    """The live display is what people actually see; it has its own call into the waiting loop."""
+    monkeypatch.setattr(cli, "_live_display_ok", lambda: True)
+    flaky(DONE, [DOWN, DOWN])
+
+    result = _run("--watch")
+
+    assert result.exit_code == 0 and "Run completed" in result.output

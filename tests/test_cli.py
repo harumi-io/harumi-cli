@@ -511,7 +511,7 @@ def test_a_connection_failure_is_an_error_message_not_a_traceback(monkeypatch, b
     result = runner.invoke(cli.app, ["run", "--branch", "main"])
 
     assert result.exit_code == 1
-    assert "Could not reach harumi-api" in result.output
+    assert "Couldn't connect to Harumi" in result.output
     assert "https://status.harumi.io" in result.output
     assert not isinstance(result.exception, httpx.HTTPError)
 

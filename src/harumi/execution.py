@@ -15,13 +15,31 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from harumi.errors import HarumiError
+from harumi.errors import ApiError, ApiUnreachableError, HarumiError
 from harumi.models import ProjectRun
 
 if TYPE_CHECKING:
     from harumi.client import ApiClient
 
 _DEFAULT_POLL_INTERVAL = 5.0
+
+# A watch can last an hour. Over that time one poll in a few thousand meets a dropped connection or a
+# gateway hiccup, and that says nothing about the run, which goes on without us. Only a failure of the
+# kind that passes (no answer, or a 5xx) is ridden out, and only for a few polls in a row.
+DEFAULT_MAX_POLL_FAILURES = 4
+
+
+class WatchLostError(HarumiError):
+    """Polling a run failed several times in a row. The run itself is not known to have failed."""
+
+    def __init__(self, run_id: str, last: Exception) -> None:
+        super().__init__(f"Lost touch with harumi-api while waiting for run {run_id}.")
+        self.run_id = run_id
+        self.last = last
+
+
+def _is_transient(exc: ApiError) -> bool:
+    return isinstance(exc, ApiUnreachableError) or exc.status_code in (502, 503, 504)
 
 
 def list_runs(api: "ApiClient", project_id: str) -> list[ProjectRun]:
@@ -52,12 +70,32 @@ def wait_for_run(
     poll_interval: float = _DEFAULT_POLL_INTERVAL,
     timeout: Optional[float] = None,
     on_poll: Optional[Callable[[ProjectRun], None]] = None,
+    max_poll_failures: int = 0,
+    on_poll_failure: Optional[Callable[[ApiError], None]] = None,
 ) -> ProjectRun:
-    """Block, polling until the run reaches a terminal status."""
+    """Block, polling until the run reaches a terminal status.
+
+    With `max_poll_failures` > 0, that many transient poll failures in a row are ridden out
+    (`on_poll_failure` hears each one); the next raises `WatchLostError`. Any other error, and the
+    default of 0, raise at once as before.
+    """
     deadline = time.monotonic() + timeout if timeout else None
+    failures = 0
 
     while True:
-        run = get_run(api, project_id, run_id)
+        try:
+            run = get_run(api, project_id, run_id)
+        except ApiError as exc:
+            if not max_poll_failures or not _is_transient(exc):
+                raise
+            failures += 1
+            if on_poll_failure is not None:
+                on_poll_failure(exc)
+            if failures > max_poll_failures:
+                raise WatchLostError(run_id, exc) from exc
+            time.sleep(poll_interval)
+            continue
+        failures = 0
         if on_poll is not None:
             on_poll(run)
         if run.finished:

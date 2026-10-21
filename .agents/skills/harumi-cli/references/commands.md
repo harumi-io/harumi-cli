@@ -582,10 +582,19 @@ Within the active environment, URL/org overrides (highest first): **CLI flags > 
 |---|---|---|
 | `Error: You're not logged in.` or `Error: Your Harumi session has expired.` (both go on to say to run harumi login) | No session, or it ended | Ask user to run `harumi login` (an agent must never automate the emailed code) |
 | `Error: Could not renew your login: harumi-api returned HTTP 403 ...` | A firewall, proxy or outage blocked the token refresh; the session may be fine | Check network/VPN and retry; logging in again will not help |
+| `Couldn't connect to Harumi: the connection was refused.` / `Harumi didn't answer in time.` / `The connection to Harumi was cut off.` | Harumi is down or unreachable. Each is followed by a link to the status page | `harumi status`; retry in a minute. On `staging` it also asks whether the VPN is connected |
+| `Couldn't find Harumi's address (the DNS lookup failed).` | Your network, not Harumi: no internet, or a DNS problem (on staging, the VPN) | Check the connection. The status page is not offered, as it would not help |
+| `Couldn't make a secure connection to Harumi: its certificate wasn't trusted.` | A company proxy that re-signs HTTPS traffic | Point `SSL_CERT_FILE` at the company's CA certificate file |
+| `...it may have gone through before the connection failed. Look at the current state before you try again.` | A request that changes something (a run, a create, a delete) was sent and the answer never came | Look first (`harumi runs list`, `... list`); repeating it blindly can do it twice. Not said when the connection never opened |
+| `Got a web page (HTTP 502) instead of an answer from Harumi` | A proxy, firewall, captive-portal or outage page replied for harumi-api. Its text is not shown | A 502/503/504 also offers the status page; otherwise ask your network admin |
+| `Harumi's reply isn't in the form this version of the CLI expects.` | The server and this CLI disagree on a response's shape, or a proxy mangled it | Upgrade the CLI (the message names the command for how it was installed) |
+| `Something unexpected went wrong in harumi (KeyError).` | A bug in the CLI. The exception text is not printed, as it can contain a token | Report it with the command and version; `HARUMI_DEBUG=1` prints the traceback (without local variables) |
+| `harumi-api returned HTTP 429: ... Try again in 37 seconds.` | A rate limit; the wait is the server's `Retry-After` | Wait that long. Without a usable `Retry-After` it just says so |
+| `Connection trouble. The run keeps going; trying again...` (in `run --watch`) | A poll for the run's status failed (no answer, or a 502/503/504) | Nothing: up to 4 failures in a row are ridden out. After that: `Lost touch with harumi-api ... The run is probably still going` and exit 1; `--json` reports `status: "unknown"`, not a failure |
 | `harumi-api returned HTTP 422: ... Signups not allowed for otp` | New email, no account | Re-run `harumi login --signup` |
 | `Provide --project or run from a directory with a .harumi binding` | No `--project` and `.harumi/config.json` missing in cwd + parents | `harumi new`/`harumi clone <ID>` (nothing/existing project) or `harumi import` (existing folder) or `harumi link --project <ID>` (already checked out), or pass `--project` |
 | `No Gitea token found. Run harumi login` | `git_token` absent in credentials | `harumi login` again |
-| `git push failed: ...` | Network (VPN not connected) or bad credentials | Check VPN; re-run `harumi login` to refresh token |
+| `git push failed: ...` | Network (on staging, the VPN not connected) or bad credentials | Check the network (and VPN on staging); re-run `harumi login` to refresh token |
 | `git not found` | git missing from PATH | Install git |
 | `Run ended with status: failed` | Solver code raised or exited non-zero | `harumi runs get <RUN_ID>` for stdout/stderr/error |
 | `No run id returned; cannot watch this run` | Backend didn't return a `project_run_id` | Check `harumi runs list` manually |

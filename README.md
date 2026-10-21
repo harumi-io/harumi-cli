@@ -105,6 +105,7 @@ Selection precedence: `--env` > `HARUMI_ENV` > the choice made at `harumi login`
 | `HARUMI_PLATFORM_URL` | Override the web-app URL used in printed project links |
 | `HARUMI_NO_INTERACTIVE` | Set to `1` to never show an arrow-key menu (menus are also off under `CI`, with `TERM=dumb`, and whenever stdin or stdout isn't a terminal) |
 | `HARUMI_NO_UPDATE_CHECK` | Set to `1` to turn off the "a newer version is available" notice (it is also off under `CI` and whenever stderr isn't a terminal) |
+| `HARUMI_DEBUG` | Set to `1` to get the full traceback when the CLI hits a bug of its own (otherwise it prints a short message naming the kind of error and where to report it). Local variables are never printed, as they hold tokens |
 | `HARUMI_STATUS_URL` | Override the status page used by `harumi status` and the unreachable-API hint (the hint is skipped when the API URL is overridden, unless this is set) |
 
 Credentials (JWT + refresh token + Gitea token) are stored per-environment under `~/.harumi/environments/<env>/credentials.json` (mode `0600`) after `harumi login`. The file is written atomically, and a session refresh keeps everything else in it (the git token included). Several `harumi` commands running at once take turns on a lock (`credentials.json.lock` beside it), so they share one refresh instead of logging each other out. An older flat `~/.harumi/credentials.json` is migrated into `production` automatically on first run.
