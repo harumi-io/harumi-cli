@@ -3977,6 +3977,20 @@
         },
         {
           "opts": [
+            "--comparisons"
+          ],
+          "secondary_opts": [
+            "--no-comparisons"
+          ],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Let visitors compare runs side by side. Needs --run-history."
+        },
+        {
+          "opts": [
             "--run-control"
           ],
           "secondary_opts": [
@@ -4369,6 +4383,20 @@
           "multiple": false,
           "default": null,
           "help": "Let visitors browse past runs, not just the latest one."
+        },
+        {
+          "opts": [
+            "--comparisons"
+          ],
+          "secondary_opts": [
+            "--no-comparisons"
+          ],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Let visitors compare runs side by side. Needs --run-history."
         },
         {
           "opts": [

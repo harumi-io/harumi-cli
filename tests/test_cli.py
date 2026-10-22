@@ -1899,6 +1899,7 @@ def test_share_add_defaults_every_flag_to_false(api):
         "app_enabled": False,
         "chat_enabled": False,
         "run_history_enabled": False,
+        "comparisons_enabled": False,
         "run_control_enabled": False,
     }
 
@@ -1914,6 +1915,7 @@ def test_share_add_forwards_label_and_permission_flags(api):
             "--app",
             "--chat",
             "--run-history",
+            "--comparisons",
             "--run-control",
             "--project", "proj-1",
         ],
@@ -1925,7 +1927,73 @@ def test_share_add_forwards_label_and_permission_flags(api):
     assert body["app_enabled"] is True
     assert body["chat_enabled"] is True
     assert body["run_history_enabled"] is True
+    assert body["comparisons_enabled"] is True
     assert body["run_control_enabled"] is True
+
+
+def test_share_add_comparisons_needs_run_history(api):
+    result = runner.invoke(
+        cli.app, ["share", "add", "--comparisons", "--project", "proj-1"]
+    )
+
+    assert result.exit_code != 0
+    assert "--run-history" in result.output
+    assert not [r for r in api.requests if r.method == "POST"]
+
+
+LINK_ID = "0a1b2c3d-1111-4222-8333-444455556666"
+LINK_PATH = f"/api/projects/proj-1/share-links/{LINK_ID}"
+
+
+def test_share_update_comparisons_needs_run_history_on_the_link(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})
+    api.route("PATCH", LINK_PATH, SHARE_LINK)
+
+    result = runner.invoke(cli.app, ["share", "update", LINK_ID[:8], "--comparisons", "--project", "proj-1"])
+
+    assert result.exit_code != 0
+    assert "run history" in result.output
+    assert not [r for r in api.requests if r.method == "PATCH"]
+
+
+def test_share_update_comparisons_goes_through_when_the_link_has_run_history(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": [{**SHARE_LINK, "run_history_enabled": True}]})
+    api.route("PATCH", LINK_PATH, SHARE_LINK)
+
+    result = runner.invoke(cli.app, ["share", "update", LINK_ID[:8], "--comparisons", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert api.body_for("PATCH", LINK_PATH) == {"comparisons_enabled": True}
+
+
+def test_share_update_comparisons_together_with_run_history_needs_no_lookup(api):
+    api.route("PATCH", LINK_PATH, SHARE_LINK)
+
+    result = runner.invoke(
+        cli.app, ["share", "update", LINK_ID, "--run-history", "--comparisons", "--project", "proj-1"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert api.body_for("PATCH", LINK_PATH) == {"run_history_enabled": True, "comparisons_enabled": True}
+
+
+def test_share_update_turning_run_history_off_turns_comparisons_off(api):
+    api.route("PATCH", LINK_PATH, SHARE_LINK)
+
+    result = runner.invoke(cli.app, ["share", "update", LINK_ID, "--no-run-history", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert api.body_for("PATCH", LINK_PATH) == {"run_history_enabled": False, "comparisons_enabled": False}
+
+
+def test_share_update_refuses_comparisons_with_no_run_history(api):
+    result = runner.invoke(
+        cli.app, ["share", "update", LINK_ID, "--comparisons", "--no-run-history", "--project", "proj-1"]
+    )
+
+    assert result.exit_code != 0
+    assert "--no-run-history" in result.output
+    assert not api.requests
 
 
 def test_share_update_only_sends_provided_fields(api):
