@@ -2394,7 +2394,7 @@ def test_datasources_query_surfaces_the_read_only_rejection(api):
 # ---------------------------------------------------------------------------
 
 RUN = {
-    "id": "run-1",
+    "id": "7f3a91c2-0000-4000-8000-000000000001",
     "project_id": "proj-1",
     "status": "completed",
     "created_at": "2026-01-01T00:00:00Z",
@@ -2408,18 +2408,18 @@ def test_runs_list_renders_each_run(api):
     result = runner.invoke(cli.app, ["runs", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "run-1" in result.output
+    assert "7f3a91c2" in result.output  # the first 8 characters, which every `runs` command accepts
     assert "completed" in result.output
 
 
 def test_runs_get_prints_captured_stdout_and_error(api):
     api.route(
         "GET",
-        "/api/projects/proj-1/runs/run-1",
+        "/api/projects/proj-1/runs/7f3a91c2-0000-4000-8000-000000000001",
         {**RUN, "status": "failed", "stdout": "solving...\n", "stderr": "", "error": "infeasible"},
     )
 
-    result = runner.invoke(cli.app, ["runs", "get", "run-1", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["runs", "get", "7f3a91c2-0000-4000-8000-000000000001", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "solving..." in result.output
@@ -2427,13 +2427,13 @@ def test_runs_get_prints_captured_stdout_and_error(api):
 
 
 def test_runs_cancel_posts_to_the_cancel_endpoint(api):
-    api.route("POST", "/api/projects/proj-1/runs/run-1/cancel", {**RUN, "status": "cancelled"})
+    api.route("POST", "/api/projects/proj-1/runs/7f3a91c2-0000-4000-8000-000000000001/cancel", {**RUN, "status": "cancelled"})
 
-    result = runner.invoke(cli.app, ["runs", "cancel", "run-1", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["runs", "cancel", "7f3a91c2-0000-4000-8000-000000000001", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "cancelled" in result.output
-    assert api.paths() == ["/api/projects/proj-1/runs/run-1/cancel"]
+    assert api.paths() == ["/api/projects/proj-1/runs/7f3a91c2-0000-4000-8000-000000000001/cancel"]
 
 
 # ---------------------------------------------------------------------------
@@ -2447,7 +2447,7 @@ QUEUED = {
     "execution_log_id": "log-1",
     "status": "queued",
     "workflow_run_id": "wf-1",
-    "project_run_id": "run-1",
+    "project_run_id": "7f3a91c2-0000-4000-8000-000000000001",
 }
 
 
@@ -2684,9 +2684,9 @@ def test_dashboard_validate_explicit_path_checks_only_that_file(api, tmp_path, m
 
 COMPARISON = {
     "columns": [
-        {"run_id": "run-1", "branch": "main", "commit": "aaaaaaa1", "status": "completed", "runtime_s": 90.0},
-        {"run_id": "run-2", "branch": "v2", "commit": "bbbbbbb2", "status": "completed", "runtime_s": 125.0},
-        {"run_id": "run-3", "branch": "v3", "commit": "ccccccc3", "status": "failed", "runtime_s": None},
+        {"run_id": "7f3a91c2-0000-4000-8000-000000000001", "branch": "main", "commit": "aaaaaaa1", "status": "completed", "runtime_s": 90.0},
+        {"run_id": "7f3a91c2-0000-4000-8000-000000000002", "branch": "v2", "commit": "bbbbbbb2", "status": "completed", "runtime_s": 125.0},
+        {"run_id": "7f3a91c2-0000-4000-8000-000000000003", "branch": "v3", "commit": "ccccccc3", "status": "failed", "runtime_s": None},
     ],
     "kpis": [
         {
@@ -2708,7 +2708,7 @@ COMPARISON = {
             "deltas": [None, None, None],
         },
     ],
-    "winner_run_id": "run-2",
+    "winner_run_id": "7f3a91c2-0000-4000-8000-000000000002",
     "no_winner_reason": None,
     "warnings": ["v3@ccccccc: no usable output (No output.json for this run)."],
     "fairness": {"verdict": "differs", "files": ["inputs/demand.csv"]},
@@ -2719,7 +2719,7 @@ def test_compare_prints_kpis_winner_and_the_inputs_verdict(api):
     api.route("GET", "/api/projects/proj-1/compare", COMPARISON)
 
     result = runner.invoke(
-        cli.app, ["compare", "run-1", "run-2", "run-3", "--project", "proj-1"]
+        cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "7f3a91c2-0000-4000-8000-000000000003", "--project", "proj-1"]
     )
 
     assert result.exit_code == 0, result.output
@@ -2736,16 +2736,16 @@ def test_compare_prints_kpis_winner_and_the_inputs_verdict(api):
 def test_compare_sends_the_runs_in_order_as_one_comma_separated_param(api):
     api.route("GET", "/api/projects/proj-1/compare", COMPARISON)
 
-    runner.invoke(cli.app, ["compare", "run-2", "run-1", "--project", "proj-1"])
+    runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000002", "7f3a91c2-0000-4000-8000-000000000001", "--project", "proj-1"])
 
-    assert api.params_for("GET", "/api/projects/proj-1/compare") == {"runs": "run-2,run-1"}
+    assert api.params_for("GET", "/api/projects/proj-1/compare") == {"runs": "7f3a91c2-0000-4000-8000-000000000002,7f3a91c2-0000-4000-8000-000000000001"}
 
 
 def test_compare_json_prints_exactly_what_the_api_returned(api):
     api.route("GET", "/api/projects/proj-1/compare", COMPARISON)
 
     result = runner.invoke(
-        cli.app, ["compare", "run-1", "run-2", "--project", "proj-1", "--json"]
+        cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "--project", "proj-1", "--json"]
     )
 
     assert result.exit_code == 0, result.output
@@ -2756,7 +2756,7 @@ def test_compare_says_why_there_is_no_winner(api):
     body = {**COMPARISON, "winner_run_id": None, "no_winner_reason": "No primary KPI is declared."}
     api.route("GET", "/api/projects/proj-1/compare", body)
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "No primary KPI is declared." in result.output
@@ -2766,7 +2766,7 @@ def test_compare_older_api_without_a_verdict_still_prints(api):
     body = {k: v for k, v in COMPARISON.items() if k != "fairness"}
     api.route("GET", "/api/projects/proj-1/compare", body)
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "Total cost" in result.output
@@ -2775,9 +2775,9 @@ def test_compare_older_api_without_a_verdict_still_prints(api):
 @pytest.mark.parametrize(
     "ids, said",
     [
-        (["run-1"], "needs 2 to 4 runs"),
+        (["7f3a91c2-0000-4000-8000-000000000001"], "needs 2 to 4 runs"),
         (["a", "b", "c", "d", "e"], "at most 4 runs"),
-        (["run-1", "run-1"], "more than once"),
+        (["7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000001"], "more than once"),
     ],
 )
 def test_compare_needs_two_to_four_distinct_runs_before_calling_the_api(api, ids, said):
@@ -2799,13 +2799,13 @@ def test_compare_prints_branch_names_and_paths_that_look_like_rich_markup(api):
             {**COMPARISON["columns"][1], "branch": "odd/[/nope]"},
         ],
         "kpis": [{**COMPARISON["kpis"][0], "label": "Cost [red]", "values": [1, 2], "deltas": [None, 1]}],
-        "winner_run_id": "run-2",
+        "winner_run_id": "7f3a91c2-0000-4000-8000-000000000002",
         "fairness": {"verdict": "differs", "files": ["inputs/[2024].csv"]},
         "warnings": ["see [/oops]"],
     }
     api.route("GET", "/api/projects/proj-1/compare", body)
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     for text in ("fix/[bold]x", "odd/[/nope]", "Cost [red]", "inputs/[2024].csv", "see [/oops]"):
@@ -2817,12 +2817,12 @@ def test_compare_tolerates_a_response_that_leaves_fields_out(api):
         "GET",
         "/api/projects/proj-1/compare",
         {
-            "columns": [{"run_id": "run-1"}, {"run_id": "run-2", "branch": "v2"}],
+            "columns": [{"run_id": "7f3a91c2-0000-4000-8000-000000000001"}, {"run_id": "7f3a91c2-0000-4000-8000-000000000002", "branch": "v2"}],
             "kpis": [{"key": "objective", "values": [1]}],
         },
     )
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "objective" in result.output
@@ -2832,7 +2832,7 @@ def test_compare_does_not_misalign_columns_when_a_kpi_has_too_few_values(api):
     body = {**COMPARISON, "kpis": [{**COMPARISON["kpis"][0], "values": [100], "deltas": []}]}
     api.route("GET", "/api/projects/proj-1/compare", body)
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "run-3", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "7f3a91c2-0000-4000-8000-000000000003", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert result.output.count("—") >= 2
@@ -2842,23 +2842,37 @@ def test_compare_names_the_primary_kpi_only_when_there_is_one(api):
     body = {**COMPARISON, "kpis": [{**COMPARISON["kpis"][0], "primary": False}]}
     api.route("GET", "/api/projects/proj-1/compare", body)
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "--project", "proj-1"])
 
     assert "Winner" in result.output
     assert "marked *" not in result.output
 
 
 def test_compare_reports_an_unknown_run_as_an_error(api):
+    """A whole id the server does not know: its own words, plus where to find real ones."""
     api.route("GET", "/api/projects/proj-1/compare", {"detail": "Run not found"}, status=404)
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "nope", "--project", "proj-1"])
+    result = runner.invoke(
+        cli.app,
+        ["compare", "7f3a91c2-0000-4000-8000-000000000001", "9e9e9e9e-0000-4000-8000-000000000009", "--project", "proj-1"],
+    )
 
     assert result.exit_code == 1
-    assert "Run not found" in result.output
+    assert "Run not found" in result.output and "harumi runs list" in result.output
+
+
+def test_compare_with_something_that_is_no_run_id_says_so_and_points_at_the_list(api):
+    """Not a whole id and not the start of one: said before asking the server, naming what was typed."""
+    api.route("GET", "/api/projects/proj-1/runs", {"runs": [RUN]})
+
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "nope", "--project", "proj-1"])
+
+    assert result.exit_code == 1
+    assert "nope" in result.output and "harumi runs list" in result.output
 
 
 def test_compare_rejects_a_run_id_containing_a_comma(api):
-    result = runner.invoke(cli.app, ["compare", "run-1", "a,b", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "a,b", "--project", "proj-1"])
 
     assert result.exit_code == 1
     assert api.paths() == []
@@ -3403,12 +3417,12 @@ def test_runs_download_defaults_to_the_latest_run(api, tmp_path, monkeypatch):
 
 def test_runs_download_takes_an_explicit_run_id(api, tmp_path, monkeypatch):
     monkeypatch.setattr("harumi.execution.download_run_output", lambda _a, _p, run, dest: dest / f"{run.id}.zip")
-    api.route("GET", "/api/projects/proj-1/runs/run-1", {**RUN, "output_url": "s3://x"})
+    api.route("GET", "/api/projects/proj-1/runs/7f3a91c2-0000-4000-8000-000000000001", {**RUN, "output_url": "s3://x"})
 
-    result = runner.invoke(cli.app, ["runs", "download", "run-1", "--project", "proj-1", "-o", str(tmp_path)])
+    result = runner.invoke(cli.app, ["runs", "download", "7f3a91c2-0000-4000-8000-000000000001", "--project", "proj-1", "-o", str(tmp_path)])
 
     assert result.exit_code == 0, result.output
-    assert api.paths() == ["/api/projects/proj-1/runs/run-1"]
+    assert api.paths() == ["/api/projects/proj-1/runs/7f3a91c2-0000-4000-8000-000000000001"]
 
 
 def test_runs_download_with_no_runs_is_a_clean_error(api):
@@ -3444,7 +3458,7 @@ def test_share_update_password_can_combine_with_other_flags_and_alone_needs_no_o
 
 
 def test_run_output_dir_is_deprecated_but_still_accepted(api, git, bound_dir):
-    api.route("POST", "/api/projects/proj-bound/execute", {"execution_log_id": "e1", "project_run_id": "run-1", "status": "queued"})
+    api.route("POST", "/api/projects/proj-bound/execute", {"execution_log_id": "e1", "project_run_id": "7f3a91c2-0000-4000-8000-000000000001", "status": "queued"})
 
     result = runner.invoke(cli.app, ["run", "--branch", "main", "-o", "out"])
 

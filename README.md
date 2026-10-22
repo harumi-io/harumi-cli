@@ -105,6 +105,7 @@ Selection precedence: `--env` > `HARUMI_ENV` > the choice made at `harumi login`
 | `HARUMI_PLATFORM_URL` | Override the web-app URL used in printed project links |
 | `HARUMI_NO_INTERACTIVE` | Set to `1` to never show an arrow-key menu (menus are also off under `CI`, with `TERM=dumb`, and whenever stdin or stdout isn't a terminal) |
 | `HARUMI_NO_UPDATE_CHECK` | Set to `1` to turn off the "a newer version is available" notice (it is also off under `CI` and whenever stderr isn't a terminal) |
+| `NO_COLOR` | Honoured as the [standard](https://no-color.org) says: colour is dropped, **bold stays**. Colour is off when output is piped or redirected, and on again only if you set `FORCE_COLOR`. An empty `NO_COLOR` is ignored. `TERM=dumb` turns it all off |
 | `HARUMI_DEBUG` | Set to `1` to get the full traceback for anything that escapes a command, including a closed pipe or a disk error (otherwise a bug prints a short message naming the kind of error and where to report it). Local variables are never printed, as they hold tokens |
 | `HARUMI_STATUS_URL` | Override the status page used by `harumi status` and the unreachable-API hint (the hint is skipped when the API URL is overridden, unless this is set) |
 
