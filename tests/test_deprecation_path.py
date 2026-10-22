@@ -327,14 +327,19 @@ def release_gaps(removal_version: str, current_version: str):
         return [f"no changelog entry for {removal_version}"]
     gaps = [] if entry.date else [f"the {removal_version} heading has no date"]
     removed = entry.notes.split("### Removed")[-1] if "### Removed" in entry.notes else ""
-    quoted = set(re.findall(r"`([^`]+)`", removed))
-    groups = {"repo", "skill", "config"}
+    quoted = {normalised_name(span) for span in re.findall(r"`([^`]+)`", removed)}
     for key in cli._RETIRED:
-        name = key.removeprefix("harumi ")
-        listed = name in quoted or name.split()[-1] in quoted or (name.split()[0] in groups and f"harumi {name.split()[0]} ..." in quoted)
-        if not listed:
+        name = normalised_name(key)
+        # The full name, or a group written once (`harumi repo ...`) that it belongs to. A bare last word is not
+        # enough: `delete` is the end of two names, so one mention would stand in for both.
+        if name not in quoted and not any(name.startswith(group + " ") for group in quoted):
             gaps.append(f"the notes do not list `{name}` as removed")
     return gaps
+
+
+def normalised_name(text: str) -> str:
+    """`harumi repo ...`, `repo ...` and `repo` are the same group; `harumi push` and `push` the same command."""
+    return re.sub(r"\s+\.\.\.$", "", text.strip()).removeprefix("harumi ").strip()
 
 
 def test_the_release_notes_are_complete_by_the_time_the_version_is_bumped():
@@ -348,7 +353,8 @@ def test_the_release_check_does_fire_when_the_notes_are_left_as_drafted():
     names, so it must report both."""
     gaps = release_gaps(cli._REMOVAL_VERSION, cli._REMOVAL_VERSION)
 
-    assert any("no date" in g for g in gaps) and sum("do not list" in g for g in gaps) >= 25
+    assert any("no date" in g for g in gaps)
+    assert sum("do not list" in g for g in gaps) == len(cli._RETIRED)  # none of them, whatever the table grows to
 
 
 def test_a_complete_release_entry_satisfies_the_check(monkeypatch):
@@ -426,6 +432,51 @@ def test_the_draft_names_only_commands_and_flags_that_exist():
 )
 def test_the_notes_check_catches_a_wrong_command_or_flag(wrong):
     assert unresolved_in_notes(wrong) != []
+
+
+def gaps_for(removed_text: str):
+    from harumi.changelog import Release
+
+    entry = Release(cli._REMOVAL_VERSION, "2026-11-01", "### Removed\n\n" + removed_text)
+    return [g for g in release_gaps_with(entry) if "do not list" in g]
+
+
+def release_gaps_with(entry):
+    original = release_notes
+    sys.modules[__name__].release_notes = lambda version: entry
+    try:
+        return release_gaps(cli._REMOVAL_VERSION, cli._REMOVAL_VERSION)
+    finally:
+        sys.modules[__name__].release_notes = original
+
+
+def test_names_written_with_the_program_name_count_as_listed():
+    """The draft already writes `harumi env`; a release author who writes `harumi push` must not be told it is
+    missing and then reword correct notes to satisfy a test."""
+    every_name = ", ".join(f"`{key}`" for key in cli._RETIRED)
+
+    assert gaps_for(every_name) == []
+
+
+def test_names_written_without_the_program_name_count_as_listed():
+    every_name = ", ".join(f"`{key.removeprefix('harumi ')}`" for key in cli._RETIRED)
+
+    assert gaps_for(every_name) == []
+
+
+def test_a_group_written_once_covers_its_commands():
+    leaves = [key for key in cli._RETIRED if key.startswith("harumi repo ")]
+    others = ", ".join(f"`{key}`" for key in cli._RETIRED if not key.startswith("harumi repo"))
+
+    assert len(leaves) >= 10 and gaps_for(others + ", `harumi repo ...`") == []
+    assert len(gaps_for(others)) == len(leaves) + 1  # without it, the group and each of its commands are missing
+
+
+def test_one_shared_last_word_does_not_stand_in_for_every_name_that_ends_with_it():
+    """`delete` ends `projects delete` and `org delete`; listing the word once must not satisfy both."""
+    missing = gaps_for("`delete`, `remove`, `create`, `list`")
+
+    assert len(missing) == len(cli._RETIRED), "a bare word counted as listing a name"
 
 
 def test_the_draft_notes_exist_ahead_of_the_release_and_are_newest_first():
