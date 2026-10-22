@@ -87,6 +87,7 @@ def test_the_help_has_no_stray_short_lines_from_hard_wrapped_text(monkeypatch):
 
     body = [l.strip() for l in runner.invoke(cli.app, ["projects", "rm", "--help"]).output.splitlines()]
     prose = [l for l in body[: body.index(next(l for l in body if l.startswith("╭")))] if l and not l.startswith("Usage")]
+    prose = prose[: prose.index("Examples:")] if "Examples:" in prose else prose  # the examples are a block, not prose
 
     assert prose and max(len(l) for l in prose) <= 80, "not rendered at 80 columns, so this test proves nothing"
     assert all(len(l) > 12 for l in prose), prose
