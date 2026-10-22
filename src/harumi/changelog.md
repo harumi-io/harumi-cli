@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.12.0
+
+A friendlier first session, readable output everywhere, and the same rules for every command: how it confirms, how it fails, what it prints for a script.
+
+### New
+
+- Bare `harumi` is a quick start, and `harumi start` asks which of `new`, `import` and `clone` you want. At a terminal, commands that need an id offer a menu instead (`HARUMI_NO_INTERACTIVE=1` turns menus off; without a terminal they never appear).
+- `harumi login` asks which workspace to use (an organization or your personal one) and offers next steps. Harumi staff choose production or staging inside `login`; `harumi env` is gone. `org use` has a picker and `--personal`.
+- `--json` on every command that reads, and on `run` (`run --watch --json` prints data on stdout and progress on stderr). Only the fields meant for scripts are included: no tokens, signed URLs or secret values.
+- `harumi run` prints one line per phase; `--watch` shows one live line with elapsed time. A failed run leads with its cause and the last lines of stderr. Ctrl-C stops watching, never the run (exit 130, with the commands to follow or cancel it).
+- `runs get` and `runs download` use the latest run when you give none; `runs cancel` offers the runs still going; `harumi compare` lets you pick the runs.
+- `harumi import` shows what it will upload and leaves out virtual environments, `node_modules` and files that look like secrets. A secret that git tracks is warned about; without a terminal, `import` refuses unless you pass `--include-tracked-secrets`.
+- `harumi specs` shows whole kernel names and says how to use one; `harumi usage` shows percentages and dollars; a plan limit tells you what to do about it (subscribe, ask an admin, enable overage), including the trial's limits.
+- `-h` works like `--help`, and `-v` like `--version`. The command list is grouped, and about thirty commands end their `--help` with an `Examples:` block.
+- Press TAB after `harumi --install-completion` to complete commands, flags and the values with a fixed list (`--type`, `--role`, `--mode`).
+- `share add|update --comparisons` lets viewers compare runs (it needs `--run-history`).
+
+### Changes a script can notice
+
+- **A declined confirmation exits 1** (it was 0).
+- **A delete with no `--yes` and no terminal refuses, exit 1,** and tells you to pass `--yes`. It used to read `y` from standard input, so `printf y | harumi projects rm ...` no longer works.
+- `org rm` asks you to type the organization's name; `share update --no-password` asks first. A permanent delete by id needs the exact name or 8 or more characters of the id.
+- **`files rm` of a file that is not there exits 1** (harumi-api says "deleted" for any path). Pass `--missing-ok` for the old idempotent behaviour.
+- `harumi check` exits 1 when the project cannot run.
+- `runs list`, `schedules list`, `memories list`, `share list` and `org members` print the first 8 characters of an id, and the commands that take one accept the start of it (`projects list` still prints whole ids). Their columns changed: `runs list` shows `started` and `took`, `schedules list` no longer shows the kernel, and `share list` no longer prints tokens.
+- Errors say what failed, whose problem it is and what to do: your network, a company TLS proxy (`SSL_CERT_FILE`), a refused connection and a cut-off reply each read differently, and when a change may have gone through before the connection dropped, it says so, so you can check before you repeat it. `HARUMI_DEBUG=1` shows the full trace.
+- Names are matched, not guessed: `org use Acme` saves the real organization id (it used to save the word you typed), `--role owner` is refused before the request, and a wrong verb says which command exists (`secrets create` -> `set`).
+- `projects rm` says it moves a project to the Trash, where it stays for 7 days.
+- `datasources`, `schedules`, `memories` and `secrets` show text as stored (a `[/x]` in a query result used to crash), and `files put` completes the upload so the file really appears.
+
+### Fixed
+
+- `Client` (the Python library) uses its own environment's login. With clients for two environments, the first one used to send the second one's token.
+- `dashboard validate` knows the current widgets: `filter`, `detail` and `kpi-rail` are gone (`metric` replaces `kpi-rail`).
+
+### Removed
+
+- `harumi env`. Set `HARUMI_ENV=staging` for scripts, or pass `--env`.
+
 ## 0.11.0 - 2026-10-13
 
 A smaller, more consistent command set, real `skills` commands, and update notices.
