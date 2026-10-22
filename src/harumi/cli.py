@@ -592,6 +592,30 @@ def _prompt_hidden(text: str, *, confirm: bool = False) -> str:
     return line.rstrip("\r\n")
 
 
+def _print_records(table: Table, headers: list[str], rows: list[list[Text]], *, lead: int = 2) -> None:
+    """Print `rows` as `table` if it can fit with every cell whole, else as two lines per row.
+
+    A table has a narrowest width below which it cannot go: `projects list` needs 87 columns with the
+    project id whole, which is more than a default terminal. Shrinking it then cuts the id, the one
+    value you copy, or squeezes every other column to nothing. So below that width each row becomes
+    two lines: the first `lead` cells together (the id and the name), then the rest as `header: value`
+    pairs, dimmed. Nothing is cut or wrapped at any width, and a list stays scannable, which one line
+    per field would not. `--json` is the form for a script.
+    """
+    from rich.measure import Measurement
+
+    narrowest = Measurement.get(console, console.options.update(width=10_000), table).minimum
+    if narrowest <= console.width:
+        console.print(table)
+        return
+    for row in rows:
+        first = Text("  ").join(cell for cell in row[:lead] if cell.plain)
+        console.print(first, soft_wrap=True)
+        rest = [Text.assemble((f"{h}: ", "dim"), cell) for h, cell in zip(headers[lead:], row[lead:]) if cell.plain]
+        if rest:
+            console.print(Text("   ") + Text("  ").join(rest), soft_wrap=True, style="dim")
+
+
 _JSON = typer.Option(False, "--json", help="Print JSON on stdout instead of a table, for scripts.")
 
 
@@ -1242,7 +1266,7 @@ def status() -> None:
         else:
             state = "[bold red]down[/bold red]"
             down += 1
-        table.add_row(str(endpoint.get("group") or "-"), str(endpoint.get("name", "?")), state)
+        table.add_row(_cell(endpoint.get("group") or "-"), _cell(endpoint.get("name", "?")), state)  # from a public page we do not control
     console.print(table)
     if down:
         _fail(f"{down} service(s) down. Details: {url}")
@@ -1683,7 +1707,7 @@ def profile_show(
     p = client.get_profile()
     table = Table("field", "value")
     for field in ("id", "email", "first_name", "last_name", "bio"):
-        table.add_row(field, str(getattr(p, field, "") or ""))
+        table.add_row(field, _cell(getattr(p, field, "") or ""))
     console.print(table)
 
 
@@ -1886,7 +1910,7 @@ def skills_library(
     table = Table("slug", "name", "category", "version", "description")
     table.columns[0].no_wrap = True  # the slug is what you copy into `skills add`
     for p in sorted(presets, key=lambda p: p.slug):
-        table.add_row(p.slug, p.name, p.category, str(p.version), p.description)
+        table.add_row(_cell(p.slug), _cell(p.name), _cell(p.category), _cell(p.version), _cell(p.description))
     console.print(table)
 
 
@@ -2007,7 +2031,7 @@ def blueprints(
 
     table = Table("slug", "name", "description")
     for b in items:
-        table.add_row(b.slug, b.name, b.description)
+        table.add_row(_cell(b.slug), _cell(b.name), _cell(b.description))
     console.print(table)
 
 
@@ -2845,13 +2869,20 @@ def projects_list(
 
     columns = ["id", "name", "updated"] + (["workspace"] if names else []) + ["kernel_spec", "role"]
     table = Table(*columns)
+    # The project id goes straight to `projects get`, `clone`, `link` and `--project`, so it is never cut or
+    # wrapped; the name and the rest give way around it, and below the width where they cannot, each
+    # project is printed as a block instead (see `_print_records`).
+    table.columns[0].no_wrap = True
+    table.columns[0].overflow = "fold"
+    rows = []
     for p in shown:
-        row = [p.id, p.name, _ago(p.updated_at or p.created_at)]
+        row = [_cell(p.id), _cell(p.name), _cell(_ago(p.updated_at or p.created_at))]
         if names:
-            row.append(_workspace_label(p, names))
-        row += [p.kernel_spec or "", p.role_name or ""]
+            row.append(_cell(_workspace_label(p, names)))
+        row += [_cell(p.kernel_spec or ""), _cell(p.role_name or "")]
         table.add_row(*row)
-    console.print(table)
+        rows.append(row)
+    _print_records(table, columns, rows)
     if len(shown) < total:
         console.print(
             f"[dim]Showing {len(shown)} of {total} projects, most recently updated first."
@@ -3312,13 +3343,16 @@ def runs_list(
         return
 
     shown = runs if all_ else runs[: limit or RUNS_SHOWN]
+    # The first 8 characters of the id, which every `runs` command and `compare` accept: the whole id is
+    # 36 and is what made this column shrink to "7f3a91c2-0000-…" at any width, unusable to copy.
     table = Table("id", "status", "source", "branch", "started", "took")
+    table.columns[0].no_wrap = True
     for r in shown:
         table.add_row(
-            r.id,
-            _status_markup(r.status),
-            r.source or "",
-            r.git_branch or "",
+            _cell(r.id[:8]),
+            _status_markup(r.status),  # our own markup, from a fixed set of statuses
+            _cell(r.source or ""),
+            _cell(r.git_branch or ""),
             _run_started(r),
             _duration(_run_duration(r)),
         )
@@ -3333,7 +3367,7 @@ def runs_list(
 @runs_app.command("get")
 @_handle_errors
 def runs_get(
-    run_id: Optional[str] = typer.Argument(None, help="Run id. Defaults to the project's latest run."),
+    run_id: Optional[str] = typer.Argument(None, help="Run id, or the start of it (what `runs list` shows). Defaults to the project's latest run."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     as_json: bool = _JSON,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
@@ -3343,7 +3377,8 @@ def runs_get(
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
-    r = client.get_run(project_id, run_id) if run_id else client.get_latest_run(project_id)
+    with _pointing_to("harumi runs list"):
+        r = client.get_run(project_id, _run_id(client, project_id, run_id)) if run_id else client.get_latest_run(project_id)
     if r is None:
         _fail("This project has no runs yet. Start one with [bold]harumi run --watch[/bold].")
         return
@@ -3390,7 +3425,7 @@ def runs_get(
 @runs_app.command("download")
 @_handle_errors
 def runs_download(
-    run_id: Optional[str] = typer.Argument(None, help="Run id. Defaults to the project's latest run."),
+    run_id: Optional[str] = typer.Argument(None, help="Run id, or the start of it (what `runs list` shows). Defaults to the project's latest run."),
     output_dir: Path = typer.Option(
         Path("."), "--output-dir", "-o", help="Directory to download into. Default: current directory."
     ),
@@ -3404,7 +3439,8 @@ def runs_download(
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
-    run = client.get_run(project_id, run_id) if run_id else client.get_latest_run(project_id)
+    with _pointing_to("harumi runs list"):
+        run = client.get_run(project_id, _run_id(client, project_id, run_id)) if run_id else client.get_latest_run(project_id)
     if run is None:
         _fail("Project has no runs yet.")
         return
@@ -3429,7 +3465,7 @@ def runs_download(
 @runs_app.command("cancel")
 @_handle_errors
 def runs_cancel(
-    run_id: Optional[str] = typer.Argument(None, help="Run id. Pick from the runs still going if omitted."),
+    run_id: Optional[str] = typer.Argument(None, help="Run id, or the start of it (what `runs list` shows). Pick from the runs still going if omitted."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -3447,7 +3483,8 @@ def runs_cancel(
         if run_id is None:
             return  # backed out of the menu; choosing a run was the confirmation
 
-    r = client.cancel_run(project_id, run_id)
+    with _pointing_to("harumi runs list"):
+        r = client.cancel_run(project_id, _run_id(client, project_id, run_id))
     if r.finished and r.status != "cancelled":
         console.print(f"Run {escape(r.id)} had already {_status_markup(r.status)}; there was nothing to cancel.")
         return
@@ -3556,6 +3593,11 @@ def compare(
         ids = _check_compare_ids(run_ids)
         project_id = _resolve_project(project)
         client = _get_client(api_url=api_url, org=org)
+        if any(not _FULL_ID.match(i) for i in ids):
+            # A start of an id (what `runs list` shows) names a run; the API wants whole ids. Two spellings
+            # of one run are then the same run, which `_check_compare_ids` is run on again to refuse.
+            runs = client.list_runs(project_id)
+            ids = _check_compare_ids([i if _FULL_ID.match(i) else _match_by_id(runs, i, "run", "harumi runs list").id for i in ids])
     else:
         project_id = _resolve_project(project)
         client = _get_client(api_url=api_url, org=org)
@@ -4486,7 +4528,7 @@ def dashboard_validate(
         if widgets:
             table = Table("id", "type", "title")
             for w in widgets:
-                table.add_row(w["id"], w["type"], w["title"])
+                table.add_row(_cell(w["id"]), _cell(w["type"]), _cell(w["title"]))  # titles are the author's own text
             console.print(table)
         else:
             console.print("No widgets would render.")
@@ -5372,6 +5414,13 @@ schedules_app = typer.Typer(help="Manage project cron schedules for git-ref runs
 app.add_typer(schedules_app, name="schedules")
 
 
+def _run_id(client: Client, project_id: str, typed: str) -> str:
+    """The full id for what the user typed: a whole id as given (no lookup), or the start of exactly one run."""
+    if _FULL_ID.match(typed):
+        return typed
+    return _match_by_id(client.list_runs(project_id), typed, "run", "harumi runs list").id
+
+
 def _schedule_id(client: Client, project_id: str, typed: str) -> str:
     """The full id for what the user typed: a full id as given, or the start of exactly one."""
     if _FULL_ID.match(typed):
@@ -6049,9 +6098,12 @@ def org_list(
 
     table = Table("id", "name", "role")
     table.columns[0].no_wrap = True
+    rows = []
     for o in orgs:
-        table.add_row(_cell(o.id), _cell(o.business_name), _cell(o.role_name or o.role or ""))
-    console.print(table)
+        row = [_cell(o.id), _cell(o.business_name), _cell(o.role_name or o.role or "")]
+        table.add_row(*row)
+        rows.append(row)
+    _print_records(table, ["id", "name", "role"], rows)
     current = Config.load().org_id
     known = next((o for o in orgs if o.id == current), None)
     where = escape(_printable(known.business_name)) if known else "your personal workspace"

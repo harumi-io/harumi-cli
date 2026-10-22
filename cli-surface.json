@@ -3003,7 +3003,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Run id. Pick from the runs still going if omitted."
+          "help": "Run id, or the start of it (what `runs list` shows). Pick from the runs still going if omitted."
         },
         {
           "opts": [
@@ -3058,7 +3058,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Run id. Defaults to the project's latest run."
+          "help": "Run id, or the start of it (what `runs list` shows). Defaults to the project's latest run."
         },
         {
           "opts": [
@@ -3126,7 +3126,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Run id. Defaults to the project's latest run."
+          "help": "Run id, or the start of it (what `runs list` shows). Defaults to the project's latest run."
         },
         {
           "opts": [
