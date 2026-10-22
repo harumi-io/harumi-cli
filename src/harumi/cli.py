@@ -143,6 +143,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import difflib
+import errno
 import functools
 import json
 import mimetypes
@@ -154,16 +155,17 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import NoReturn, Optional
 
 import httpx
+import pydantic
 import typer
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
-from harumi import __version__, auth, interactive, json_out, quickstart
+from harumi import __version__, auth, interactive, json_out, models, quickstart, update
 from harumi import skills as skills_mod
 from harumi.client import Client, upload_is_staged
 from harumi.file_sync_cap import (
@@ -196,12 +198,14 @@ from harumi.dashboard import (
     validate_dashboard_toml,
     widget_schemas,
 )
+from harumi.execution import WatchLostError
 from harumi.errors import (
     ApiError,
     ApiUnreachableError,
     HarumiError,
     NotAuthenticatedError,
     SessionRefreshError,
+    UnexpectedReplyError,
 )
 from harumi.git import (
     LARGE_FILE_BYTES,
@@ -228,6 +232,9 @@ app = typer.Typer(
     # Bare `harumi` is the quick start (see `_quickstart`), not a help dump.
     no_args_is_help=False,
     invoke_without_command=True,
+    # typer 0.16 to 0.21 print every local variable of the failing frame in a crash traceback, and these
+    # hold session and git tokens. Newer typer stops by default; this keeps the old ones from doing it.
+    pretty_exceptions_show_locals=False,
 )
 console = Console()
 err_console = Console(stderr=True)
@@ -683,33 +690,89 @@ def _paywall_hint(code: Optional[str]) -> str:
     return template.format(billing=_billing_url())
 
 
+# What a request that got no answer at all says, by kind. Plain words, and no errno: a person cannot act on one.
+_UNREACHABLE = {
+    "refused": "Couldn't connect to Harumi: the connection was refused.",
+    "dns": "Couldn't find Harumi's address (the DNS lookup failed). Check your internet connection.",
+    "timeout": "Harumi didn't answer in time.",
+    "tls": (
+        "Couldn't make a secure connection to Harumi: its certificate wasn't trusted. On a company network this "
+        "is usually a proxy that re-signs traffic; point SSL_CERT_FILE at your company's CA certificate file and try again."
+    ),
+    "dropped": "The connection to Harumi was cut off.",
+}
+# Kinds where the problem is on your side of the connection, so the platform's status page would only mislead.
+_YOUR_NETWORK = {"dns", "tls"}
+
+
+def _wait_phrase(seconds: int) -> str:
+    if seconds >= 3600:
+        hours = round(seconds / 3600)
+        return f"{hours} hour{'' if hours == 1 else 's'}"
+    if seconds >= 120:
+        return f"{round(seconds / 60)} minutes"
+    return f"{seconds} second{'' if seconds == 1 else 's'}"
+
+
+def _format_unreachable(exc: ApiUnreachableError) -> str:
+    lines = [_UNREACHABLE.get(exc.kind) or f"Couldn't reach Harumi ({escape(_printable(exc.detail.removeprefix('Could not reach harumi-api: ')))})."]
+    if ENVIRONMENTS[active_environment()].internal and exc.kind not in {"tls"}:
+        # Staging is VPN-only, so "can't connect" there nearly always means the VPN. Production users are
+        # never told an environment exists.
+        lines.append("This environment is only reachable over the VPN. Is it connected?")
+    if exc.may_have_succeeded:
+        lines.append(
+            "This request changes something, so it may have gone through before the connection failed. "
+            "Look at the current state before you try again."
+        )
+    hint_url = None if exc.kind in _YOUR_NETWORK else status_hint_url()
+    if hint_url:
+        lines.append(f"Check {hint_url} for platform status, or run [bold]harumi status[/bold].")
+    return "\n".join(lines)
+
+
 def _format_api_error(exc: ApiError) -> str:
-    """`str(exc)` for every `ApiError` except a 402, which gets a message that
-    actually tells the user what to do — "harumi-api returned HTTP 402: ..."
-    is accurate but doesn't point anywhere. 402 here always means billing:
-    the workspace has no plan, is over a weekly/monthly limit, or the plan
-    doesn't cover the kernel. harumi-api sends the reason as `code`, which
-    picks the hint; its `detail` is shown as is.
+    """The message for an `ApiError`, in words that say what to do.
+
+    A request with no answer is described by what happened (see `_UNREACHABLE`). A web page where
+    harumi-api should have answered is described, not pasted. A 402 means billing and gets a hint
+    from its `code`; a 429 says how long to wait; a 5xx points at the status page. Anything else is
+    the server's own text, cleaned of control characters, since it is shown through Rich markup.
     """
-    if isinstance(exc, ApiUnreachableError) or exc.status_code >= 500:
-        # harumi-api gave no answer, or a server-side failure: likely an outage, not user error.
-        # Not every ApiError(0, ...) qualifies: a failed presigned S3 transfer is not Harumi being down.
+    if isinstance(exc, ApiUnreachableError):
+        return _format_unreachable(exc)
+    if exc.status_code == 0:
+        # A failed presigned S3 transfer: not Harumi being down, and not an HTTP status either.
+        return escape(_printable(exc.detail))
+    text = escape(_printable(exc.detail))
+    if exc.code == "non_api_reply":
+        # Already says what it is, with the status; claiming harumi-api "returned" it would be wrong.
+        hint_url = status_hint_url() if exc.status_code >= 500 else None
+        return text if hint_url is None else f"{text}\nCheck {hint_url} for platform status, or run [bold]harumi status[/bold]."
+    # A refresh that failed says so first: it is the login's problem, whatever the command was doing.
+    lead = "Could not renew your login: " if isinstance(exc, SessionRefreshError) else ""
+    if exc.status_code >= 500:
         hint_url = status_hint_url()
-        if hint_url is None:
-            return escape(str(exc))
-        return f"{escape(str(exc))}\nCheck {hint_url} for platform status, or run [bold]harumi status[/bold]."
+        base = f"{lead}harumi-api returned HTTP {exc.status_code}: {text}"
+        return base if hint_url is None else f"{base}\nCheck {hint_url} for platform status, or run [bold]harumi status[/bold]."
     if exc.code == "mfa_required":
         # The API wants a fresh authenticator code for this action. The CLI signs in by email code and
         # has no way to ask for one, so retrying here cannot work: say where it can be done.
-        return (
-            f"{escape(exc.detail)}\n"
-            "The CLI can't ask for your authenticator code. Do this in the web app, where you can enter it."
-        )
+        return f"{text}\nThe CLI can't ask for your authenticator code. Do this in the web app, where you can enter it."
+    if exc.status_code == 429 and exc.retry_after:
+        return f"harumi-api returned HTTP 429: {text}\nTry again in {_wait_phrase(exc.retry_after)}."
     if exc.status_code != 402:
-        # `_fail` prints through Rich markup, and server text can hold `[/x]`-style brackets.
-        return escape(str(exc))
+        return f"{lead}harumi-api returned HTTP {exc.status_code}: {text}"
     hint = _paywall_hint(exc.code)
-    return f"{escape(exc.detail)}\n{hint}" if hint else escape(exc.detail)
+    return f"{text}\n{hint}" if hint else text
+
+
+# Every model in harumi.models describes a harumi-api reply (that file is the contract with the server).
+# A ValidationError from one of them means the server's answer was not what this version expects; from
+# anything else it is a bug or bad local input, and is left to say so.
+_API_MODELS = {
+    name for name, obj in vars(models).items() if isinstance(obj, type) and issubclass(obj, pydantic.BaseModel)
+}
 
 
 def _handle_errors(fn):
@@ -729,8 +792,20 @@ def _handle_errors(fn):
             _fail(escape(str(exc)))
         except ApiError as exc:
             _fail(_format_api_error(exc))
+        except UnexpectedReplyError as exc:
+            _fail(f"{escape(str(exc))}\nIf this keeps happening on a normal network, upgrade the CLI: [bold]{update.upgrade_command()}[/bold]")
         except HarumiError as exc:
             _fail(str(exc))
+        except pydantic.ValidationError as exc:
+            if exc.title not in _API_MODELS:
+                raise  # not a reply from the server (a local model): blaming it, and saying to upgrade, would hide the cause
+            # harumi-api answered, in a shape this version does not know (a newer or older server). Only the
+            # field names are shown: the failing input can be a value the user typed or a credential.
+            fields = ", ".join(sorted({".".join(str(p) for p in e["loc"]) for e in exc.errors() if e.get("loc")})) or "the reply"
+            _fail(
+                f"Harumi's reply wasn't in the form this version of the CLI expects (problem with: {escape(fields)}). "
+                f"Upgrade the CLI: [bold]{update.upgrade_command()}[/bold]"
+            )
         except DashboardSchemaError as exc:
             # The vendored widget contract is unusable. Only the dashboard
             # commands need it, so this surfaces as a normal command failure
@@ -2956,6 +3031,10 @@ def run(
                     f"{_format_api_error(exc)}\n"
                     "Run [bold]harumi check[/bold] to see what is blocking this project."
                 )
+            if getattr(exc, "may_have_succeeded", False):
+                # The request to start it was sent and the answer never came: a run may be queued.
+                # Starting another would run the project twice (and spend the allowance twice).
+                _fail(f"{_format_api_error(exc)}\nTo see whether a run was queued: [bold]harumi runs list[/bold]")
             raise
         run_id = response.project_run_id
         console.print(f"Queued run [bold]{run_id}[/bold]" if run_id else "Queued.")
@@ -2976,7 +3055,13 @@ def run(
                 _emit_json(_run_record(None, response.status or "queued", watched=False))
             return
 
-        result = _watch_run(client, project_id, run_id)
+        try:
+            result = _watch_run(client, project_id, run_id)
+        except _WatchLost:
+            if as_json:
+                # Not "failed": nothing is known about the run, and a pipeline must not treat it as a verdict.
+                _emit_json({**_run_record(run_id, "unknown", watched=True), "note": "lost contact while watching; the run may still be going"})
+            raise typer.Exit(code=1)
         if as_json:
             _emit_json(_run_record(run_id, result.status, watched=True, run=result))
         if result.succeeded:
@@ -3048,16 +3133,24 @@ def _watch_run(client: Client, project_id: str, run_id: str):
     from rich.live import Live
     from rich.spinner import Spinner
 
-    from harumi.execution import wait_for_run
+    from harumi.execution import DEFAULT_MAX_POLL_FAILURES, wait_for_run
 
     started = time.monotonic()
-    state = {"status": "queued"}
+    state = {"status": "queued", "trouble": False}
     live = _live_display_ok()
 
     def on_poll(run) -> None:
         if run.status != state["status"] and not live:
             console.print(f"[dim]{_duration(time.monotonic() - started):>7}[/dim]  {run.status}")
         state["status"] = run.status
+        state["trouble"] = False
+
+    def on_poll_failure(exc) -> None:
+        # Once per outage, not once per poll: the run goes on without us, and a line every few
+        # seconds would bury the progress it replaces.
+        if not state["trouble"] and not live:
+            console.print("[yellow]Connection trouble.[/yellow] [dim]The run keeps going; trying again...[/dim]")
+        state["trouble"] = True
 
     spinner = Spinner("dots")
 
@@ -3070,9 +3163,23 @@ def _watch_run(client: Client, project_id: str, run_id: str):
     try:
         if live:
             with Live(get_renderable=frame, console=console, refresh_per_second=8, transient=True):
-                return wait_for_run(client.api, project_id, run_id, on_poll=on_poll)
+                return wait_for_run(
+                    client.api, project_id, run_id, on_poll=on_poll,
+                    max_poll_failures=DEFAULT_MAX_POLL_FAILURES, on_poll_failure=on_poll_failure,
+                )
         console.print(f"Waiting for run {run_id} to finish...")
-        return wait_for_run(client.api, project_id, run_id, on_poll=on_poll)
+        return wait_for_run(
+            client.api, project_id, run_id, on_poll=on_poll,
+            max_poll_failures=DEFAULT_MAX_POLL_FAILURES, on_poll_failure=on_poll_failure,
+        )
+    except WatchLostError as exc:
+        # The run is not known to have failed, only that we stopped hearing about it.
+        console.print(
+            f"\n[bold red]Lost touch with harumi-api[/bold red] while waiting. [bold]The run is probably still going.[/bold]\n"
+            f"  Check on it:  [bold]harumi runs get {run_id}[/bold]\n"
+            f"  Cancel it:    [bold]harumi runs cancel {run_id}[/bold]"
+        )
+        raise _WatchLost(run_id) from exc
     except KeyboardInterrupt:
         console.print(
             f"\nStopped watching. [bold]The run is still going.[/bold]\n"
@@ -3080,6 +3187,14 @@ def _watch_run(client: Client, project_id: str, run_id: str):
             f"  Cancel it:  [bold]harumi runs cancel {run_id}[/bold]"
         )
         raise typer.Exit(code=130)
+
+
+class _WatchLost(Exception):
+    """Carries the run id out of `_watch_run` so `run` can report the outcome as unknown."""
+
+    def __init__(self, run_id: str) -> None:
+        super().__init__(run_id)
+        self.run_id = run_id
 
 
 def _print_failed_run(run) -> None:
@@ -6046,6 +6161,28 @@ _hidden_alias(org_app, "delete", org_rm, "harumi org delete", "harumi org rm")
 _hidden_alias(org_app, "remove", org_rm_member, "harumi org remove", "harumi org rm-member")
 
 
+# errno values that say the problem is a local file or disk (full, read-only, no permission, missing), as
+# opposed to an OSError that merely shares the base class: a reset connection, an SSL failure.
+_LOCAL_FILE_ERRNOS = {errno.ENOSPC, errno.EROFS, errno.EACCES, errno.EPERM, errno.ENOENT, errno.EDQUOT}
+
+
+def _report_crash(exc: BaseException) -> NoReturn:
+    """What a person sees when the CLI itself breaks, in place of a traceback.
+
+    Everything a person can cause is handled where it happens (`_handle_errors`), so what reaches here is a
+    bug. A traceback is no use to them, and the exception's text is a risk: it can carry a URL with a token
+    in it. So: that it is a bug, the kind, and where to report it. HARUMI_DEBUG=1 gives the traceback.
+    """
+    err_console.print(
+        f"[bold red]Error:[/bold red] Something unexpected went wrong in harumi ({type(exc).__name__}). "
+        "This is a bug in the CLI, not something you did.\n"
+        f"Please report it at https://github.com/harumi-io/harumi-cli/issues with the command you ran and "
+        f"harumi {__version__}. Run it again with [bold]HARUMI_DEBUG=1[/bold] for the full details "
+        "(look them over before sharing: they can contain file paths)."
+    )
+    raise SystemExit(1) from None
+
+
 def main() -> None:
     from harumi.update import UpdateCheck
 
@@ -6054,6 +6191,24 @@ def main() -> None:
     check.start()
     try:
         app()
+    except Exception as exc:
+        if os.environ.get("HARUMI_DEBUG"):
+            raise  # whatever it is, a bug report wants the traceback
+        if isinstance(exc, BrokenPipeError):
+            # `harumi ... | head`: the reader left. Not an error; point stdout at nothing so Python's
+            # exit-time flush does not complain about the closed pipe.
+            try:
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            except (OSError, ValueError, AttributeError):  # stdout replaced by something with no file descriptor
+                pass
+            raise SystemExit(1) from None
+        if isinstance(exc, OSError) and exc.errno in _LOCAL_FILE_ERRNOS:
+            # A full or read-only disk, a permission problem on ~/.harumi: the machine, not a bug. Only the
+            # OS's own words and the path are shown, never anything the CLI was holding.
+            where = f" ({escape(str(exc.filename))})" if exc.filename else ""
+            err_console.print(f"[bold red]Error:[/bold red] {escape(exc.strerror or type(exc).__name__)}{where}")
+            raise SystemExit(1) from None
+        _report_crash(exc)
     finally:
         # Runs after the command (including after `typer.Exit`/SystemExit), so a
         # notice never lands in the middle of a command's own output.

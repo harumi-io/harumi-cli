@@ -21,7 +21,14 @@ from typing import Optional
 import httpx
 
 from harumi.config import Config, clear_credentials, credentials_lock, load_credentials, save_credentials
-from harumi.errors import ApiError, NotAuthenticatedError, SessionRefreshError, transport_errors_as_api_error
+from harumi.errors import (
+    ApiError,
+    NotAuthenticatedError,
+    SessionRefreshError,
+    guard_json,
+    raise_for_status as _raise_for_status,
+    transport_errors_as_api_error,
+)
 from harumi.models import LoggedUser
 
 # Refresh proactively if the access token expires within this many seconds,
@@ -55,7 +62,7 @@ def verify_otp(
             f"{config.api_url}/users/otp/verify", json={"email": email, "token": token}
         )
     _raise_for_status(response)
-    user = LoggedUser.model_validate(response.json())
+    user = LoggedUser.model_validate(guard_json(response).json())
     _persist(user, replace=True)
     return user
 
@@ -81,7 +88,7 @@ def refresh_session(
         _raise_for_status(response)
     except ApiError as exc:
         raise SessionRefreshError(exc.status_code, exc.detail) from exc
-    user = LoggedUser.model_validate(response.json())
+    user = LoggedUser.model_validate(guard_json(response).json())
     _persist(user)
     return user
 
@@ -195,13 +202,3 @@ def has_session() -> bool:
     """Whether a login is on file at all. Says nothing about it still working."""
     creds = load_credentials()
     return bool(creds and creds.get("access_token"))
-
-
-def _raise_for_status(response: httpx.Response) -> None:
-    if response.status_code >= 400:
-        detail = response.text
-        try:
-            detail = response.json().get("detail", detail)
-        except Exception:
-            pass
-        raise ApiError(response.status_code, str(detail))
