@@ -12,6 +12,7 @@ from subdirectories of the project.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import json
 import os
 import shutil
@@ -104,6 +105,26 @@ PROJECT_CONFIG_NAME = ".harumi/config.json"
 # ponytail: process-global mutable state — fine for a single-shot CLI process,
 # and it keeps credential helpers callable without threading env everywhere.
 _ACTIVE_ENV: Optional[str] = None
+
+# The environment one `Client` is working in, for the duration of one of its calls. The global above is "the
+# last Config loaded", which is right for a CLI that runs one command and wrong for a library: a second `Client`
+# for another environment replaced it, and the first then read (and refreshed) the second's login. A context
+# variable is also per thread, so clients on different threads do not see each other's.
+#
+# `Config.load()` still sets the global, on purpose: the CLI is built on it and a Client built last is as good a
+# "current environment" as any for code that asks outside a call. What a Client does never depends on it.
+_ENV_SCOPE: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("harumi_environment_scope", default=None)
+
+
+@contextlib.contextmanager
+def environment_scope(name: str) -> Iterator[None]:
+    """Resolve credentials and settings against `name` inside the block, whatever the process-wide
+    active environment is. Nests, and restores on the way out even if the block raises."""
+    token = _ENV_SCOPE.set(name)
+    try:
+        yield
+    finally:
+        _ENV_SCOPE.reset(token)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -266,7 +287,7 @@ def set_active_environment(name: str) -> None:
 
 
 def active_environment() -> str:
-    return _ACTIVE_ENV or resolve_environment()
+    return _ENV_SCOPE.get() or _ACTIVE_ENV or resolve_environment()
 
 
 def active_platform_url() -> str:
