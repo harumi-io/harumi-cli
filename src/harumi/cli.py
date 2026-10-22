@@ -1973,9 +1973,12 @@ def _agent_skills_oserror(exc: OSError, target: Path) -> str:
     where = escape(_under_home(target))
     if isinstance(exc, FileExistsError) or (target.exists() and not target.is_dir()):
         return f"{where} is a file, not a folder, so the skills cannot go there. Move or delete it, then run this again."
+    # The OS names the thing it failed to create (`.../skills/harumi-cli`); the one a person can fix is the folder
+    # that holds it, so that is the one named.
+    folder = escape(_under_home(target.parent))
     if isinstance(exc, PermissionError):
-        return f"No permission to write to {where}. Fix its permissions (or choose another agent with --agent), then run this again."
-    return f"Could not write to {where}: {escape(exc.strerror or str(exc))}."
+        return f"No permission to write to {folder}. Fix its permissions (or choose another agent with --agent), then run this again."
+    return f"Could not write to {folder}: {escape(exc.strerror or str(exc))}."
 
 
 @agent_skills_app.command("install")

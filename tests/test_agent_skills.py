@@ -173,7 +173,9 @@ def test_a_folder_we_cannot_write_to_says_so_and_what_to_do(fake_home):
     assert code == 1
     flat = err.replace("\n", " ")
     assert "Traceback" not in err and "Errno" not in err
-    assert "No permission to write to" in flat and "~/.cursor/skills" in flat.replace("  ", " ")
+    # The folder a person can fix, not the file inside it that the OS failed to create.
+    assert "No permission to write to ~/.cursor/skills." in flat.replace("  ", " ")
+    assert "harumi-cli" not in flat
     assert "--agent" in flat  # the way out, which a bare "Permission denied" does not give
 
 
