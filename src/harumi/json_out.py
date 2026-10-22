@@ -31,6 +31,7 @@ SCHEDULE = (
 MEMORY = ("id", "scope", "content", "retrieval_mode", "source", "updated_at")
 MEMBER = ("user_id", "email", "first_name", "last_name", "role", "pending")
 BLUEPRINT = ("slug", "name", "description")
+SKILL_PRESET = ("slug", "name", "description", "category", "tags", "version")
 USAGE = (
     "plan_code", "tier", "unlimited", "balance_credits", "included_credits", "period_start", "period_end", "weekly_used_pct",
     "monthly_used_pct", "weekly_resets_at", "monthly_resets_at", "overage_allowed", "overage_enabled", "overage_paused",
@@ -95,6 +96,11 @@ def spec(k: Any) -> dict:
 
 def blueprint(b: Any) -> dict:
     return _pick(b, BLUEPRINT)
+
+
+def skill_preset(p: Any) -> dict:
+    """A library preset as a script sees it: never its content, which `skills add` writes to a file."""
+    return _pick(p, SKILL_PRESET)
 
 
 def usage(u: Any) -> dict:

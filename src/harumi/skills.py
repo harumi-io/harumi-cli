@@ -12,6 +12,7 @@ by CI on release instead; see release.yml).
 
 from __future__ import annotations
 
+import difflib
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -98,6 +99,40 @@ def agents_missing_skill() -> list[Agent]:
     return [a for a in detect_agents() if not (a.global_dir / "harumi-cli" / "SKILL.md").exists()]
 
 
+def _chosen_agents(agent_keys: Optional[list[str]]) -> "list[Agent] | str":
+    """The agents to install for, or a sentence explaining why not (an unknown name, with the known ones)."""
+    if agent_keys:
+        unknown = sorted(set(agent_keys) - set(AGENT_KEYS))
+        if unknown:
+            hints = []
+            for name in unknown:
+                close = difflib.get_close_matches(name, AGENT_KEYS, n=1, cutoff=0.6)
+                if close:
+                    hints.append(f"Did you mean {close[0]}?")
+            return f"Unknown agent(s): {', '.join(unknown)}. {' '.join(hints)} Known: {', '.join(AGENT_KEYS)}.".replace("  ", " ")
+        return [a for a in AGENTS if a.key in agent_keys]
+    return detect_agents() or [a for a in AGENTS if a.key == "universal"]
+
+
+def install_targets(*, agent_keys: Optional[list[str]] = None, project: bool = False) -> "list[Agent] | str":
+    """Where `install` would write, or why it cannot: checked first so nothing is touched on a bad request."""
+    return [] if project else _chosen_agents(agent_keys)
+
+
+def destinations(written: list[Path], *, project: bool = False) -> list[tuple[str, Path]]:
+    """(who it is for, the skills folder) for each place `install` wrote, in the order written."""
+    seen: dict[Path, str] = {}
+    for path in written:
+        folder = path.parent
+        if folder in seen:
+            continue
+        if project:
+            seen[folder] = "this project"
+        else:
+            seen[folder] = next((a.label for a in AGENTS if a.global_dir == folder), folder.name)
+    return [(label, folder) for folder, label in seen.items()]
+
+
 def install(
     *,
     agent_keys: Optional[list[str]] = None,
@@ -116,16 +151,9 @@ def install(
     if project:
         target_dirs = [(cwd or Path.cwd()) / PROJECT_SKILLS_DIR]
     else:
-        if agent_keys:
-            unknown = set(agent_keys) - set(AGENT_KEYS)
-            if unknown:
-                raise ValueError(
-                    f"Unknown agent(s): {', '.join(sorted(unknown))}. "
-                    f"Known: {', '.join(AGENT_KEYS)}."
-                )
-            chosen = [a for a in AGENTS if a.key in agent_keys]
-        else:
-            chosen = detect_agents() or [a for a in AGENTS if a.key == "universal"]
+        chosen = _chosen_agents(agent_keys)
+        if isinstance(chosen, str):
+            raise ValueError(chosen)
         target_dirs = [a.global_dir for a in chosen]
 
     written: list[Path] = []

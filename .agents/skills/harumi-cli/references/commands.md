@@ -487,7 +487,7 @@ harumi memories list [--query TEXT] [--mode always|on_demand] [--project ID] [--
 harumi memories add [CONTENT|-] [--mode always|on_demand] [--project ID]
 harumi memories edit [MEMORY_ID] [--content TEXT] [--mode always|on_demand] [--project ID]
 harumi memories rm [MEMORY_ID] [--yes] [--project ID]
-harumi skills library [--category C] [--query TEXT] [--api-url URL] [--org ORG]
+harumi skills library [--category C] [--query TEXT] [--json] [--api-url URL] [--org ORG]
 harumi skills add SLUG [--force] [--api-url URL] [--org ORG]
 ```
 
@@ -495,8 +495,8 @@ harumi skills add SLUG [--force] [--api-url URL] [--org ORG]
 - **`add`**: `POST /projects/{id}/memories` with `{content, source: "cli", retrieval_mode}`. `content` is 1-4000 characters; `--mode` defaults to `on_demand`. `CONTENT` of `-` reads standard input. If it is omitted, a terminal is prompted and anything else is told to pass it.
 - **`edit`**: `PATCH /projects/{id}/memories/{memory_id}` with only the fields given. At least one of `--content` / `--mode` is required, otherwise the CLI fails before calling the API.
 - **`rm`**: `DELETE /projects/{id}/memories/{memory_id}`, prompting for confirmation unless `--yes`. With no id a terminal gets a picker of the project's own memories; `--yes` needs the id. A workspace memory (scope `organization` or `user`) is named as such instead of reported as not found.
-- **`skills library`**: `GET /skill-library` → the platform's preset skills (`slug`, `name`, `category`, `version`, `description`). `--category` matches exactly; `--query` is a case-insensitive substring of name, description or tags.
-- **`skills add SLUG`**: needs a bound clone. `GET /skill-library/{slug}`, then writes `<clone>/skills/<slug>/SKILL.md` with `source: harumi/<slug>` and `version: N` set in the frontmatter (replacing any the preset had), exactly as the platform's Install button does. Refuses when that file exists unless `--force`: if the existing file's `source:` is `harumi/<slug>` it says the preset is already installed, otherwise that the folder belongs to a different skill. It writes the file only and prints the `git add / commit / push harumi` line; the project's assistant loads skills from the live branch.
+- **`skills library`** (`--json` prints `slug`, `name`, `description`, `category`, `tags`, `version` and never a skill's content; a search with no match prints the categories that exist): `GET /skill-library` → the platform's preset skills (`slug`, `name`, `category`, `version`, `description`). `--category` matches exactly; `--query` is a case-insensitive substring of name, description or tags.
+- **`skills add SLUG`**: needs a bound clone. A slug the library does not have says so, offers the nearest one and points at `skills library` (a server error is not called a missing skill). The commit command it prints starts with `cd <project root>`, so it works from a subfolder.  `GET /skill-library/{slug}`, then writes `<clone>/skills/<slug>/SKILL.md` with `source: harumi/<slug>` and `version: N` set in the frontmatter (replacing any the preset had), exactly as the platform's Install button does. Refuses when that file exists unless `--force`: if the existing file's `source:` is `harumi/<slug>` it says the preset is already installed, otherwise that the folder belongs to a different skill. It writes the file only and prints the `git add / commit / push harumi` line; the project's assistant loads skills from the live branch.
 - A project's *own* skills are plain files at `skills/<slug>/SKILL.md`: create, edit and delete them in the clone with your editor and git. There is no command for that on purpose.
 
 ## `agent-skills`
@@ -505,7 +505,7 @@ harumi skills add SLUG [--force] [--api-url URL] [--org ORG]
 harumi agent-skills install [--agent KEY]... [--project] [--dry-run] [--force]
 ```
 
-Copies the bundled `harumi-cli` and `harumi-cli-setup` skills onto this machine for Cursor, Claude Code, Codex or the universal `~/.agents/skills` folder (auto-detected, or `--agent`). `--project` writes to `./.agents/skills` instead. `--dry-run` prints each `source -> destination` and writes nothing (it replaces `skill path`). Not the same as `harumi skills`, which is about a project's skills. Replaces `skill install`.
+Copies the bundled `harumi-cli` and `harumi-cli-setup` skills onto this machine (it prints, per agent, which skills went into which folder; with no agent found it says so and uses `~/.agents/skills`; a file or an unwritable folder in the way is explained, not an `[Errno 17]`) for Cursor, Claude Code, Codex or the universal `~/.agents/skills` folder (auto-detected, or `--agent`). `--project` writes to `./.agents/skills` instead. `--dry-run` prints each `source -> destination` and writes nothing (it replaces `skill path`). Not the same as `harumi skills`, which is about a project's skills. Replaces `skill install`.
 
 ## `org`
 

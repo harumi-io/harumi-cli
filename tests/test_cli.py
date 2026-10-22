@@ -1102,6 +1102,27 @@ def test_import_never_overwrites_an_existing_manifest(api, git_ops, tmp_path):
     assert "python custom.py" in (folder / "harumi.toml").read_text()
 
 
+def test_import_shows_a_folder_name_with_brackets_as_typed(api, git_ops, tmp_path):
+    """`Creating project route [v2]...` lost its `[v2]`: rich read it as a tag. (A `[/x]` closing tag cannot be in
+    a folder name, since `/` separates path parts; that case is covered where the name is plain text, in
+    `test_blueprints.py`.)"""
+    from harumi.config import save_git_token
+
+    save_git_token("gitea-token", username="dev@harumi.test")
+    folder = tmp_path / "route [v2] [bold]x[bold]"
+    folder.mkdir()
+    (folder / "main.py").write_text("print(1)\n")
+    api.route("POST", "/api/projects", {"id": "proj-b", "name": "route [v2] [bold]x[bold]", "notebook_ids": []})
+    _route_project_repo(api, "proj-b", "route")
+
+    result = runner.invoke(cli.app, ["import", str(folder), "--yes"])
+
+    assert result.exit_code == 0, result.output
+    flat = result.output.replace("\n", " ")
+    assert "Creating project route [v2] [bold]x[bold]" in flat
+    assert "Created project route [v2] [bold]x[bold]" in flat
+
+
 def test_clone_fetches_an_existing_project_and_binds(api, git_ops, tmp_path, monkeypatch):
     from harumi.config import save_git_token
 
@@ -3264,7 +3285,7 @@ def test_agent_skills_install_dry_run_shows_source_and_destination(tmp_path):
     )
 
     assert result.exit_code == 0, result.output
-    assert "->" in result.output
+    assert "->" in result.output  # the dry run keeps its source -> destination: it is how you check what is copied
     assert "harumi-cli" in result.output
 
 
