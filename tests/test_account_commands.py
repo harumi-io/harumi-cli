@@ -249,7 +249,8 @@ def test_role_without_a_member_picks_one(api, monkeypatch):
     assert api.calls[-1].endswith(f"/users/{U3}") and U1 not in seen["values"]  # the owner can't be changed
 
 
-def test_removing_a_member_names_them_in_the_question(api):
+def test_removing_a_member_names_them_in_the_question(api, monkeypatch):
+    monkeypatch.setattr(interactive, "is_interactive", lambda *a, **k: True)
     out = plain(runner.invoke(cli.app, ["org", "rm-member", "zeta", "22222222"], input="n\n").output)
 
     assert "bo@example.com" in out and U2 not in out and "Aborted" in out

@@ -32,6 +32,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [agent-skills](#agent-skills)
 - [org](#org)
 - [Scripts and CI (`--json`)](#scripts-and-ci---json)
+- [Confirmations (`--yes`)](#confirmations---yes)
 - [Config & credential files](#config--credential-files)
 - [Troubleshooting](#troubleshooting)
 - [Python library (`Client`) alternative](#python-library-client-alternative)
@@ -356,7 +357,7 @@ harumi share add [--label TEXT] [--app/--no-app] [--chat/--no-chat] [--run-histo
                   [--run-control/--no-run-control] [--project ID]
 harumi share update [LINK_ID] [--label TEXT] [--enable/--disable] [--app/--no-app] [--chat/--no-chat]
                      [--run-history/--no-run-history] [--run-control/--no-run-control]
-                     [--password/--no-password] [--project ID]
+                     [--password/--no-password] [--yes] [--project ID]
 harumi share rm [LINK_ID] [--yes] [--project ID]
 harumi share rotate [LINK_ID] [--yes] [--project ID]
 ```
@@ -525,7 +526,7 @@ harumi org use [ORG | --personal]
 - **`list`**: `GET /users/organizations`; ends with the workspace you are working in.
 - **`create`**: `POST /users/organizations` with `{business_name}`.
 - **`rename`**: `PATCH /users/organizations/{id}` with `{business_name}`.
-- **`rm`**: `DELETE /users/organizations/{id}`, prompting for confirmation unless `--yes`. **Permanent**: unlike projects, an organization is not soft-deleted (harumi-api purges its projects at once and cancels its subscription), so this is the one delete here with no way back. The question names the organization and what goes with it. If it was the workspace you were working in, the saved choice is cleared and you are back in your personal workspace. Only the owner can delete it; a 403 `mfa_required` (the organization requires a fresh authenticator code) is reported as "do this in the web app", as the CLI cannot ask for one.
+- **`rm`**: `DELETE /users/organizations/{id}`; asks you to type the organization's name unless `--yes` (see [Confirmations](#confirmations---yes)). **Permanent**: unlike projects, an organization is not soft-deleted (harumi-api purges its projects at once and cancels its subscription), so this is the one delete here with no way back. The question names the organization and what goes with it. If it was the workspace you were working in, the saved choice is cleared and you are back in your personal workspace. Only the owner can delete it; a 403 `mfa_required` (the organization requires a fresh authenticator code) is reported as "do this in the web app", as the CLI cannot ask for one.
 - **`members`**: `GET /users/organizations/{id}/users`; a table of name, email, role (`(invited)` while pending) and the first 8 characters of the user id.
 - **`invite`**: `POST /users/organizations/{id}/users` with `{email, role}`.
 - **`role`**: `PUT /users/organizations/{id}/users/{user_id}` with `{role}`.
@@ -554,6 +555,24 @@ harumi runs list --json | jq -r '.[] | select(.status=="failed") | .id'
 **`run --json`** prints `{"run_id", "status", "exit_code", "succeeded", "took_seconds", "error", "watched"}`. Without `--watch` it is printed once the run is queued (`status: "queued"`, `succeeded: null`); with `--watch`, once it finishes. The exit code does not change: `run --watch` exits 1 when the run does not succeed, with or without `--json`.
 
 **Exit codes:** 0 success, 1 any failure (including a watched run that failed), 2 a usage error. Menus are off whenever stdin or stdout is not a terminal, under `CI`, with `TERM=dumb`, or with `HARUMI_NO_INTERACTIVE=1`; a command that needs a choice then fails and lists the choices.
+
+## Confirmations (`--yes`)
+
+Every command that deletes or removes something follows one rule, from `projects rm` to `org rm-member`:
+
+| Where you run it | What happens |
+|---|---|
+| `--yes` (or `-y`) | Goes ahead, no question. |
+| At a terminal, no `--yes` | Asks `[y/N]`. Enter is **No**. Declining prints `Aborted.` and **exits 1**, so `harumi org rm X && deploy` stops. |
+| No terminal (a script, CI, an agent, a pipe), no `--yes` | **Refuses at once**: `Cannot ask here: no interactive terminal. Run it again with --yes to go ahead.` and exits 1. It never prints a prompt into a log and waits, and a `y` piped to stdin is **not** consent (it was not given to this question). |
+
+The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 0.12.0.
+
+- **The permanent ones that take other things with them ask you to type the name** instead of `y`: `projects rm` (the project name) and `org rm` (the organization name, exactly: case and spaces count; Enter is a no). An agent passes `--yes` and still must name the project or organization (`--yes` with no name is refused).
+- **The question says which one**, not a UUID: a schedule by its cron, branch and command, a memory by its text, a file by its name and size, a share link by its label.
+- **`share update --no-password`** asks because it opens the dashboard to anyone with the link; setting a password or any other change never asks. Its `--yes` only covers that.
+- **`secrets set` of a name that exists** says `Replaced` and that the old value is gone; it does not ask, since replacing is what the command is for.
+- **Hidden prompts** (`secrets set`, `share update --password`, `datasources add|update|test`): at a terminal the value is typed hidden; with no terminal one line is read from stdin without echo warnings, so `printf '%s' "$KEY" | harumi secrets set API_KEY` works. An empty stdin fails with `No value on standard input`. A secret is never a flag.
 
 ## Config & credential files
 

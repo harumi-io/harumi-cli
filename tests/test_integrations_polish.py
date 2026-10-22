@@ -184,6 +184,7 @@ def test_an_unknown_memory_points_at_the_list(api):
 
 
 def test_rm_without_an_id_picks_one_at_a_terminal(api, monkeypatch):
+    monkeypatch.setattr(interactive, "is_interactive", lambda *a, **k: True)
     monkeypatch.setattr(interactive, "select", lambda message, options, **k: S2)
 
     result = runner.invoke(cli.app, ["schedules", "rm"], input="y\n")

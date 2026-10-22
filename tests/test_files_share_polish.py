@@ -215,7 +215,8 @@ def test_removing_a_file_names_it_and_its_size(api):
     assert "Deleted 1 file(s)" not in out
 
 
-def test_the_question_names_the_file_and_what_it_holds(api):
+def test_the_question_names_the_file_and_what_it_holds(api, monkeypatch):
+    monkeypatch.setattr(interactive, "is_interactive", lambda *a, **k: True)
     result = runner.invoke(cli.app, ["files", "rm", "models/model.lp"], input="n\n")
 
     out = plain(result.output)
@@ -549,7 +550,8 @@ def test_a_missing_file_without_the_flag_names_the_flag_for_scripts(api):
 # -- the confirmation names what you are deleting ----------------------------------------------------------
 
 
-def test_the_share_rm_question_shows_the_label_so_a_wrong_prefix_is_noticed(api):
+def test_the_share_rm_question_shows_the_label_so_a_wrong_prefix_is_noticed(api, monkeypatch):
+    monkeypatch.setattr(interactive, "is_interactive", lambda *a, **k: True)
     result = runner.invoke(cli.app, ["share", "rm", L1[:8]], input="n\n")
 
     out = plain(result.output)
@@ -753,6 +755,7 @@ def test_the_delete_question_for_a_file_cleans_the_name_but_sends_the_original(a
     odd = "inputs/x\u202e.csv"
     api.files[odd] = (5, ago(days=1))
     asked = []
+    monkeypatch.setattr(interactive, "is_interactive", lambda *a, **k: True)
     monkeypatch.setattr(cli.typer, "confirm", lambda text, **k: asked.append(text) or False)
 
     runner.invoke(cli.app, ["files", "rm", odd])

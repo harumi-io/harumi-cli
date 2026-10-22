@@ -239,14 +239,14 @@ def test_rename_without_a_name_or_a_terminal_says_how_to_give_one(server, no_ter
     assert server.renamed == {}
 
 
-def test_rm_with_an_id_still_requires_the_typed_name(server):
+def test_rm_with_an_id_still_requires_the_typed_name(server, at_terminal):
     result = runner.invoke(cli.app, ["projects", "rm", "proj-1"], input="wrong\n")
 
-    assert "Aborted" in result.output
+    assert "Aborted" in result.output and result.exit_code == 1
     assert server.deleted == []
 
 
-def test_picking_a_project_to_delete_is_not_consent_the_typed_name_is_still_required(server, monkeypatch):
+def test_picking_a_project_to_delete_is_not_consent_the_typed_name_is_still_required(server, monkeypatch, at_terminal):
     """The safety property. A picker makes it easy to land on the wrong row, so
     choosing from a list must never replace typing the name."""
     pick(monkeypatch, "proj-2")

@@ -4386,6 +4386,19 @@
         },
         {
           "opts": [
+            "--yes",
+            "-y"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Skip the confirmation when removing a password."
+        },
+        {
+          "opts": [
             "--password"
           ],
           "secondary_opts": [

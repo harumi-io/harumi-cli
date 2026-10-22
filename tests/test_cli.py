@@ -283,6 +283,12 @@ class FakeApi:
 
 
 @pytest.fixture
+def at_a_terminal(monkeypatch):
+    """A person at a keyboard. Confirmations only ask where there is one; elsewhere they refuse and name --yes."""
+    monkeypatch.setattr(cli.interactive, "is_interactive", lambda *a, **k: True)
+
+
+@pytest.fixture
 def api(monkeypatch) -> FakeApi:
     fake = FakeApi()
     transport = httpx.MockTransport(fake._handle)
@@ -1695,17 +1701,17 @@ def test_files_get_reports_an_unwritable_output_path(api, tmp_path, monkeypatch)
     assert "Traceback" not in result.output
 
 
-def test_files_rm_aborts_without_confirmation(api):
+def test_files_rm_aborts_without_confirmation(api, at_a_terminal):
     api.route("GET", "/api/projects/proj-1/files", {"files": [{"name": "data.csv", "key": "proj-1/data.csv", "size": 10}], "is_truncated": False})
 
     result = runner.invoke(cli.app, ["files", "rm", "data.csv", "--project", "proj-1"], input="n\n")
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output  # declining is not success: `rm && deploy` must stop
     assert "Aborted." in result.output
     assert not any(r.method == "DELETE" for r in api.requests)  # the listing is read; nothing is deleted
 
 
-def test_files_rm_deletes_when_confirmed(api):
+def test_files_rm_deletes_when_confirmed(api, at_a_terminal):
     api.route("GET", "/api/projects/proj-1/files", {"files": [{"name": "data.csv", "key": "proj-1/data.csv", "size": 10}], "is_truncated": False})
     api.route("DELETE", "/api/projects/proj-1/files", {"deleted": 1})
 
@@ -1791,14 +1797,16 @@ def test_schedules_add_forwards_optional_overrides(api):
     assert body["email_to"] == "everyone"
 
 
-def test_schedules_remove_aborts_without_confirmation(api):
+def test_schedules_remove_aborts_without_confirmation(api, at_a_terminal):
+    api.route("GET", "/api/projects/proj-1/schedules/5c4e1b2a-0000-4000-8000-000000000001", SCHEDULE)  # read to describe it
+
     result = runner.invoke(
         cli.app, ["schedules", "rm", "5c4e1b2a-0000-4000-8000-000000000001", "--project", "proj-1"], input="n\n"
     )
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert "Aborted." in result.output
-    assert api.requests == []
+    assert [r.method for r in api.requests] == ["GET"]  # it looked, and changed nothing
 
 
 def test_schedules_remove_deletes_when_confirmed(api):
@@ -1991,14 +1999,14 @@ def test_share_update_with_no_flags_fails_without_a_request(api):
     assert api.requests == []
 
 
-def test_share_remove_aborts_without_confirmation(api):
+def test_share_remove_aborts_without_confirmation(api, at_a_terminal):
     api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})  # read to name the link in the question
 
     result = runner.invoke(
         cli.app, ["share", "rm", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1"], input="n\n"
     )
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert "Aborted." in result.output
     assert "Client dashboard" in result.output  # the question names what is being deleted
     assert not any(r.method == "DELETE" for r in api.requests)  # and nothing was deleted
@@ -2049,7 +2057,7 @@ def test_share_update_no_password_removes_it(api):
     api.route("DELETE", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", SHARE_LINK)
 
     result = runner.invoke(
-        cli.app, ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--no-password", "--project", "proj-1"]
+        cli.app, ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--no-password", "--yes", "--project", "proj-1"]
     )
 
     assert result.exit_code == 0, result.output
@@ -2998,14 +3006,16 @@ def test_memories_edit_sends_content(api):
     assert api.body_for("PATCH", "/api/projects/proj-1/memories/3d7a9f10-0000-4000-8000-000000000001") == {"content": "New text"}
 
 
-def test_memories_rm_aborts_without_confirmation(api):
+def test_memories_rm_aborts_without_confirmation(api, at_a_terminal):
+    api.route("GET", "/api/projects/proj-1/memories", {"memories": [MEMORY]})  # read to quote it
+
     result = runner.invoke(
         cli.app, ["memories", "rm", "3d7a9f10-0000-4000-8000-000000000001", "--project", "proj-1"], input="n\n"
     )
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert "Aborted." in result.output
-    assert api.requests == []
+    assert [r.method for r in api.requests] == ["GET"]  # it looked, and changed nothing
 
 
 def test_memories_rm_deletes_when_confirmed(api):
