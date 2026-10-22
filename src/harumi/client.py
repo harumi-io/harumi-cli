@@ -17,7 +17,7 @@ from urllib.parse import quote
 import httpx
 
 from harumi import auth
-from harumi.config import Config
+from harumi.config import Config, environment_scope
 from harumi.errors import (
     ApiError,
     NotAuthenticatedError,
@@ -124,6 +124,22 @@ class ApiClient:
         _retried: bool = False,
         **kwargs: Any,
     ) -> httpx.Response:
+        # Everything below reads and writes credentials for the environment this client is for, not for
+        # whichever Config was loaded last (see `config.environment_scope`).
+        with environment_scope(self.config.environment):
+            return self._request(method, path, json=json, params=params, timeout=timeout, _retried=_retried, **kwargs)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: Any = None,
+        params: Optional[dict[str, Any]] = None,
+        timeout: Optional[float] = None,
+        _retried: bool = False,
+        **kwargs: Any,
+    ) -> httpx.Response:
         url = f"{self.config.api_url}{path}"
         headers = self._headers()
         # After the headers: building them can renew an expired session (rotating the
@@ -177,8 +193,10 @@ class ApiClient:
         from an unrelated request made inside the block.
         """
         url = f"{self.config.api_url}{path}"
-        headers = self._headers()
-        sent_with = self._refresh_token_in_use()  # after the headers: see `request`
+        # Scoped for the credential work only. The caller's `with` body is theirs and must not run inside it.
+        with environment_scope(self.config.environment):
+            headers = self._headers()
+            sent_with = self._refresh_token_in_use()  # after the headers: see `request`
 
         with httpx.Client(timeout=timeout or self.timeout, transport=self.transport) as client, ExitStack() as stack:
             # Only *opening* the stream means "could not reach harumi-api". A failure while the
@@ -194,8 +212,9 @@ class ApiClient:
                 response.close()
                 if not sent_with:
                     raise NotAuthenticatedError(expired=True, environment=self.config.environment)
-                auth.renew_session(self.config, sent_with, transport=self.transport)
-                headers = self._headers()
+                with environment_scope(self.config.environment):
+                    auth.renew_session(self.config, sent_with, transport=self.transport)
+                    headers = self._headers()
                 with transport_errors_as_api_error():
                     response = stack.enter_context(
                         client.stream(method, url, json=json, params=params, headers=headers)
@@ -272,13 +291,15 @@ class Client:
     # -- Auth ---------------------------------------------------------------
 
     def request_otp(self, email: str) -> None:
-        auth.request_otp(self.config, email)
+        auth.request_otp(self.config, email, transport=self.api.transport)
 
     def verify_otp(self, email: str, token: str):
-        return auth.verify_otp(self.config, email, token)
+        with environment_scope(self.config.environment):  # saves the new login
+            return auth.verify_otp(self.config, email, token, transport=self.api.transport)
 
     def logout(self) -> None:
-        auth.logout()
+        with environment_scope(self.config.environment):  # forgets this client's login, not another's
+            auth.logout()
 
     def get_profile(self) -> UserProfile:
         response = self.api.request("GET", "/users/profile")

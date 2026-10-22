@@ -643,7 +643,7 @@ Within the active environment, URL/org overrides (highest first): **CLI flags > 
 
 ## Python library (`Client`) alternative
 
-When scripting is better than shelling out:
+When scripting is better than shelling out. A `Client` is self-contained: two clients for two environments (`Client(environment="staging")`, `Client(environment="production")`) each use their own login, in any order and on any thread. Everything the library raises is a `harumi.errors.HarumiError` (`ApiError`, `NotAuthenticatedError`, ...), and `import harumi` loads none of the CLI. It signs in from the credentials file `harumi login` writes; there is no token argument or environment variable for CI yet.
 
 ```python
 from harumi import Client
@@ -695,7 +695,7 @@ blueprints = client.list_blueprints()
 
 # Dashboard spec discovery, widget contract + validation
 from harumi.dashboard import (
-    WIDGET_SCHEMAS,
+    widget_schemas,
     local_dashboard_paths,
     pick_dashboard_paths,
     validate_dashboard_toml,
@@ -705,9 +705,10 @@ for path in local_dashboard_paths(Path(".")):  # dashboard/*.toml, then dashboar
 # ...or the repo's copies:
 paths = pick_dashboard_paths(f.path for f in client.list_repo_files(project_id, ref="main"))
 
-# Public share link
-status = client.enable_share(binding.project_id)
-print(status.share_token)
+# Public share link (a project can have several; each has its own token and permissions)
+link = client.create_share_link(binding.project_id, {"app_enabled": True})
+print(link.token)
+links = client.list_share_links(binding.project_id)
 
 # Create a project
 project = client.create_project("New Project")  # project.repo is None if unprovisioned

@@ -112,6 +112,13 @@ def test_an_old_name_says_in_its_help_that_it_is_going_away(path):
     assert " ".join(use.split()) in out  # all of it, brackets too: `[RUN_ID]` must not be swallowed as styling
 
 
+def typer_version():
+    from importlib.metadata import version
+
+    return tuple(int(p) for p in version("typer").split(".")[:2])
+
+
+@pytest.mark.skipif(typer_version() < (0, 23), reason="typer 0.16 prints an escaped [tag] with its backslash (\\[bold]), as in test_compare_picker")
 def test_a_replacement_is_shown_as_written_not_read_as_styling(monkeypatch):
     """Help is rich markup, so a hint with `[bold]` in it would lose the words and their brackets. (The `[RUN_ID]`
     we have today starts with a capital and would survive anyway; this is the case that would not.)"""
@@ -131,6 +138,16 @@ def test_a_replacement_is_shown_as_written_not_read_as_styling(monkeypatch):
     out = " ".join(runner.invoke(probe, ["zzz", "--help"]).stdout.split())
 
     assert "harumi new [bold]NAME[/bold] --x" in out
+
+
+def test_no_real_hint_has_a_bracket_that_rich_would_read_as_styling():
+    """Why the escape test above may be skipped on typer 0.16 without leaving a hole: rich reads `[x]` as a tag
+    only when it starts with a letter, `/`, `@` or `#`. `[RUN_ID]` starts with a capital and `[-- <path>]` with a dash,
+    so no shipped hint is changed by escaping, on any typer. Fails if someone adds one that would be."""
+    tags = re.compile(r"\[[a-z/@#][^\]]*\]")
+    risky = {key: use for key, use in cli._RETIRED.items() if tags.search(use)}
+
+    assert risky == {}
 
 
 def harumi_commands_in(text: str):
