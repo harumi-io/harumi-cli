@@ -6375,8 +6375,8 @@ _hidden_alias(org_app, "remove", org_rm_member, "harumi org remove", "harumi org
 
 
 # Which help panel each command is listed under. One table so the grouping can be read, and argued with, in
-# one place; a test fails if a visible command is missing from it. The order within a panel is the order
-# here, and the panels' own order is `_PANEL_ORDER`.
+# one place; a test fails if a visible command is missing from it, or the table names one that does not
+# exist. Both the panels and the commands within them are listed in the order shown (see `_Group.list_commands`).
 _PANELS: dict[str, list[str]] = {
     # `blueprints` and `specs` are lists you look things up in before `new` and `run`, so they sit with them.
     "Get started": ["login", "start", "new", "import", "clone", "link", "blueprints"],
@@ -6388,17 +6388,18 @@ _PANELS: dict[str, list[str]] = {
 
 
 def _assign_panels() -> None:
-    """Put every visible command under its panel in `--help`."""
-    placed: dict[str, str] = {}
+    """Put every command in `_PANELS` under its panel in `--help`.
+
+    Most commands are registered without a name (Typer derives it from the function), so it is derived the
+    same way here to match.
+    """
     for panel, names in _PANELS.items():
-        for rank, name in enumerate(names):
-            placed[name] = panel
-            for info in app.registered_commands:
-                if (info.name or info.callback.__name__.replace("_", "-")) == name:
-                    info.rich_help_panel = panel
-            for group in app.registered_groups:
-                if group.name == name:
-                    group.rich_help_panel = panel
+        for info in app.registered_commands:
+            if (info.name or info.callback.__name__.replace("_", "-")) in names:
+                info.rich_help_panel = panel
+        for group in app.registered_groups:
+            if group.name in names:
+                group.rich_help_panel = panel
 
 
 _assign_panels()
