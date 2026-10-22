@@ -536,6 +536,8 @@ harumi org use [ORG | --personal]
 
 ## Scripts and CI (`--json`)
 
+**A table is for a person and is not a stable format**: its columns, the width of its ids (8 characters in `runs list`) and whether it is a table at all (narrow terminals get two lines per project) can change. A script uses `--json`, which always has whole ids.
+
 A table printed for a person never rewrites what is stored: `[red]` in a branch or project name is shown as typed (Rich would have taken it for a colour), and control characters are removed.
 
 Every command that reads data takes `--json`: `projects list|get`, `runs list|get`, `files ls`, `share list|get`, `datasources list|get`, `schedules list|get`, `secrets list`, `memories list`, `org list|members`, `specs`, `blueprints`, `usage`, `whoami`, and `compare` (which prints the API's response unchanged). `run --json` is below.

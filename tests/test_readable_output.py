@@ -145,6 +145,7 @@ def test_a_stray_closing_tag_cannot_crash_a_table(api, monkeypatch, args):
     result = runner.invoke(cli.app, args)
 
     assert result.exit_code == 0 and isinstance(result.exception, (type(None), SystemExit))
+    assert "bad[/oops]" in plain(result.stdout)  # it printed the text, not just survived it
 
 
 # -- the id you copy is whole, or is a start that the next command accepts ----------------------------------------
