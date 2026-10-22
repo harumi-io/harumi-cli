@@ -33,6 +33,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [org](#org)
 - [Scripts and CI (`--json`)](#scripts-and-ci---json)
 - [Confirmations (`--yes`)](#confirmations---yes)
+- [Command grammar](#command-grammar)
 - [Config & credential files](#config--credential-files)
 - [Troubleshooting](#troubleshooting)
 - [Python library (`Client`) alternative](#python-library-client-alternative)
@@ -578,6 +579,14 @@ The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share upda
 - **`share update --no-password`** asks because it opens the dashboard to anyone with the link; setting a password or any other change never asks. Its `--yes` only covers that.
 - **`secrets set` of a name that exists** says `Replaced` and that the old value is gone; it does not ask, since replacing is what the command is for.
 - **Hidden prompts** (`secrets set`, `share update --password`, `datasources add|update|test`): at a terminal the value is typed hidden; with no terminal one line is read from stdin without echo warnings, so `printf '%s' "$KEY" | harumi secrets set API_KEY` works. An empty stdin fails with `No value on standard input`. A secret is never a flag.
+
+## Command grammar
+
+- **Asking for help:** `-h` and `--help` work on every command and group (`harumi projects rm -h`); `harumi help [COMMAND]` is the same. `-v` is `--version`.
+- **The verbs** repeat across groups: `list`, `get`, `add`, `update`, `rm`. Four groups are irregular and are not renamed, because a rename needs a deprecation window: `files` uses `ls`, `put`, `get`, `rm`; `org` uses `create`; `memories` uses `edit`; `secrets` and `profile` use `set`.
+- **A wrong verb is answered, never guessed:** `harumi secrets create` exits 2 with `No such command 'create'. Did you mean 'set'? Commands: list, set, rm.`; `org add` names both `create` (a new organization) and `invite` (a person); `harumi version` points at `--version`. It is a hint, not an alias, so nothing runs. A misspelling (`harumi shar`) gets `Did you mean 'share'?` on every supported Typer version. Hidden deprecated names (`projects delete`, ...) keep working and are not listed.
+- **The help is grouped** into *Get started*, *Run and results*, *Project*, *Account and team* and *Help and updates*. `--api-url`, `--git-url` and `--org` (which point a command at another server or organization) are listed under an **Advanced** heading in every command's help; they are all still there, and still in the contract, only apart. (`usage --org` is the exception: it is what the command is about.)
+- **Completion** (`harumi --install-completion`, once per shell): commands, subcommands, flags, and the fixed-list values `--type` (`postgresql`, `mysql`, `sqlserver`, `oracle`), `--role` and `--mode`. Ids and names are not completed: that would need a login and a request on every TAB.
 
 ## Config & credential files
 

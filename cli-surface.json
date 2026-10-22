@@ -82,7 +82,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -94,7 +94,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -137,7 +137,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -149,7 +149,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -191,7 +191,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -203,7 +203,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the Harumi Git base URL."
+          "help": "Use another Harumi Git server."
         },
         {
           "opts": [
@@ -215,7 +215,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -270,7 +270,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -282,7 +282,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -373,7 +373,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -385,7 +385,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -590,7 +590,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -602,7 +602,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -657,7 +657,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -669,7 +669,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -712,7 +712,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -724,7 +724,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -803,7 +803,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -815,7 +815,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -871,7 +871,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -883,7 +883,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -1045,7 +1045,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -1057,7 +1057,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -1270,7 +1270,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -1282,7 +1282,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -1338,7 +1338,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -1350,7 +1350,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -1393,7 +1393,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -1405,7 +1405,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -1460,7 +1460,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -1472,7 +1472,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -1540,7 +1540,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -1552,7 +1552,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -1657,7 +1657,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -1669,7 +1669,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the Harumi Git base URL."
+          "help": "Use another Harumi Git server."
         },
         {
           "opts": [
@@ -1681,7 +1681,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -1712,7 +1712,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -1724,7 +1724,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the Harumi Git base URL."
+          "help": "Use another Harumi Git server."
         },
         {
           "opts": [
@@ -1736,7 +1736,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -1778,7 +1778,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -1790,7 +1790,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override Harumi Git base URL."
+          "help": "Use another Harumi Git server."
         }
       ]
     },
@@ -1850,7 +1850,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -1862,7 +1862,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -1929,7 +1929,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -1941,7 +1941,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -2009,7 +2009,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -2021,7 +2021,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -2077,7 +2077,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -2089,7 +2089,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -2179,7 +2179,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -2191,7 +2191,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the Harumi Git base URL."
+          "help": "Use another Harumi Git server."
         },
         {
           "opts": [
@@ -2203,7 +2203,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -2233,7 +2233,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         }
       ]
     },
@@ -2287,7 +2287,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         }
       ]
     },
@@ -2317,7 +2317,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         }
       ]
     },
@@ -2359,7 +2359,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         }
       ]
     },
@@ -2401,7 +2401,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         }
       ]
     },
@@ -2444,7 +2444,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         }
       ]
     },
@@ -2499,7 +2499,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         }
       ]
     },
@@ -2553,7 +2553,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         }
       ]
     },
@@ -2637,7 +2637,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -2649,7 +2649,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -2691,7 +2691,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -2703,7 +2703,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -2733,7 +2733,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -2745,7 +2745,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         },
         {
           "opts": [
@@ -2800,7 +2800,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -2812,7 +2812,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -2855,7 +2855,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -2867,7 +2867,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -2961,7 +2961,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -2973,7 +2973,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the Harumi Git base URL."
+          "help": "Use another Harumi Git server."
         },
         {
           "opts": [
@@ -2985,7 +2985,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -3028,7 +3028,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -3040,7 +3040,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -3096,7 +3096,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -3108,7 +3108,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -3163,7 +3163,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -3175,7 +3175,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -3218,7 +3218,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -3230,7 +3230,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         },
         {
           "opts": [
@@ -3382,7 +3382,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -3394,7 +3394,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -3449,7 +3449,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -3461,7 +3461,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -3504,7 +3504,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -3516,7 +3516,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -3572,7 +3572,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -3584,7 +3584,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -3723,7 +3723,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -3735,7 +3735,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -3778,7 +3778,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -3790,7 +3790,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -3846,7 +3846,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -3858,7 +3858,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -3901,7 +3901,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -3913,7 +3913,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -4012,7 +4012,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -4024,7 +4024,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -4079,7 +4079,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -4091,7 +4091,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -4134,7 +4134,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -4146,7 +4146,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -4202,7 +4202,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -4214,7 +4214,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -4270,7 +4270,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -4282,7 +4282,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -4434,7 +4434,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -4446,7 +4446,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -4488,7 +4488,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -4500,7 +4500,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -4543,7 +4543,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -4555,7 +4555,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
@@ -4585,7 +4585,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -4597,13 +4597,13 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     },
     {
       "path": "start",
-      "help": "Interactively figure out which of the three onboarding journeys you want, and run it.",
+      "help": "Not sure where to begin? Answer a question or two and it runs the right command.",
       "params": []
     },
     {
@@ -4625,7 +4625,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -4698,7 +4698,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the harumi-api base URL."
+          "help": "Use another harumi-api (self-hosted or local)."
         },
         {
           "opts": [
@@ -4710,7 +4710,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Override the organization sent as X-Organization."
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
         }
       ]
     }

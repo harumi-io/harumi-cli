@@ -317,7 +317,9 @@ def test_the_app_turns_off_locals_in_crash_tracebacks_explicitly():
     import pathlib
 
     tree = ast.parse(pathlib.Path(cli.__file__).read_text())
-    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "Typer"]
+    # The root app is built by `_typer(...)` (a thin wrapper over `typer.Typer`); either spelling counts.
+    names = {"Typer", "_typer"}
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "attr", getattr(n.func, "id", "")) in names]
     top = [c for c in calls if any(k.arg == "invoke_without_command" for k in c.keywords)]  # the root app
     assert len(top) == 1
     flag = next((k.value for k in top[0].keywords if k.arg == "pretty_exceptions_show_locals"), None)
