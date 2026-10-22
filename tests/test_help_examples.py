@@ -230,6 +230,15 @@ def test_unwrap_leaves_a_block_whose_line_breaks_mean_something(block):
     assert cli._unwrap(text) == text
 
 
+def test_unwrap_treats_a_run_of_blank_lines_like_one_paragraph_break():
+    """`"" in " \\t"` is True in Python, so an empty first line once made a whole paragraph look indented."""
+    text = "Summary.\n\n\nwrapped\nsentence."
+
+    joined = cli._unwrap(text)
+    assert joined.split("\n\n")[-1] == "wrapped sentence."  # joined, and no space left where the empty line was
+    assert joined.split() == text.split()
+
+
 def test_unwrap_is_idempotent_and_never_loses_a_word():
     text = "Summary.\n\nOne two\nthree four\nfive.\n\nSteps:\n- a\n- b"
     once = cli._unwrap(text)

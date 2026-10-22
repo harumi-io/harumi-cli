@@ -6479,9 +6479,9 @@ def _unwrap(help_text: str) -> str:
     paragraphs = help_text.split("\n\n")
     for i, paragraph in enumerate(paragraphs):
         lines = paragraph.split("\n")
-        is_block = paragraph.lstrip().startswith("\b") or any(_LIST_ITEM.match(ln) or ln[:1] in " \t" for ln in lines)
+        is_block = paragraph.lstrip().startswith("\b") or any(_LIST_ITEM.match(ln) or ln.startswith((" ", "\t")) for ln in lines)
         if len(lines) > 1 and not is_block:
-            paragraphs[i] = " ".join(ln.strip() for ln in lines)
+            paragraphs[i] = " ".join(ln.strip() for ln in lines if ln.strip())
     return "\n\n".join(paragraphs)
 
 
