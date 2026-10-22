@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pathlib
 import re
+import sys
 
 import pytest
 from typer.main import get_command
@@ -303,6 +304,200 @@ def test_the_tripwire_does_fire_when_the_version_is_reached():
     """Today it passes only because 0.11 is before 0.12. This is the same check with the removal version set to
     the one we are on, to show it would catch the names being left behind."""
     assert len(still_here_after(__version__)) >= 28
+
+
+def release_notes(version: str):
+    """The parsed changelog entry for `version`, or None."""
+    from harumi import changelog
+
+    return next((r for r in changelog.load() if r.version == version), None)
+
+
+def release_gaps(removal_version: str, current_version: str):
+    """What the release notes still lack once `current_version` has reached `removal_version`.
+
+    The 0.12.0 notes are drafted ahead of the release without a date and without the removed names (they are
+    still here, deprecated, until the release commit deletes them). Bumping the version is the moment both
+    must be filled in; an empty list before that, so the draft can sit in `dev` meanwhile.
+    """
+    if version_tuple(current_version) < version_tuple(removal_version):
+        return []
+    entry = release_notes(removal_version)
+    if entry is None:
+        return [f"no changelog entry for {removal_version}"]
+    gaps = [] if entry.date else [f"the {removal_version} heading has no date"]
+    removed = entry.notes.split("### Removed")[-1] if "### Removed" in entry.notes else ""
+    spans = re.findall(r"`([^`]+)`", removed)
+    quoted = {normalised_name(span) for span in spans}
+    # Only a span written with a trailing "..." is a group (`harumi repo ...`). A stray `projects` in the prose is
+    # not: it would otherwise stand in for every name that starts with it.
+    groups = {normalised_name(span) for span in spans if span.strip().endswith("...")}
+    for key in cli._RETIRED:
+        name = normalised_name(key)
+        # The full name, or the group it belongs to. A bare last word is not enough: `delete` is the end of two
+        # names, so one mention would stand in for both.
+        if name not in quoted and not any(name.startswith(group + " ") for group in groups):
+            gaps.append(f"the notes do not list `{name}` as removed")
+    return gaps
+
+
+def normalised_name(text: str) -> str:
+    """`harumi repo ...`, `repo ...` and `repo` are the same group; `harumi push` and `push` the same command."""
+    return re.sub(r"\s+\.\.\.$", "", text.strip()).removeprefix("harumi ").strip()
+
+
+def test_the_release_notes_are_complete_by_the_time_the_version_is_bumped():
+    """When this fails: give the 0.12.0 heading its date, and list every name in `_RETIRED` under its `### Removed`
+    (write `harumi repo ...` once for the group)."""
+    assert release_gaps(cli._REMOVAL_VERSION, __version__) == []
+
+
+def test_the_release_check_does_fire_when_the_notes_are_left_as_drafted():
+    """Same check with the current version standing in for the release: the draft has no date and lists none of the
+    names, so it must report both."""
+    gaps = release_gaps(cli._REMOVAL_VERSION, cli._REMOVAL_VERSION)
+
+    assert any("no date" in g for g in gaps)
+    assert sum("do not list" in g for g in gaps) == len(cli._RETIRED)  # none of them, whatever the table grows to
+
+
+def test_a_complete_release_entry_satisfies_the_check(monkeypatch):
+    """So the release step can go green: a dated entry that lists every retired name passes."""
+    from harumi.changelog import Release
+
+    names = ", ".join(f"`{key.removeprefix('harumi ')}`" for key in cli._RETIRED)
+    complete = Release(cli._REMOVAL_VERSION, "2026-11-01", f"### Removed\n\n- {names}\n")
+    monkeypatch.setattr(sys.modules[__name__], "release_notes", lambda version: complete)
+
+    assert release_gaps(cli._REMOVAL_VERSION, cli._REMOVAL_VERSION) == []
+
+
+def all_flags_anywhere():
+    found = {"--version", "-v", "-h", "--help", "--install-completion", "--show-completion"}
+
+    def walk(command):
+        for param in command.params:
+            found.update(getattr(param, "opts", []))
+            found.update(getattr(param, "secondary_opts", []))
+        for sub in getattr(command, "commands", {}).values():
+            walk(sub)
+
+    walk(get_command(cli.app))
+    return found
+
+
+def unresolved_in_notes(notes: str):
+    """Every `harumi ...` command and every `--flag` quoted in release notes, that the CLI does not have."""
+    root = get_command(cli.app)
+    flags = all_flags_anywhere()
+    bad = []
+    for span in re.findall(r"`([^`]+)`", notes):
+        words = re.sub(r"\s+\.\.\.|<[^>]*>", "", span).split()
+        if not words:
+            continue
+        if words[0] == "harumi":
+            command, i = root, 1
+            while i < len(words) and not words[i].startswith("-") and hasattr(command, "commands"):
+                if words[i] not in command.commands:
+                    bad.append((span, f"no command {words[i]!r}"))
+                    break
+                command = command.commands[words[i]]
+                i += 1
+            else:
+                known = {o for p in command.params for o in list(getattr(p, "opts", [])) + list(getattr(p, "secondary_opts", []))}
+                known |= {"--help", "-h"} | ({"--version", "-v", "--install-completion"} if command is root else set())
+                bad += [(span, f"no option {w}") for w in words[i:] if w.startswith("-") and w not in known]
+        else:
+            # A command quoted without the program name (`share add|update --comparisons`) or a bare flag: the
+            # flags in it must exist somewhere, which is what a reader can check.
+            bad += [(span, f"no flag {w!r} anywhere") for w in words if w.startswith("-") and w.split("=")[0] not in flags]
+    return bad
+
+
+def test_the_draft_names_only_commands_and_flags_that_exist():
+    """Release notes are read by people deciding whether to upgrade. A flag that was renamed before release, or a
+    command that never shipped, would send them looking for it."""
+    notes = release_notes(cli._REMOVAL_VERSION).notes
+
+    assert unresolved_in_notes(notes) == []
+    assert len(re.findall(r"`harumi ", notes)) >= 8  # the scan found the commands, so the line above says something
+
+
+@pytest.mark.parametrize(
+    "wrong",
+    [
+        "`harumi begin` starts it",
+        "pass `--comparisonz`",
+        "`share add|update --comparisonz`",
+        "`harumi runs frobnicate`",
+        "`harumi run --no-such-flag`",
+    ],
+    ids=["unknown command", "unknown bare flag", "unknown flag after a command without its program name", "unknown subcommand", "unknown flag on a real command"],
+)
+def test_the_notes_check_catches_a_wrong_command_or_flag(wrong):
+    assert unresolved_in_notes(wrong) != []
+
+
+@pytest.fixture
+def gaps_for(monkeypatch):
+    """A function giving the names the release notes fail to list, for a given "Removed" section."""
+    from harumi.changelog import Release
+
+    def check(removed_text: str):
+        entry = Release(cli._REMOVAL_VERSION, "2026-11-01", "### Removed\n\n" + removed_text)
+        monkeypatch.setattr(sys.modules[__name__], "release_notes", lambda version: entry)
+        return [g for g in release_gaps(cli._REMOVAL_VERSION, cli._REMOVAL_VERSION) if "do not list" in g]
+
+    return check
+
+
+def test_names_written_with_the_program_name_count_as_listed(gaps_for):
+    """The draft already writes `harumi env`; a release author who writes `harumi push` must not be told it is
+    missing and then reword correct notes to satisfy a test."""
+    every_name = ", ".join(f"`{key}`" for key in cli._RETIRED)
+
+    assert gaps_for(every_name) == []
+
+
+def test_names_written_without_the_program_name_count_as_listed(gaps_for):
+    every_name = ", ".join(f"`{key.removeprefix('harumi ')}`" for key in cli._RETIRED)
+
+    assert gaps_for(every_name) == []
+
+
+def test_a_group_written_once_covers_its_commands(gaps_for):
+    leaves = [key for key in cli._RETIRED if key.startswith("harumi repo ")]
+    others = ", ".join(f"`{key}`" for key in cli._RETIRED if not key.startswith("harumi repo"))
+
+    assert len(leaves) >= 10 and gaps_for(others + ", `harumi repo ...`") == []
+    assert len(gaps_for(others)) == len(leaves) + 1  # without it, the group and each of its commands are missing
+
+
+def test_one_shared_last_word_does_not_stand_in_for_every_name_that_ends_with_it(gaps_for):
+    """`delete` ends `projects delete` and `org delete`; listing the word once must not satisfy both."""
+    missing = gaps_for("`delete`, `remove`, `create`, `list`")
+
+    assert len(missing) == len(cli._RETIRED), "a bare word counted as listing a name"
+
+
+def test_a_stray_word_in_the_prose_is_not_a_group(gaps_for):
+    """`projects` and `run` mentioned in passing must not stand in for `projects create`, `projects delete` and
+    `run --output-dir`."""
+    listed = ", ".join(f"`{key}`" for key in cli._RETIRED if not key.startswith(("harumi projects", "harumi run")))
+    missing = gaps_for(listed + ", and `projects` and `run` were touched")
+
+    assert sorted(missing) == [
+        "the notes do not list `projects create` as removed",
+        "the notes do not list `projects delete` as removed",
+        "the notes do not list `run --output-dir` as removed",
+    ]
+
+
+def test_the_draft_notes_exist_ahead_of_the_release_and_are_newest_first():
+    from harumi import changelog
+
+    versions = [r.version for r in changelog.load()]
+    assert versions[0] == cli._REMOVAL_VERSION and __version__ in versions
 
 
 def deprecating_release() -> str:
