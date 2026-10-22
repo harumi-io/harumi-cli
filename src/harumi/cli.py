@@ -271,6 +271,22 @@ def _no_such_command_message(group, word: str, message: str) -> str:
     return base + f" Commands: {', '.join(visible)}."
 
 
+def _removed_message(ctx, args: list[str]):
+    """"`harumi push` was removed in 0.12.0. Use: harumi import" for a name in `_RETIRED`, else None.
+
+    The longest match wins (`repo ls` before `repo`, `projects create Demo` is looked up as `projects create`).
+    """
+    parents = []
+    while ctx.parent is not None:  # the program name differs (pytest, python -m); the groups do not
+        parents.insert(0, ctx.info_name)
+        ctx = ctx.parent
+    for count in range(len(args), 0, -1):
+        key = " ".join(["harumi", *parents, *args[:count]])
+        if key in _RETIRED:
+            return f"`{key}` was removed in {_REMOVAL_VERSION}. Use: {_RETIRED[key]}"
+    return None
+
+
 class _Group(typer.core.TyperGroup):
     """Typer's group, plus: wrong-verb hints, and commands listed in the order of their help panels."""
 
@@ -281,7 +297,8 @@ class _Group(typer.core.TyperGroup):
             message = getattr(exc, "message", None)
             if not args or not isinstance(message, str) or not message.startswith("No such command"):
                 raise
-            exc.message = _no_such_command_message(self, args[0], message)  # type: ignore[attr-defined]
+            # A name that used to exist is answered with where it went, before any guess at a spelling.
+            exc.message = _removed_message(ctx, args) or _no_such_command_message(self, args[0], message)  # type: ignore[attr-defined]
             raise
 
     def list_commands(self, ctx):  # type: ignore[no-untyped-def]
@@ -549,13 +566,30 @@ def _fail(message: str) -> None:
     raise typer.Exit(code=1)
 
 
+# The release that takes the deprecated names out (the 0.11 changelog promises it, and every warning says it).
+_REMOVAL_VERSION = "0.12.0"
+
+# Every name that is going away -> what to use instead. Filled by `_deprecated`, so the warning a name prints
+# while it works and the answer it gets once it is gone (`_Group.resolve_command`) are the same text and cannot
+# drift apart. When the names are removed, delete their commands and keep these entries: they are what tells a
+# script's author, the day after, where each one went.
+_RETIRED: dict[str, str] = {
+    # Whole groups: a bare `harumi repo` gets one answer, not twelve.
+    "harumi repo": "git in your clone (`harumi clone` sets up a `harumi` git remote with your token)",
+    "harumi skill": "harumi agent-skills install",
+    "harumi config": "harumi org use <ORG_ID>",
+    # Not a command: an option that is still accepted (`run -o`), kept here so it is listed with the rest.
+    "harumi run --output-dir": "harumi runs download [RUN_ID] -o DIR",
+}
+
+
 def _warn_deprecated(old: str, use: str) -> None:
     """Tell the user a name still works but is going away. Goes to stderr so a
     script piping the command's stdout is unaffected."""
     # soft_wrap: the replacement is a command line someone will copy, so it must
     # not be broken across lines at the terminal width.
     err_console.print(
-        f"[yellow]deprecated:[/yellow] `{escape(old)}` is removed in 0.12.0. Use: {escape(use)}",
+        f"[yellow]deprecated:[/yellow] `{escape(old)}` is removed in {_REMOVAL_VERSION}. Use: {escape(use)}",
         soft_wrap=True,
     )
 
@@ -563,7 +597,8 @@ def _warn_deprecated(old: str, use: str) -> None:
 def _deprecated(old: str, use: str):
     """Decorator: warn that command `old` is deprecated in favour of `use`,
     then run it unchanged. Keeps the wrapped signature so Typer still builds
-    the same options."""
+    the same options. Also records the name in `_RETIRED`."""
+    _RETIRED[old] = use
 
     def decorator(fn):
         @functools.wraps(fn)
@@ -3142,7 +3177,7 @@ def run(
     `harumi clone` (or `harumi link`, if the checkout already exists).
     """
     if output_dir:
-        _warn_deprecated("harumi run --output-dir", "harumi runs download [RUN_ID] -o DIR")
+        _warn_deprecated("harumi run --output-dir", _RETIRED["harumi run --output-dir"])
     binding = ProjectBinding.load()
     if binding is None:
         _fail(
@@ -4985,7 +5020,7 @@ def share_update(
 
     if comparisons and run_history is None:
         # Turning comparisons on is only meaningful when the link already allows past runs.
-        current = next((l for l in client.list_share_links(project_id) if l.id == link_id), None)
+        current = next((link for link in client.list_share_links(project_id) if link.id == link_id), None)
         if current is not None and not current.run_history_enabled:
             _fail("--comparisons needs run history on this link: add --run-history, or nothing can be compared.")
 
@@ -6509,6 +6544,14 @@ def _unwrap(help_text: str) -> str:
     return "\n\n".join(paragraphs)
 
 
+def _retired_help(key: str, text: str) -> str:
+    """The help of a name that is going away starts by saying so, and what to use.
+
+    The replacement goes through `escape`: help is rich markup, and `[RUN_ID]` would be read as styling and vanish.
+    """
+    return f"Deprecated: removed in {_REMOVAL_VERSION}. Use: {escape(_RETIRED[key])}\n\n{text}"
+
+
 def _polish_help() -> None:
     """Finish every command's help text: unwrap its paragraphs, then add its examples."""
 
@@ -6522,6 +6565,8 @@ def _polish_help() -> None:
     for path, info in registered(app, ""):
         text = info.help if isinstance(info.help, str) else inspect.getdoc(info.callback) or ""
         text = _unwrap(text.rstrip())
+        if f"harumi {path}" in _RETIRED:
+            text = _retired_help(f"harumi {path}", text)
         if path in _EXAMPLES:
             text += _examples_block(_EXAMPLES[path])
         info.help = text
