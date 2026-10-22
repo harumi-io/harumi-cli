@@ -1958,6 +1958,29 @@ agent_skills_app = _typer(
 app.add_typer(agent_skills_app, name="agent-skills")
 
 
+def _under_home(path: Path) -> str:
+    """`~/.cursor/skills` for a path inside the home folder, else the path as it is. Shorter, and the same on
+    every machine, which is what a person reads back or pastes into a bug report."""
+    try:
+        return "~/" + path.resolve().relative_to(Path.home().resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _agent_skills_oserror(exc: OSError, target: Path) -> str:
+    """What went wrong writing a skills folder, in words (the raw `[Errno 17] File exists: '...'` names neither
+    the cause nor the way out)."""
+    where = escape(_under_home(target))
+    if isinstance(exc, FileExistsError) or (target.exists() and not target.is_dir()):
+        return f"{where} is a file, not a folder, so the skills cannot go there. Move or delete it, then run this again."
+    # The OS names the thing it failed to create (`.../skills/harumi-cli`); the one a person can fix is the folder
+    # that holds it, so that is the one named.
+    folder = escape(_under_home(target.parent))
+    if isinstance(exc, PermissionError):
+        return f"No permission to write to {folder}. Fix its permissions (or choose another agent with --agent), then run this again."
+    return f"Could not write to {folder}: {escape(exc.strerror or str(exc))}."
+
+
 @agent_skills_app.command("install")
 def agent_skills_install(
     agent: Optional[list[str]] = typer.Option(
@@ -1979,18 +2002,43 @@ def agent_skills_install(
     With no flags, auto-detects installed agents (Cursor/Claude Code/Codex)
     by their config directory and writes to each one's global skills folder.
     """
+    targets = skills_mod.install_targets(agent_keys=agent, project=project)
+    if isinstance(targets, str):
+        _fail(escape(targets))  # an unknown agent, with the known ones
+        return
+    detected = bool(agent) or project or bool(skills_mod.detect_agents())
     try:
         written = skills_mod.install(agent_keys=agent, project=project, dry_run=dry_run, force=force)
         sources = {d.name: d for d in skills_mod.bundled_skill_dirs()}
-    except (FileNotFoundError, FileExistsError, ValueError) as exc:
-        _fail(str(exc))
+    except (FileNotFoundError, ValueError) as exc:
+        _fail(escape(str(exc)))
         return
-    verb = "Would write" if dry_run else "Wrote"
-    for path in written:
-        source = sources.get(path.name)
-        console.print(f"[dim]{verb}:[/dim] {source} -> {path}" if source else f"[dim]{verb}:[/dim] {path}")
-    if not dry_run:
-        console.print(f"[bold green]Installed[/bold green] {len(written)} skill director{'y' if len(written) == 1 else 'ies'}.")
+    except FileExistsError as exc:
+        # install() raises this for a folder that is not a skill (it names --force) and the OS raises it for a
+        # file in the way; only the second has an errno.
+        if exc.errno is None:
+            _fail(escape(str(exc)))
+            return
+        _fail(_agent_skills_oserror(exc, Path(exc.filename) if exc.filename else Path(".")))
+        return
+    except OSError as exc:
+        _fail(_agent_skills_oserror(exc, Path(exc.filename) if exc.filename else Path(".")))
+        return
+
+    if not detected and not dry_run:
+        console.print(
+            "No Cursor, Claude Code or Codex folder found, so the skills went to the shared "
+            "[bold]~/.agents/skills[/bold]. Pick an agent with [bold]--agent cursor[/bold] (or claude-code, codex)."
+        )
+    if dry_run:
+        # Dry run keeps the source on the line: it is how you check what would be copied from where.
+        for path in written:
+            source = sources.get(path.name)
+            console.print(f"[dim]Would write:[/dim] {escape(str(source))} -> {escape(_under_home(path))}", soft_wrap=True)
+        return
+    for label, folder in skills_mod.destinations(written, project=project):
+        names = ", ".join(sorted(p.name for p in written if p.parent == folder))
+        console.print(f"[bold green]Installed[/bold green] for {escape(label)}: {escape(names)} in {escape(_under_home(folder))}", soft_wrap=True)
 
 
 # Retired in 0.11: `harumi skill` (singular) collided with `harumi skills`.
@@ -2025,12 +2073,14 @@ def skills_library(
     query: Optional[str] = typer.Option(
         None, "--query", "-q", help="Only presets whose name, description or tags contain this text."
     ),
+    as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """List the preset skills you can install into a project with `harumi skills add`."""
     client = _get_client(api_url=api_url, org=org)
-    presets = client.list_skill_library()
+    everything = client.list_skill_library()
+    presets = everything
     if category:
         presets = [p for p in presets if p.category.lower() == category.lower()]
     if query:
@@ -2038,8 +2088,16 @@ def skills_library(
         presets = [
             p for p in presets if any(needle in text.lower() for text in (p.name, p.description, *p.tags))
         ]
+    if as_json:
+        _emit_json([json_out.skill_preset(p) for p in sorted(presets, key=lambda p: p.slug)])
+        return
     if not presets:
         console.print("No skills found.")
+        categories = sorted({p.category for p in everything if p.category})
+        if categories:
+            console.print(f"Categories: {escape(', '.join(categories))}. Run [bold]harumi skills library[/bold] for the whole list.")
+        else:
+            console.print("Run [bold]harumi skills library[/bold] with no filter to see every preset.")
         return
 
     table = Table("slug", "name", "category", "version", "description")
@@ -2047,6 +2105,17 @@ def skills_library(
     for p in sorted(presets, key=lambda p: p.slug):
         table.add_row(_cell(p.slug), _cell(p.name), _cell(p.category), _cell(p.version), _cell(p.description))
     console.print(table)
+
+
+def _unknown_skill_message(client, slug: str) -> str:
+    """The error for a slug the library does not have: where to look, and the nearest slug if there is one."""
+    try:
+        known = [p.slug for p in client.list_skill_library()]
+    except ApiError:
+        known = []  # the lookup that already failed is the news; a second failure adds nothing
+    close = difflib.get_close_matches(slug, known, n=1, cutoff=0.6)
+    hint = f" Did you mean {escape(close[0])}?" if close else ""
+    return f"The library has no skill called {escape(repr(slug))}.{hint} See what is on offer with [bold]harumi skills library[/bold]."
 
 
 @skills_app.command("add")
@@ -2086,7 +2155,13 @@ def skills_add(
         )
 
     client = _get_client(api_url=api_url, org=org)
-    preset = client.get_skill_library(slug)
+    try:
+        preset = client.get_skill_library(slug)
+    except ApiError as exc:
+        if exc.status_code != 404:
+            raise
+        _fail(_unknown_skill_message(client, slug))
+        return
     try:
         content = skills_mod.with_install_provenance(preset.content, preset.slug, preset.version)
     except ValueError as exc:
@@ -2096,11 +2171,17 @@ def skills_add(
     dest.write_text(content, encoding="utf-8")
     rel = f"{skills_mod.SKILLS_DIR}/{slug}"
     console.print(
-        f"[bold green]Installed[/bold green] [bold]{preset.name}[/bold] (v{preset.version}) at {dest}.", soft_wrap=True
+        f"[bold green]Installed[/bold green] [bold]{escape(preset.name)}[/bold] (v{preset.version}) at {escape(str(dest))}.",
+        soft_wrap=True,
     )
+    # Start from the project root, so the commands work from any folder inside the clone: a plain
+    # `git add skills/<slug>` fails with "pathspec did not match" from a subfolder. The path is quoted for the
+    # shell and escaped for rich (a folder called "my proj [v2]" is both).
+    root = shlex.quote(str(project_dir))
     console.print(
-        "Commit and push it so the project's assistant can use it:\n"
-        f"  [bold]git add {rel} && git commit -m \"Install {slug} skill\" && git push harumi[/bold]"
+        "Commit and push it so the project's assistant can use it:\n  "
+        + escape(f"cd {root} && git add {rel} && git commit -m \"Install {slug} skill\" && git push harumi"),
+        soft_wrap=True,
     )
 
 
@@ -2161,13 +2242,15 @@ def blueprints(
         _emit_json([json_out.blueprint(b) for b in items])
         return
     if not items:
-        console.print("No blueprints found.")
+        console.print("No blueprints found. [bold]harumi new <NAME>[/bold] still creates a project, from the default scaffold.")
         return
 
     table = Table("slug", "name", "description")
+    table.columns[0].no_wrap = True  # the slug is what you copy into `new --blueprint`
     for b in items:
         table.add_row(_cell(b.slug), _cell(b.name), _cell(b.description))
     console.print(table)
+    console.print("[dim]Start one with [bold]harumi new <NAME> --blueprint <slug>[/bold].[/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -2587,7 +2670,7 @@ def _push_impl(
     console.print(f"Creating project [bold]{escape(name)}[/bold]...")
     project = client.create_project(name, personal=personal)
     console.print(
-        f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id})."
+        f"[bold green]Created[/bold green] project [bold]{escape(project.name)}[/bold] (id={project.id})."
     )
     _print_project_workspace(project.customer_id)
 
@@ -2731,6 +2814,29 @@ def _require_entitled_workspace(client, customer_id: Optional[str]) -> None:
         )
 
 
+def _checked_blueprint(client, slug: Optional[str]) -> Optional[str]:
+    """The blueprint slug to send, or a refusal that names the nearest real one.
+
+    harumi-api already checks the slug before it writes anything, so a typo never leaves a project behind; what
+    it sends back is `HTTP 400`. This asks first, so the message can say what exists. It is advisory: if the list
+    cannot be read, the slug goes through and the server decides. The list's own spelling is sent, so
+    `Vehicle-Routing` finds `vehicle-routing`.
+    """
+    if not slug:
+        return slug
+    try:
+        known = [b.slug for b in client.list_blueprints()]
+    except (ApiError, HarumiError):
+        return slug
+    by_lower = {k.lower(): k for k in known}
+    if slug.lower() in by_lower:
+        return by_lower[slug.lower()]
+    close = difflib.get_close_matches(slug.lower(), list(by_lower), n=1, cutoff=0.6)
+    hint = f" Did you mean {escape(by_lower[close[0]])}?" if close else ""
+    _fail(f"There is no blueprint called {escape(repr(slug))}.{hint} See them with [bold]harumi blueprints[/bold].")
+    return slug
+
+
 def _new_impl(
     *,
     name: str,
@@ -2750,13 +2856,14 @@ def _new_impl(
         _fail("--dir only applies when cloning. Drop --no-clone, or drop --dir.")
 
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
+    blueprint = _checked_blueprint(client, blueprint)
     _require_entitled_workspace(client, None if personal else (customer_id or client.config.org_id))
 
-    console.print(f"Creating project [bold]{name}[/bold]...")
+    console.print(f"Creating project [bold]{escape(name)}[/bold]...")
     project = client.create_project(
         name, customer_id=customer_id, blueprint=blueprint, personal=personal
     )
-    console.print(f"[bold green]Created[/bold green] project [bold]{project.name}[/bold] (id={project.id}).")
+    console.print(f"[bold green]Created[/bold green] project [bold]{escape(project.name)}[/bold] (id={project.id}).")
     _print_project_workspace(project.customer_id)
 
     if not clone:
@@ -4651,7 +4758,7 @@ def dashboard_validate(
     failed = False
     for name, raw in specs:
         if len(specs) > 1:
-            console.print(f"[bold]{name}[/bold]")
+            console.print(f"[bold]{escape(name)}[/bold]")
         try:
             widgets, issues = validate_dashboard_toml(raw, output)
         except DashboardTomlError as exc:
@@ -6491,20 +6598,20 @@ _EXAMPLES: dict[str, list[tuple[str, str]]] = {
     "files get": [("harumi files get sets/2026/data.csv", ""), ("harumi files get sets/2026/data.csv -o data.csv", "")],
     "files ls": [("harumi files ls", "")],
     "files rm": [("harumi files rm sets/2026/data.csv", "")],
-    "datasources add": [("harumi datasources add wh --type postgresql --host db.acme.io", "asks for the password")],
+    "datasources add": [("harumi datasources add wh --type mysql --host db.io", "asks for the password")],
     "datasources query": [
         ('harumi datasources query wh --sql "SELECT * FROM orders" --limit 20', ""),
-        ('harumi datasources query wh --sql "SELECT * FROM orders" --csv out.csv', "to a file"),
+        ('harumi datasources query wh --sql "SELECT 1" --csv out.csv', "to a file"),
     ],
     "schedules add": [('harumi schedules add --cron "0 9 * * *"', "every day at 09:00 UTC"), ('harumi schedules add --cron "*/30 * * * *"', "every 30 minutes")],
     "secrets set": [("harumi secrets set GUROBI_LICENSE", "asks for the value; never a flag")],
-    "memories add": [('harumi memories add "Costs are in euros"', ""), ('harumi memories add "Costs are in euros" --mode always', "load it into every chat")],
+    "memories add": [('harumi memories add "Costs are in euros"', ""), ('harumi memories add "Costs are in euros" --mode always', "in every chat")],
     "org invite": [("harumi org invite Acme --email ana@example.com", ""), ("harumi org invite Acme --email ana@example.com --role admin", "")],
     "org role": [("harumi org role Acme ana@example.com --role admin", "")],
     "org use": [("harumi org use Acme", "work in Acme from now on"), ("harumi org use --personal", "back to your own workspace")],
     "usage": [("harumi usage", "plan, weekly and monthly use"), ("harumi usage --json", "for scripts")],
     "dashboard validate": [("harumi dashboard validate", ""), ("harumi dashboard validate --latest", "also check paths against the last run")],
-    "skills add": [("harumi skills add SLUG", "copy a preset in; `harumi skills library` lists them")],
+    "skills add": [("harumi skills add SLUG", "SLUG is from `skills library`")],
     "agent-skills install": [("harumi agent-skills install", "every agent it finds"), ("harumi agent-skills install --agent cursor", ""), ("harumi agent-skills install --dry-run", "show, do not write")],
     "profile set": [("harumi profile set --first-name Ana --last-name Silva", ""), ('harumi profile set --bio ""', "an empty value clears it")],
     "projects rm": [("harumi projects rm PROJECT_ID", "moves it to the Trash"), ("harumi projects rm PROJECT_ID --yes", "do not ask")],

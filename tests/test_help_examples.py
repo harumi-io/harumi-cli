@@ -128,14 +128,35 @@ def test_the_examples_in_help_are_exactly_the_examples_in_the_table():
             assert line in shown, f"{line!r} is not in the help of `harumi {path}` as printed"
 
 
-def test_examples_fit_a_normal_terminal_and_hold_no_markup():
-    """The lines as they are printed, comment included: past 88 columns they wrap in the middle of a command."""
+# Help prose is drawn at most 80 columns wide, with one column of margin on each side, so a line longer than 78
+# wraps mid-command on the most common terminal width. (A 120-column terminal is fine; 80 is what people have.)
+MOST_COMMON_TERMINAL_WIDTH = 80
+LONGEST_LINE_THAT_FITS = MOST_COMMON_TERMINAL_WIDTH - 2
+
+
+def test_examples_fit_the_most_common_terminal_and_hold_no_markup():
+    """The lines as they are printed, comment included. This once said 88 and was measured on the unwrapped string
+    with COLUMNS pinned to 200, so it could not see that four examples wrapped on an 80-column terminal."""
     printed = [row for lines in cli._EXAMPLES.values() for row in cli._examples_block(lines).splitlines()[3:]]
-    too_wide = [row.strip() for row in printed if len(row) > 88]
+    too_wide = [row.strip() for row in printed if len(row) > LONGEST_LINE_THAT_FITS]
     markup = [e for _, e, c in cli._iter_examples() if "[" in e or "[" in c]
 
     assert len(printed) > 40  # the slice above really found the example lines
     assert too_wide == [] and markup == []  # a "[" would be read by rich as styling and vanish
+
+
+def test_the_examples_really_stay_on_one_line_when_drawn_at_80_columns(monkeypatch):
+    """The measurement above, checked against what is drawn: render every help at 80 columns and look for an
+    example that came out on two lines (the comment's tail alone on its own line)."""
+    wrapped = []
+    for path in cli._EXAMPLES:
+        text = help_text(path.split(), MOST_COMMON_TERMINAL_WIDTH, monkeypatch)
+        block = text.split("Examples:")[1].split("\n")[1:]
+        for line, nxt in zip(block, block[1:]):
+            if line.strip().startswith("harumi") and nxt.strip() and not nxt.strip().startswith(("harumi", "╭", "│")):
+                wrapped.append((path, line.strip()[:50], nxt.strip()[:30]))
+
+    assert wrapped == []
 
 
 def test_an_example_never_shows_a_secret_on_the_command_line():
