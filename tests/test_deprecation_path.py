@@ -118,7 +118,6 @@ def typer_version():
     return tuple(int(p) for p in version("typer").split(".")[:2])
 
 
-@pytest.mark.skipif(typer_version() < (0, 23), reason="typer 0.16 prints an escaped [tag] with its backslash (\\[bold]), as in test_compare_picker")
 def test_a_replacement_is_shown_as_written_not_read_as_styling(monkeypatch):
     """Help is rich markup, so a hint with `[bold]` in it would lose the words and their brackets. (The `[RUN_ID]`
     we have today starts with a capital and would survive anyway; this is the case that would not.)"""
@@ -137,7 +136,11 @@ def test_a_replacement_is_shown_as_written_not_read_as_styling(monkeypatch):
 
     out = " ".join(runner.invoke(probe, ["zzz", "--help"]).stdout.split())
 
-    assert "harumi new [bold]NAME[/bold] --x" in out
+    # typer 0.16 prints an escaped tag with its backslash (as in test_compare_picker); 0.23 and later do not.
+    # Either way the words and brackets survive, which is what escaping is for: unescaped, `[bold]` is styling
+    # and the text would read "harumi new NAME --x".
+    shown = "harumi new \\[bold]NAME\\[/bold] --x" if typer_version() < (0, 23) else "harumi new [bold]NAME[/bold] --x"
+    assert shown in out
 
 
 def test_no_real_hint_has_a_bracket_that_rich_would_read_as_styling():

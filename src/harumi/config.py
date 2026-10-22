@@ -110,6 +110,9 @@ _ACTIVE_ENV: Optional[str] = None
 # last Config loaded", which is right for a CLI that runs one command and wrong for a library: a second `Client`
 # for another environment replaced it, and the first then read (and refreshed) the second's login. A context
 # variable is also per thread, so clients on different threads do not see each other's.
+#
+# `Config.load()` still sets the global, on purpose: the CLI is built on it and a Client built last is as good a
+# "current environment" as any for code that asks outside a call. What a Client does never depends on it.
 _ENV_SCOPE: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("harumi_environment_scope", default=None)
 
 

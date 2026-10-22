@@ -314,17 +314,57 @@ def test_login_calls_use_the_clients_transport_like_every_other_call():
     assert [path for _, _, path in seen.seen] == ["/api/users/otp"]
 
 
-def test_the_scope_ends_with_the_call_and_the_cli_global_is_untouched():
-    """The CLI sets one active environment for the whole process; a Client call must not change it for the CLI."""
+def test_the_scope_is_live_during_the_call_and_gone_after_it():
+    """Inside a call the client's environment wins; outside it the CLI's own global is back, untouched. Checked from
+    the handler (during the call) because looking only before and after cannot tell a scope from no scope."""
     log_in("production", "PROD-TOKEN")
     log_in("staging", "STAGING-TOKEN")
-    config.set_active_environment("production")
-    client = Client(environment="staging", transport=httpx.MockTransport(Recorder()))
-    config.set_active_environment("production")
+    during = []
+
+    def handler(request):
+        during.append(config.active_environment())
+        return httpx.Response(200, json=[])
+
+    client = Client(environment="staging", transport=httpx.MockTransport(handler))
+    config.set_active_environment("production")  # what the CLI would have set
 
     client.list_projects()
 
+    assert during == ["staging"]
     assert config.active_environment() == "production"
+
+
+def test_many_threads_sharing_one_client_refresh_an_expired_login_once():
+    """The docs promise a Client works on any thread. Six threads that all find the access token expired must spend
+    the single-use refresh token once between them (the credentials lock), not race and log each other out."""
+    log_in("production", "OLD")
+    used, guard, errors = [], threading.Lock(), []
+
+    def handler(request):
+        if request.url.path.endswith("/users/refresh"):
+            with guard:
+                if used:
+                    return httpx.Response(422, json={"detail": "Refresh token is not valid"})
+                used.append(1)
+            return httpx.Response(200, json={"access_token": "NEW", "refresh_token": "R2", "id": "u", "email": "a@b.c"})
+        if request.headers.get("authorization") == "Bearer OLD":
+            return httpx.Response(401, json={"detail": "expired"})
+        return httpx.Response(200, json=[])
+
+    client = Client(environment="production", transport=httpx.MockTransport(handler))
+
+    def work():
+        try:
+            client.list_projects()
+        except Exception as exc:
+            errors.append(repr(exc))
+
+    threads = [threading.Thread(target=work) for _ in range(6)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+
+    assert errors == [] and len(used) == 1
+    assert config.load_credentials()["access_token"] == "NEW"
 
 
 def test_a_scope_nests_and_restores_on_an_error():
