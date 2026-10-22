@@ -250,6 +250,8 @@ harumi profile set --first-name Ana --bio "..."    # --last-name "" / --bio "" c
 
 ## Scripts and CI
 
+Every delete follows one rule: `--yes` goes ahead; at a terminal it asks (declining exits 1); with no terminal and no `--yes` it **refuses at once** and names the flag. A `y` piped to stdin is not consent. `projects rm` and `org rm` ask for the name, so an agent passes `--yes` and the name. See [Confirmations](references/commands.md#confirmations---yes).
+
 Read commands take `--json`: stdout is one JSON document and nothing else (an array for a list, `[]` when empty), errors stay on stderr with exit 1. `harumi run --watch --json` prints `{"run_id","status","exit_code","succeeded",...}` and still exits 1 if the run fails. Prefer it to parsing a table; the contract and the list of commands are in [references/commands.md](references/commands.md#scripts-and-ci---json).
 
 ## Config & environments

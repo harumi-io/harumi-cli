@@ -100,7 +100,8 @@ def test_the_help_says_what_stops_at_once_including_the_share_links_that_do_not_
     assert "restoring does not bring them back" in out
 
 
-def test_the_confirmation_prompt_says_trash_and_shows_the_consequences(api):
+def test_the_confirmation_prompt_says_trash_and_shows_the_consequences(api, monkeypatch):
+    monkeypatch.setattr(cli.interactive, "is_interactive", lambda *a, **k: True)
     result = runner.invoke(cli.app, ["projects", "rm", "proj-1"], input="Routing [v2]\n")
 
     out = plain(result.output)
@@ -128,10 +129,11 @@ def test_the_result_names_the_place_to_restore_from(api):
     assert config.active_platform_url() in out and "Trash" in out
 
 
-def test_a_wrong_name_still_aborts_and_deletes_nothing(api):
+def test_a_wrong_name_still_aborts_and_deletes_nothing(api, monkeypatch):
+    monkeypatch.setattr(cli.interactive, "is_interactive", lambda *a, **k: True)
     result = runner.invoke(cli.app, ["projects", "rm", "proj-1"], input="nope\n")
 
-    assert "Aborted" in result.output and api.deleted == []
+    assert "Aborted" in result.output and api.deleted == [] and result.exit_code == 1
 
 
 # -- the wording is only used where it is true -------------------------------------------------------------
@@ -180,13 +182,18 @@ def test_organization_deletion_still_says_it_is_permanent(monkeypatch):
         return httpx.Response(200, json=[{"id": "6d1c0aa5-0000-4000-8000-0000000000a1", "business_name": "Acme", "role": "owner"}])  # looked up to name it
 
     monkeypatch.setattr(cli, "_get_client", lambda *a, **k: Client(api_url="https://api.harumi.io/api", transport=httpx.MockTransport(handler)))
-    monkeypatch.setattr(cli.typer, "confirm", lambda text, **k: asked.append(text) or False)
+    monkeypatch.setattr(cli.interactive, "is_interactive", lambda *a, **k: True)
+    # The organization is the one delete that asks for its name rather than a y/N; what it must do first
+    # is say, in the words below, that this is permanent and what goes with it.
+    monkeypatch.setattr(cli.typer, "prompt", lambda text, **k: asked.append(text) or "not the name")
 
-    runner.invoke(cli.app, ["org", "rm", "6d1c0aa5-0000-4000-8000-0000000000a1"])
+    result = runner.invoke(cli.app, ["org", "rm", "6d1c0aa5-0000-4000-8000-0000000000a1"])
 
-    assert asked and "cannot be undone" in asked[0] and "organization" in asked[0]
-    assert "Acme" in asked[0] and "Every project in it is deleted" in asked[0]  # it names what goes
-    assert sent == ["GET /api/users/organizations"]  # and nothing was deleted
+    shown = " ".join(result.output.split())
+    assert asked and "organization" in asked[0] and "Acme" in asked[0]
+    assert "cannot be undone" in shown and "Every project in it is deleted" in shown and "Acme" in shown  # said before it asks
+    assert asked[0].startswith("Type the organization name")  # and what it asks for is the name, not a y/N
+    assert sent == ["GET /api/users/organizations"] and result.exit_code == 1  # a wrong name deletes nothing
 
 
 # -- repo rm is a commit, so it can be undone --------------------------------------------------------------

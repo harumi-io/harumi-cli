@@ -531,6 +531,67 @@ def _printable(text: object) -> str:
 _FULL_ID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
+def _stdin_is_terminal() -> bool:
+    try:
+        return bool(sys.stdin.isatty())
+    except (AttributeError, ValueError):
+        return False
+
+
+_YES = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt.")
+
+
+def _confirm(question: str, *, yes: bool) -> None:
+    """Ask before something that cannot be taken back; return only if the answer is yes.
+
+    One rule for every destructive command. `--yes` goes ahead. At a terminal the user is asked, and
+    declining exits 1: a script that says `harumi org rm X && deploy` must not carry on after a no.
+    With no terminal and no `--yes` it refuses at once and names the flag, as the menus do, rather
+    than printing a prompt into a log and waiting on stdin (where a piped "y" is not consent a
+    person gave to this question, and an open, empty stdin would hang).
+    """
+    if yes:
+        return
+    if not interactive.is_interactive():
+        _fail(f"{escape(question)}\nCannot ask here: no interactive terminal. Run it again with [bold]--yes[/bold] to go ahead.")
+    if not typer.confirm(question):  # plain text: not Rich markup
+        console.print("Aborted.")
+        raise typer.Exit(code=1)
+
+
+def _confirm_by_typing(question: str, expected: str, *, yes: bool, noun: str, to: str = "confirm") -> None:
+    """Like `_confirm`, for what is permanent and takes other things with it: the user types the name.
+
+    `question` says what will happen and is shown first. The name must match exactly: a "y" is too
+    easy to type on the way to something else.
+    """
+    if yes:
+        return
+    if not interactive.is_interactive():
+        _fail(f"{escape(question)}\nCannot ask here: no interactive terminal. Run it again with [bold]--yes[/bold] to go ahead.")
+    console.print(escape(question))
+    # default="" so that just pressing Enter is an answer (a no) and not a prompt that asks again.
+    typed = typer.prompt(f"Type the {noun} ({expected!r}) to {to}", default="", show_default=False)
+    if typed != expected:
+        console.print("Aborted (the name did not match).")
+        raise typer.Exit(code=1)
+
+
+def _prompt_hidden(text: str, *, confirm: bool = False) -> str:
+    """A secret value. Hidden at a terminal; one line from stdin when there is none.
+
+    `getpass` falls back to echoing when stdin is not a terminal and prints a warning about it into
+    the log, which for a CI job feeding a secret in is noise at best and alarming at worst. A
+    secret is never a flag (it would land in shell history), so a pipe is how a script gives one.
+    """
+    if _stdin_is_terminal():
+        return typer.prompt(text, hide_input=True, confirmation_prompt=confirm)
+    line = sys.stdin.readline()
+    if not line.strip():
+        _fail("No value on standard input. Pipe it in: [bold]printf '%s' \"$VALUE\" | harumi ...[/bold]")
+    return line.rstrip("\r\n")
+
+
 _JSON = typer.Option(False, "--json", help="Print JSON on stdout instead of a table, for scripts.")
 
 
@@ -2872,7 +2933,7 @@ _TRASH_DAYS = 7
 @_handle_errors
 def projects_rm(
     project_id: Optional[str] = typer.Argument(None, help="Project id. Pick from a list if omitted."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    yes: bool = _YES,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
 ) -> None:
@@ -2896,14 +2957,11 @@ def projects_rm(
 
     if not yes:
         p = client.get_project(project_id)
-        console.print(
-            f"[bold]{escape(p.name)}[/bold] goes to the Trash. It stops running now (schedules cancelled, "
-            f"app shut down) and its share links are removed. You can restore it within {_TRASH_DAYS} days."
+        _confirm_by_typing(
+            f"{p.name} goes to the Trash. It stops running now (schedules cancelled, app shut down) and its share "
+            f"links are removed. You can restore it within {_TRASH_DAYS} days.",
+            p.name, yes=False, noun="project name", to="move it to the Trash",
         )
-        typed = typer.prompt(f"Type the project name ({p.name!r}) to move it to the Trash")
-        if typed != p.name:
-            console.print("Aborted (name did not match).")
-            return
 
     deleted = client.delete_project(project_id)
     console.print(
@@ -3753,7 +3811,7 @@ def repo_rm(
     path: str = typer.Argument(..., help="File or folder path within the repo."),
     message: Optional[str] = typer.Option(None, "--message", "-m", help="Commit message."),
     branch: Optional[str] = typer.Option(None, "--branch", help="Target branch (defaults to the default branch)."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    yes: bool = _YES,
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -3870,7 +3928,7 @@ def repo_branch_create(
 @_handle_errors
 def repo_branch_rm(
     name: str = typer.Argument(..., help="Branch (version) name."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    yes: bool = _YES,
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -4271,7 +4329,7 @@ def files_get(
 @_handle_errors
 def files_rm(
     remote_path: str = typer.Argument(..., help="File path within the project's files."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    yes: bool = _YES,
     missing_ok: bool = typer.Option(
         False,
         "--missing-ok",
@@ -4297,9 +4355,7 @@ def files_rm(
         console.print(f"{escape(_printable(remote_path))} was not there, so there was nothing to delete.")
         return
     what = f"'{_printable(remote_path)}'" + (f" ({_format_bytes(found.size)})" if found else "")  # shown cleaned; sent as given
-    if not yes and not typer.confirm(f"Delete {what} from this project's files? This cannot be undone."):
-        console.print("Aborted.")
-        return
+    _confirm(f"Delete {what} from this project's files? This cannot be undone.", yes=yes)
 
     client.delete_project_file(project_id, remote_path)
     size = f" ({_format_bytes(found.size)})" if found else ""
@@ -4733,6 +4789,7 @@ def share_update(
     chat: Optional[bool] = typer.Option(None, "--chat/--no-chat", help="Let signed-in visitors ask the read-only assistant about this project."),
     run_history: Optional[bool] = typer.Option(None, "--run-history/--no-run-history", help="Let visitors browse past runs, not just the latest one."),
     run_control: Optional[bool] = typer.Option(None, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation when removing a password."),
     password: Optional[bool] = typer.Option(None, "--password/--no-password", help="--password sets or changes the link's password (prompted, hidden, min 8 characters); --no-password removes it. Previously unlocked viewers must re-enter it."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
@@ -4767,16 +4824,17 @@ def share_update(
             return
     link_id = _resolve_share_link(client, project_id, link_id)
 
+    if password is False:
+        # Removing it opens the dashboard to anyone who has the URL, and signs out nobody: the one change
+        # here that makes a link more exposed rather than less.
+        _confirm("Remove this link's password? Anyone with the link will be able to open it.", yes=yes)
+
     # Ask for the password before changing anything, and apply it last: setting or
     # removing it signs out every viewer who had unlocked the link, so it must not
     # happen if the other fields were rejected.
     new_password = None
     if password is True:
-        new_password = typer.prompt(
-            "Enter share link password (hidden, min 8 characters)",
-            hide_input=True,
-            confirmation_prompt=True,
-        )
+        new_password = _prompt_hidden("Enter share link password (hidden, min 8 characters)", confirm=True)
 
     if body:
         try:
@@ -4806,7 +4864,7 @@ def share_update(
 @_handle_errors
 def share_rm(
     link_id: Optional[str] = typer.Argument(None, help="Share link id (or the start of it). Pick from a list if omitted."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    yes: bool = _YES,
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -4834,9 +4892,7 @@ def share_rm(
     if not yes:
         # Name the link, not just its id: a prefix that matched the wrong one is then easy to spot.
         who = f"'{_printable(known.label) if known and known.label else 'untitled'}' ({link_id})"
-        if not typer.confirm(f"Delete share link {who}? This cannot be undone."):  # plain text: not Rich markup
-            console.print("Aborted.")
-            return
+        _confirm(f"Delete share link {who}? This cannot be undone.", yes=False)
 
     try:
         client.delete_share_link(project_id, link_id)
@@ -4850,7 +4906,7 @@ def share_rm(
 @_handle_errors
 def share_rotate(
     link_id: Optional[str] = typer.Argument(None, help="Share link id (or the start of it). Pick from a list if omitted."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    yes: bool = _YES,
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -4867,9 +4923,7 @@ def share_rotate(
             return
     link_id = _resolve_share_link(client, project_id, link_id)
 
-    if not yes and not typer.confirm("Rotate this share link? The current URL will stop working immediately."):
-        console.print("Aborted.")
-        return
+    _confirm("Rotate this share link? The current URL will stop working immediately.", yes=yes)
 
     try:
         link = client.rotate_share_link(project_id, link_id)
@@ -4891,7 +4945,7 @@ def share_set_password(
 ) -> None:
     """Set or change a share link's password (min 8 characters, prompted, hidden input)."""
     project_id = _resolve_project(project)
-    password = typer.prompt("Enter share link password (hidden, min 8 characters)", hide_input=True)
+    password = _prompt_hidden("Enter share link password (hidden, min 8 characters)")
     client = _get_client(api_url=api_url, org=org)
     client.set_share_link_password(project_id, link_id, password)
     console.print("[bold green]Set[/bold green] the share link password. Previously unlocked viewers must re-enter it.")
@@ -4939,7 +4993,7 @@ def _check_datasource_type(kind: Optional[str]) -> Optional[str]:
 
 
 def _prompt_credentials(current: str = "credentials") -> str:
-    return typer.prompt(f"Enter {current} (hidden)", hide_input=True)
+    return _prompt_hidden(f"Enter {current} (hidden)")
 
 
 def _read_pem(path: Path, flag: str) -> str:
@@ -5199,7 +5253,7 @@ def datasources_update(
 @_handle_errors
 def datasources_rm(
     name: str = typer.Argument(..., help="Datasource name."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    yes: bool = _YES,
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -5207,9 +5261,7 @@ def datasources_rm(
     """Delete a datasource (removes the DB row and its stored credentials)."""
     project_id = _resolve_project(project)
 
-    if not yes and not typer.confirm(f"Delete datasource '{name}'? This cannot be undone."):
-        console.print("Aborted.")
-        return
+    _confirm(f"Delete datasource '{_printable(name)}'? Its stored credentials are deleted with it. This cannot be undone.", yes=yes)
 
     client = _get_client(api_url=api_url, org=org)
     with _pointing_to("harumi datasources list"):
@@ -5517,7 +5569,7 @@ def schedules_update(
 @_handle_errors
 def schedules_rm(
     schedule_id: Optional[str] = typer.Argument(None, help="Schedule id, or the start of it. Pick from a list if omitted."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    yes: bool = _YES,
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -5535,9 +5587,14 @@ def schedules_rm(
             return
     schedule_id = _schedule_id(client, project_id, schedule_id)
 
-    if not yes and not typer.confirm(f"Delete schedule '{schedule_id}'? This cannot be undone."):  # plain text: not markup
-        console.print("Aborted.")
-        return
+    what = f"'{schedule_id}'"
+    if not yes:
+        try:
+            sc = client.get_schedule(project_id, schedule_id)
+            what = f"'{_printable(sc.cron)}' on {_printable(sc.git_branch)}" + (f" running {_printable(sc.command)}" if sc.command else "") + f" ({schedule_id[:8]})"
+        except ApiError:
+            pass  # the delete below says what is wrong; the question can do without the description
+    _confirm(f"Delete schedule {what}? It stops firing for good. This cannot be undone.", yes=yes)
 
     with _pointing_to("harumi schedules list"):
         schedule = client.delete_schedule(project_id, schedule_id)
@@ -5609,16 +5666,21 @@ def secrets_set(
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
-    value = typer.prompt(f"Enter value for {name!r} (hidden)", hide_input=True)
+    try:
+        existed = any(sec.name == name for sec in client.list_secrets(project_id))
+    except ApiError:
+        existed = False  # only affects the wording below; the secret is set either way
+    value = _prompt_hidden(f"Enter value for {name!r} (hidden)")
     client.create_secret(project_id, name, value)
-    console.print(f"[bold green]Set[/bold green] secret [bold]{name}[/bold].")
+    verb = "Replaced" if existed else "Set"
+    console.print(f"[bold green]{verb}[/bold green] secret [bold]{escape(name)}[/bold]." + (" The old value is gone." if existed else ""))
 
 
 @secrets_app.command("rm")
 @_handle_errors
 def secrets_rm(
     name: str = typer.Argument(..., help="Secret name."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    yes: bool = _YES,
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -5626,9 +5688,7 @@ def secrets_rm(
     """Delete a secret."""
     project_id = _resolve_project(project)
 
-    if not yes and not typer.confirm(f"Delete secret '{name}'? This cannot be undone."):
-        console.print("Aborted.")
-        return
+    _confirm(f"Delete secret '{_printable(name)}'? Runs that read it will no longer find it. This cannot be undone.", yes=yes)
 
     client = _get_client(api_url=api_url, org=org)
     with _pointing_to("harumi secrets list"):
@@ -5817,7 +5877,7 @@ def memories_edit(
 @_handle_errors
 def memories_rm(
     memory_id: Optional[str] = typer.Argument(None, help="Memory id, or the start of it. Pick from a list if omitted."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    yes: bool = _YES,
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
     org: Optional[str] = typer.Option(None, "--org", help="Override the organization sent as X-Organization."),
@@ -5835,9 +5895,15 @@ def memories_rm(
             return
     memory_id = _memory_id(client, project_id, memory_id)
 
-    if not yes and not typer.confirm(f"Delete memory '{memory_id}'? This cannot be undone."):  # plain text: not markup
-        console.print("Aborted.")
-        return
+    what = f"'{memory_id}'"
+    if not yes:
+        try:
+            found = next((m for m in client.list_memories(project_id) if m.id == memory_id), None)
+            if found:
+                what = f"\"{_memory_preview(_printable(found.content))}\" ({memory_id[:8]})"
+        except ApiError:
+            pass
+    _confirm(f"Delete memory {what}? This cannot be undone.", yes=yes)
 
     with _memory_errors(client, project_id, memory_id):
         memory = client.delete_memory(project_id, memory_id)
@@ -6023,7 +6089,7 @@ def org_rename(
 @_handle_errors
 def org_rm(
     organization: Optional[str] = _ORG_ARG,
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    yes: bool = _YES,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """Delete an organization, its projects and its subscription. This cannot be undone."""
@@ -6033,12 +6099,11 @@ def org_rm(
     client = _get_client(api_url=api_url)
     org_id, name = _org_choice(client, organization, "delete", destructive=True)
 
-    if not yes and not typer.confirm(  # plain text: not Rich markup
+    _confirm_by_typing(
         f"Delete organization '{_printable(name)}'? Every project in it is deleted, its subscription is cancelled "
-        "and its members lose access. This cannot be undone."
-    ):
-        console.print("Aborted.")
-        return
+        "and its members lose access. This cannot be undone.",
+        _printable(name), yes=yes, noun="organization name",
+    )
 
     client.delete_organization(org_id)
     console.print(f"[bold red]Deleted[/bold red] organization [bold]{escape(_printable(name))}[/bold].")
@@ -6126,7 +6191,7 @@ def org_role(
 def org_rm_member(
     organization: str = typer.Argument(..., help="Organization name, or the start of its id."),
     member: Optional[str] = typer.Argument(None, help="Member's email, or the start of their id. Pick from a list if omitted."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt."),
+    yes: bool = _YES,
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
 ) -> None:
     """Remove a member from an organization."""
@@ -6136,9 +6201,7 @@ def org_rm_member(
     org_id, org_name = _org_choice(client, organization, "remove someone from")
     target = _member_choice(client, org_id, member, "remove", destructive=True)
 
-    if not yes and not typer.confirm(f"Remove {_member_label(target)} from '{_printable(org_name)}'?"):  # plain text: not markup
-        console.print("Aborted.")
-        return
+    _confirm(f"Remove {_member_label(target)} from '{_printable(org_name)}'? They lose access to its projects.", yes=yes)
 
     with _pointing_to("harumi org members"):
         client.remove_organization_member(org_id, str(target.user_id))
