@@ -145,6 +145,7 @@ import contextlib
 import difflib
 import errno
 import functools
+import inspect
 import json
 import mimetypes
 import os
@@ -6427,6 +6428,106 @@ def _assign_panels() -> None:
 
 
 _assign_panels()
+
+
+# What to type, for the commands people reach for first. A table here rather than in each docstring so that
+# the examples can be read, and checked, together: tests have Click parse every line against the command it
+# sits under, so a renamed flag fails the build instead of misleading a user. Uppercase words (PROJECT_ID,
+# SLUG) are for you to fill in. Nothing here may hold a "[", which rich would read as styling, or a secret:
+# those are always prompted for.
+_EXAMPLES: dict[str, list[tuple[str, str]]] = {
+    "login": [("harumi login", ""), ("harumi login --signup", "first time here"), ("harumi login --email ana@example.com", "")],
+    "new": [('harumi new "Route planner"', ""), ('harumi new "Route planner" --dir ~/code/routes', "clone it somewhere else")],
+    "import": [("harumi import ./my-solver", "shows what would be uploaded first"), ('harumi import . --project-name "Route planner"', "")],
+    "clone": [("harumi clone", "pick from your projects"), ("harumi clone PROJECT_ID --dir ~/code/routes", "")],
+    "link": [("harumi link --project PROJECT_ID", "inside a checkout you already have")],
+    "run": [
+        ("harumi run", "run your working tree, no commit needed"),
+        ("harumi run --watch", "stay and follow it until it ends"),
+        ("harumi run --branch main --watch", "run a branch as it is on the server"),
+    ],
+    "runs list": [("harumi runs list", ""), ("harumi runs list --all --limit 50", ""), ("harumi runs list --json", "for scripts")],
+    "runs get": [("harumi runs get", "the latest run"), ("harumi runs get 3f2a9c1e", "the first 8 characters are enough")],
+    "runs cancel": [("harumi runs cancel 3f2a9c1e", "")],
+    "runs download": [("harumi runs download", "the latest run, into this folder"), ("harumi runs download 3f2a9c1e -o results", "")],
+    "compare": [("harumi compare", "pick the runs at a terminal"), ("harumi compare 3f2a9c1e 8b1d44a0", "the first is the baseline")],
+    "check": [("harumi check", "is anything blocking a run?"), ("harumi check --ref main", "")],
+    "files put": [("harumi files put data.csv", "it is inputs/data.csv in every run"), ("harumi files put data.csv sets/2026/data.csv", "")],
+    "files get": [("harumi files get sets/2026/data.csv", ""), ("harumi files get sets/2026/data.csv -o data.csv", "")],
+    "files ls": [("harumi files ls", "")],
+    "files rm": [("harumi files rm sets/2026/data.csv", "")],
+    "datasources add": [("harumi datasources add wh --type postgresql --host db.acme.io", "asks for the password")],
+    "datasources query": [
+        ('harumi datasources query wh --sql "SELECT * FROM orders" --limit 20', ""),
+        ('harumi datasources query wh --sql "SELECT * FROM orders" --csv out.csv', "to a file"),
+    ],
+    "schedules add": [('harumi schedules add --cron "0 9 * * *"', "every day at 09:00 UTC"), ('harumi schedules add --cron "*/30 * * * *"', "every 30 minutes")],
+    "secrets set": [("harumi secrets set GUROBI_LICENSE", "asks for the value; never a flag")],
+    "memories add": [('harumi memories add "Costs are in euros"', ""), ('harumi memories add "Costs are in euros" --mode always', "load it into every chat")],
+    "org invite": [("harumi org invite Acme --email ana@example.com", ""), ("harumi org invite Acme --email ana@example.com --role admin", "")],
+    "org role": [("harumi org role Acme ana@example.com --role admin", "")],
+    "org use": [("harumi org use Acme", "work in Acme from now on"), ("harumi org use --personal", "back to your own workspace")],
+    "usage": [("harumi usage", "plan, weekly and monthly use"), ("harumi usage --json", "for scripts")],
+    "dashboard validate": [("harumi dashboard validate", ""), ("harumi dashboard validate --latest", "also check paths against the last run")],
+    "skills add": [("harumi skills add SLUG", "copy a preset in; `harumi skills library` lists them")],
+    "agent-skills install": [("harumi agent-skills install", "every agent it finds"), ("harumi agent-skills install --agent cursor", ""), ("harumi agent-skills install --dry-run", "show, do not write")],
+    "profile set": [("harumi profile set --first-name Ana --last-name Silva", ""), ('harumi profile set --bio ""', "an empty value clears it")],
+    "projects rm": [("harumi projects rm PROJECT_ID", "moves it to the Trash"), ("harumi projects rm PROJECT_ID --yes", "do not ask")],
+}
+
+
+def _iter_examples():
+    """(command path, example, comment) for every example, in the order written."""
+    for path, lines in _EXAMPLES.items():
+        for example, comment in lines:
+            yield path, example, comment
+
+
+def _examples_block(lines: list[tuple[str, str]]) -> str:
+    """The help text for a command's examples. A `\\b` line stops click from re-flowing it into a paragraph."""
+    rows = [f"  {example}  # {comment}" if comment else f"  {example}" for example, comment in lines]
+    return "\n\n\b\nExamples:\n" + "\n".join(rows)
+
+
+_LIST_ITEM = re.compile(r"\s*([-*\u2022]|\d+[.)])\s")
+
+
+def _unwrap(help_text: str) -> str:
+    """Join the line breaks a docstring was wrapped with, so that the terminal does the wrapping.
+
+    Typer joins the single newlines of the first paragraph only; every later paragraph keeps the width of the
+    source file, and on a terminal narrower than that its lines end unevenly, sometimes stranding a word
+    ("...With no run ids, / at / a terminal"). A block marked with a `\\b` line, a list and an indented block
+    are left as written: their line breaks mean something.
+    """
+    paragraphs = help_text.split("\n\n")
+    for i, paragraph in enumerate(paragraphs):
+        lines = paragraph.split("\n")
+        is_block = paragraph.lstrip().startswith("\b") or any(_LIST_ITEM.match(ln) or ln.startswith((" ", "\t")) for ln in lines)
+        if len(lines) > 1 and not is_block:
+            paragraphs[i] = " ".join(ln.strip() for ln in lines if ln.strip())
+    return "\n\n".join(paragraphs)
+
+
+def _polish_help() -> None:
+    """Finish every command's help text: unwrap its paragraphs, then add its examples."""
+
+    def registered(typer_app: typer.Typer, prefix: str):
+        for info in typer_app.registered_commands:
+            yield (prefix + (info.name or info.callback.__name__.replace("_", "-"))).strip(), info
+        for group in typer_app.registered_groups:
+            if group.name:
+                yield from registered(group.typer_instance, f"{prefix}{group.name} ")
+
+    for path, info in registered(app, ""):
+        text = info.help if isinstance(info.help, str) else inspect.getdoc(info.callback) or ""
+        text = _unwrap(text.rstrip())
+        if path in _EXAMPLES:
+            text += _examples_block(_EXAMPLES[path])
+        info.help = text
+
+
+_polish_help()
 
 
 # errno values that say the problem is a local file or disk (full, read-only, no permission, missing), as
