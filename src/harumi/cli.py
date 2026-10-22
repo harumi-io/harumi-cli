@@ -4769,6 +4769,8 @@ def share_add(
 ) -> None:
     """Create a new public dashboard link. Every permission defaults to off."""
     _warn_io_control_removed(io_control)
+    if comparisons and not run_history:
+        _fail("--comparisons needs --run-history: without past runs there is nothing to compare.")
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -4779,8 +4781,6 @@ def share_add(
         "comparisons_enabled": comparisons,
         "run_control_enabled": run_control,
     }
-    if comparisons and not run_history:
-        _fail("--comparisons needs --run-history: without past runs there is nothing to compare.")
     if label:
         body["label"] = label
 
@@ -4809,6 +4809,8 @@ def share_update(
 ) -> None:
     """Partially update a share link. Only provided fields are changed."""
     _warn_io_control_removed(io_control)
+    if comparisons and run_history is False:
+        _fail("--comparisons can't go with --no-run-history: without past runs there is nothing to compare.")
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -4825,6 +4827,9 @@ def share_update(
         body["run_history_enabled"] = run_history
     if comparisons is not None:
         body["comparisons_enabled"] = comparisons
+    elif run_history is False:
+        # Comparing needs past runs, so taking them away takes comparisons with it (the web dialog does the same).
+        body["comparisons_enabled"] = False
     if run_control is not None:
         body["run_control_enabled"] = run_control
 
@@ -4836,6 +4841,12 @@ def share_update(
         if link_id is None:
             return
     link_id = _resolve_share_link(client, project_id, link_id)
+
+    if comparisons and run_history is None:
+        # Turning comparisons on is only meaningful when the link already allows past runs.
+        current = next((l for l in client.list_share_links(project_id) if l.id == link_id), None)
+        if current is not None and not current.run_history_enabled:
+            _fail("--comparisons needs run history on this link: add --run-history, or nothing can be compared.")
 
     if password is False:
         # Removing it opens the dashboard to anyone who has the URL, and signs out nobody: the one change
