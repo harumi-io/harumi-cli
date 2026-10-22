@@ -1,5 +1,5 @@
 {
-  "version": 13,
+  "version": 14,
   "discovery": {
     "dashboardDir": "dashboard",
     "rootPath": "dashboard.toml"
@@ -316,7 +316,7 @@
   "widgetTypes": [
     {
       "type": "metric",
-      "description": "A single KPI tile — a value with an optional delta.",
+      "description": "The one KPI card: a title, a large value, an optional description line and an optional trend (the delta, with an arrow that is green when the change is good and red when it is bad). Use one `metric` per number; consecutive `metric` widgets sit side by side in one row. Put a per-entity breakdown (per machine, per shift) in a `table` or chart, not in a KPI card.",
       "fields": [
         {
           "tomlKey": "value_key",
@@ -332,7 +332,35 @@
           "type": "string",
           "required": false,
           "isOutputPath": true,
-          "doc": "Optional dot-path to a delta/comparison value shown alongside the metric."
+          "doc": "Optional dot-path to a delta/comparison number, shown at the right of the description line with a trend arrow. Positive shows an up arrow with a \"+\", negative a down arrow; the color follows `good_direction`. With \"percent\" format, give a 0-1 fraction (0.5 shows +50%)."
+        },
+        {
+          "tomlKey": "good_direction",
+          "as": "goodDirection",
+          "type": "enum",
+          "required": false,
+          "values": [
+            "up",
+            "down"
+          ],
+          "isOutputPath": false,
+          "doc": "Which way the delta is an improvement: \"up\" (default, e.g. throughput) turns a rise green and a fall red; \"down\" (e.g. delays, cost) the opposite."
+        },
+        {
+          "tomlKey": "description",
+          "as": "description",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional fixed line of context under the value, e.g. \"vs last week\". Use `description_key` instead when the text comes from the run output."
+        },
+        {
+          "tomlKey": "description_key",
+          "as": "descriptionKey",
+          "type": "string",
+          "required": false,
+          "isOutputPath": true,
+          "doc": "Optional dot-path to a string in the run output shown as the description line, e.g. \"5 of 65 ops\". Wins over `description` when the path resolves."
         },
         {
           "tomlKey": "format",
@@ -358,46 +386,11 @@
       ],
       "dataExample": {
         "totals": {
-          "revenue": 812300
+          "revenue": 812300,
+          "revenue_change": 0.12
         }
       },
-      "tomlExample": "[[widgets]]\ntype = \"metric\"\nid = \"revenue\"\ntitle = \"Total revenue\"\nvalue_key = \"totals.revenue\"\nformat = \"currency\""
-    },
-    {
-      "type": "kpi-rail",
-      "description": "Several KPI tiles in one horizontal row — for a handful of related numbers that read better side by side than as separate `metric` widgets competing for grid columns. Keep a rail homogeneous: tiles of very different shapes are hard to lay out side by side, so use either 3–6 single-value tiles or 1–3 `rows_key` lists with a similar number of rows — not both in one rail. Put a per-entity breakdown (per machine, per shift) in a `table` or chart instead of a tall `rows_key` tile beside single values.",
-      "fields": [
-        {
-          "tomlKey": "items",
-          "as": "items",
-          "type": "kpiItems",
-          "required": true,
-          "isOutputPath": false,
-          "doc": "One or more `{ label, value_key, delta_key?, format?, unit? }` entries — each is the same value/delta/format/unit contract as a `metric` widget, rendered as one tile in the row. Instead of `value_key`, an entry can set `rows_key` (a dot-path to an array of `{ label, value, tone?, progress? }` rows) to render a per-entity `label / meter / value` list in that tile, with `progress_key` naming the 0-100 field that fills the meter and `tone` (`good`/`warn`/`bad`/`neutral`) coloring it."
-        }
-      ],
-      "dataExample": {
-        "totals": {
-          "cost": 128400,
-          "makespan": 640,
-          "utilization": 0.82
-        },
-        "machines": [
-          {
-            "label": "M1",
-            "value": "42 min",
-            "progress": 70,
-            "tone": "good"
-          },
-          {
-            "label": "M2",
-            "value": "18 min",
-            "progress": 30,
-            "tone": "warn"
-          }
-        ]
-      },
-      "tomlExample": "[[widgets]]\ntype = \"kpi-rail\"\nid = \"summary\"\ntitle = \"Run summary\"\nitems = [\n  { label = \"Total cost\", value_key = \"totals.cost\", format = \"currency\" },\n  { label = \"Makespan\", value_key = \"totals.makespan\", unit = \"min\" },\n  { label = \"Utilization\", value_key = \"totals.utilization\", format = \"percent\" },\n  { label = \"Setup time\", rows_key = \"machines\", progress_key = \"progress\" },\n]"
+      "tomlExample": "[[widgets]]\ntype = \"metric\"\nid = \"revenue\"\ntitle = \"Total revenue\"\nvalue_key = \"totals.revenue\"\nformat = \"currency\"\ndelta_key = \"totals.revenue_change\"\ndescription = \"vs last week\""
     },
     {
       "type": "table",
