@@ -562,6 +562,7 @@ class ProjectShareLink(BaseModel):
     chat_enabled: bool = False
     run_history_enabled: bool = False
     run_control_enabled: bool = False
+    comparisons_enabled: bool = False
     password_set: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

@@ -4531,6 +4531,7 @@ def _share_reach(link: ProjectShareLink) -> str:
             ("the deployed app", link.app_enabled),
             ("the assistant", link.chat_enabled),
             ("past runs", link.run_history_enabled),
+            ("comparing runs", link.comparisons_enabled),
             ("run the project", link.run_control_enabled),
         )
         if on
@@ -4545,6 +4546,7 @@ def _share_short_reach(link: ProjectShareLink) -> str:
             ("app", link.app_enabled),
             ("assistant", link.chat_enabled),
             ("history", link.run_history_enabled),
+            ("compare", link.comparisons_enabled),
             ("control", link.run_control_enabled),
         )
         if on
@@ -4555,7 +4557,11 @@ def _share_short_reach(link: ProjectShareLink) -> str:
 def _share_exposure(link: ProjectShareLink) -> str:
     """A warning when a link that anyone can open does more than show the dashboard."""
     if link.enabled and not link.password_set and (
-        link.app_enabled or link.chat_enabled or link.run_history_enabled or link.run_control_enabled
+        link.app_enabled
+        or link.chat_enabled
+        or link.run_history_enabled
+        or link.comparisons_enabled
+        or link.run_control_enabled
     ):
         return "no password and more than view access: anyone with the link can use it"
     return ""
@@ -4754,6 +4760,7 @@ def share_add(
     app: bool = typer.Option(False, "--app/--no-app", help="Let visitors open the project's deployed Streamlit app."),
     chat: bool = typer.Option(False, "--chat/--no-chat", help="Let signed-in visitors ask the read-only assistant about this project."),
     run_history: bool = typer.Option(False, "--run-history/--no-run-history", help="Let visitors browse past runs, not just the latest one."),
+    comparisons: bool = typer.Option(False, "--comparisons/--no-comparisons", help="Let visitors compare runs side by side. Needs --run-history."),
     run_control: bool = typer.Option(False, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
     api_url: Optional[str] = typer.Option(None, "--api-url", help="Override the harumi-api base URL."),
@@ -4769,8 +4776,11 @@ def share_add(
         "app_enabled": app,
         "chat_enabled": chat,
         "run_history_enabled": run_history,
+        "comparisons_enabled": comparisons,
         "run_control_enabled": run_control,
     }
+    if comparisons and not run_history:
+        _fail("--comparisons needs --run-history: without past runs there is nothing to compare.")
     if label:
         body["label"] = label
 
@@ -4788,6 +4798,7 @@ def share_update(
     app: Optional[bool] = typer.Option(None, "--app/--no-app", help="Let visitors open the project's deployed Streamlit app."),
     chat: Optional[bool] = typer.Option(None, "--chat/--no-chat", help="Let signed-in visitors ask the read-only assistant about this project."),
     run_history: Optional[bool] = typer.Option(None, "--run-history/--no-run-history", help="Let visitors browse past runs, not just the latest one."),
+    comparisons: Optional[bool] = typer.Option(None, "--comparisons/--no-comparisons", help="Let visitors compare runs side by side. Needs --run-history."),
     run_control: Optional[bool] = typer.Option(None, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation when removing a password."),
     password: Optional[bool] = typer.Option(None, "--password/--no-password", help="--password sets or changes the link's password (prompted, hidden, min 8 characters); --no-password removes it. Previously unlocked viewers must re-enter it."),
@@ -4812,6 +4823,8 @@ def share_update(
         body["chat_enabled"] = chat
     if run_history is not None:
         body["run_history_enabled"] = run_history
+    if comparisons is not None:
+        body["comparisons_enabled"] = comparisons
     if run_control is not None:
         body["run_control_enabled"] = run_control
 
