@@ -202,12 +202,29 @@ def test_a_name_that_does_not_match_exactly_deletes_nothing(api, monkeypatch, ty
     assert result.exit_code == 1 and "did not match" in plain(result.stderr + result.stdout) and api.changes == []
 
 
-def test_the_name_prompt_is_not_read_as_markup_and_shows_what_goes_with_it(api, monkeypatch):
+def test_the_name_prompt_shows_what_goes_with_the_organization(api, monkeypatch):
     terminal(monkeypatch)
 
-    out = plain(runner.invoke(cli.app, ["org", "rm", "Acme [Labs]"], input="no\n").stderr + runner.invoke(cli.app, ["org", "rm", "Acme [Labs]"], input="no\n").stdout)
+    result = runner.invoke(cli.app, ["org", "rm", "Acme [Labs]"], input="no\n")  # one run; both streams from it
 
+    out = plain(result.stdout + result.stderr)
     assert "Every project in it is deleted" in out and "cannot be undone" in out
+
+
+def test_a_name_with_a_rich_tag_in_it_is_shown_as_typed_so_it_can_be_typed_back(api, monkeypatch):
+    """`[red]` is a Rich style, not text: unescaped, "Q3 [red]" is shown as "Q3" and the prompt asks for a
+    name nobody can type. (`[Labs]` is not a known style, so it survives either way; this one does not.)"""
+    terminal(monkeypatch)
+    orig = api.handler
+    monkeypatch.setattr(
+        api, "handler",
+        lambda r: httpx.Response(200, json=[{"id": ORG, "business_name": "Q3 [red]", "role": "owner"}]) if r.url.path.endswith("/users/organizations") else orig(r),
+    )
+
+    result = runner.invoke(cli.app, ["org", "rm", "Q3 [red]"], input="no\n")
+
+    out = plain(result.stdout + result.stderr)
+    assert "Q3 [red]" in out and "Delete organization 'Q3 [red]'" in out
 
 
 def test_a_project_name_that_does_not_match_exits_one(api, monkeypatch):
@@ -242,6 +259,20 @@ def test_a_file_name_that_looks_like_markup_cannot_break_the_plain_refusal_eithe
     result = runner.invoke(cli.app, ["files", "rm", "a[/x].csv"])
 
     assert result.exit_code == 1 and isinstance(result.exception, SystemExit) and "a[/x].csv" in plain(result.stderr)
+
+
+def test_a_rich_tag_in_a_file_name_is_shown_as_typed_in_the_plain_refusal(api, monkeypatch):
+    """The crash case above needs `[/x]`; a name like `[bold]x[/bold].csv` does not crash, it is silently rewritten."""
+    orig = api.handler
+    monkeypatch.setattr(
+        api, "handler",
+        lambda r: httpx.Response(200, json={"files": [{"name": "[red]q3[/red].csv", "key": "k", "size": 1}], "is_truncated": False})
+        if r.url.path.endswith("/files") and r.method == "GET" else orig(r),
+    )
+
+    out = plain(runner.invoke(cli.app, ["files", "rm", "[red]q3[/red].csv"]).stderr)
+
+    assert "[red]q3[/red].csv" in out
 
 
 # -- the prompt says what, not which UUID ------------------------------------------------------------------------
