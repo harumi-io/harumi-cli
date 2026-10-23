@@ -135,6 +135,10 @@ TIERS: dict[str, tuple[str, str]] = {
         "a run against itself). The request, the table and the checks are covered offline in "
         "tests/test_cli.py",
     ),
+    # -- tags -----------------------------------------------------------------
+    "tags list": (READ, ""),
+    "tags set": (CANARY, ""),
+    "tags rm": (CANARY, ""),
     # -- schedules ------------------------------------------------------------
     "schedules list": (READ, ""),
     "schedules get": (READ, ""),
@@ -259,6 +263,10 @@ PLAN: tuple[Step, ...] = (
     Step("secrets set", ("LIVECHECK_TOKEN", "--project", "{project}"), stdin="livecheck-value\n"),
     Step("secrets list", ("--project", "{project}")),
     Step("secrets rm", ("LIVECHECK_TOKEN", "--yes", "--project", "{project}")),
+    # -- tags: `link` bound the canary to the seeded repo, so `main` exists on the server --
+    Step("tags set", ("livecheck", "--to", "main", "--project", "{project}")),
+    Step("tags list", ("--project", "{project}")),
+    Step("tags rm", ("livecheck", "--yes", "--project", "{project}")),
     # -- schedules ------------------------------------------------------------
     Step("schedules add", ("--cron", "0 3 * * *", "--project", "{project}"), capture="schedule"),
     Step("schedules list", ("--project", "{project}")),

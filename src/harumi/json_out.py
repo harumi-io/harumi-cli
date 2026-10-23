@@ -15,7 +15,7 @@ from typing import Any, Iterable, Optional
 
 PROJECT = ("id", "name", "customer_id", "kernel_spec", "role_name", "created_at", "updated_at")
 RUN = (
-    "id", "status", "exit_code", "source", "triggered_by", "git_branch", "git_commit", "command",
+    "id", "status", "exit_code", "source", "triggered_by", "git_branch", "git_tag", "git_commit", "command",
     "kernel_spec", "created_at", "started", "ended",
 )
 RUN_DETAIL = ("stdout", "stderr", "error")
@@ -25,9 +25,10 @@ SHARE = (
 )
 DATASOURCE = ("id", "name", "type", "host", "port", "database", "username", "use_proxy", "proxy_host")
 SCHEDULE = (
-    "id", "cron", "start_at", "git_branch", "git_commit", "command", "kernel_spec", "output_format", "email_to", "status",
+    "id", "cron", "start_at", "git_branch", "git_tag", "git_commit", "command", "kernel_spec", "output_format", "email_to", "status",
     "last_executed_at",
 )
+TAG = ("name", "commit_sha", "message", "created_at")
 MEMORY = ("id", "scope", "content", "retrieval_mode", "source", "updated_at")
 MEMBER = ("user_id", "email", "first_name", "last_name", "role", "pending")
 BLUEPRINT = ("slug", "name", "description")
@@ -69,6 +70,10 @@ def datasource(d: Any) -> dict:
 
 def schedule(s: Any) -> dict:
     return _pick(s, SCHEDULE)
+
+
+def tag(t: Any) -> dict:
+    return _pick(t, TAG)
 
 
 def memory(m: Any) -> dict:
