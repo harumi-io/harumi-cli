@@ -302,7 +302,7 @@ harumi compare [RUN_ID...] [--json] [--project ID] [--api-url URL] [--org ORG]
 - An unknown run id (HTTP 404) adds a pointer to `harumi runs list`.
 - Prints the project's `[[output.kpi]]` values with the change against the baseline, runtimes, the winner (best value of the primary KPI; or why there is none) followed by `harumi runs download <winner id>`, whether the runs used the same inputs (`same` / `differs` with the files / `unknown`), and the server's warnings.
 - A project with no KPIs declared says so and how to declare them (`[[output.kpi]]` tables in `harumi.toml`), instead of "no KPI is marked primary" under a table that has only runtime.
-- **`--json`**: prints the API's response unchanged, for scripts.
+- **`--json`**: prints the comparison for scripts: `columns` (`run_id`, `branch`, `commit`, `status`, `runtime_s`, `source`), `kpis` (`key`, `label`, `unit`, `direction`, `primary`, `values`, `deltas`, aligned with `columns`), `winner_run_id`, `no_winner_reason`, `warnings` and `fairness` (`verdict`: `same`, `differs` or `unknown`; `files`). Only these fields: one the API adds later is not printed. A field with no value is `null`, never missing; `warnings` and `files` are always lists.
 
 ## Editing the repo (git)
 
@@ -562,7 +562,7 @@ harumi org use [ORG | --personal]
 
 A table printed for a person never rewrites what is stored: `[red]` in a branch or project name is shown as typed (Rich would have taken it for a colour), and control characters are removed.
 
-Every command that reads data takes `--json`: `projects list|get`, `runs list|get`, `files ls`, `share list|get`, `datasources list|get`, `schedules list|get`, `secrets list`, `memories list`, `org list|members`, `specs`, `examples`, `usage`, `whoami`, and `compare` (which prints the API's response unchanged). `run --json` is below.
+Every command that reads data takes `--json`: `projects list|get`, `runs list|get`, `files ls`, `share list|get`, `datasources list|get`, `schedules list|get`, `secrets list`, `memories list`, `org list|members`, `specs`, `examples`, `usage`, `whoami`, and `compare`. `run --json` is below.
 
 ```bash
 harumi run --watch --json | jq -e '.succeeded'      # exit 1 if the run failed or the JSON says it did not succeed

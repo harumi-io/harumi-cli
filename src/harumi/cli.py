@@ -3961,7 +3961,7 @@ def compare(
         None, metavar="[RUN_ID]...", help="2-4 run ids; the first is the baseline. Pick from a list if omitted."
     ),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    as_json: bool = typer.Option(False, "--json", help="Print the API's comparison as JSON, for scripts."),
+    as_json: bool = typer.Option(False, "--json", help="Print the comparison as JSON, for scripts."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
@@ -4000,7 +4000,7 @@ def compare(
 
     if as_json:
         # typer.echo, not the rich console: no wrapping or colour in piped output.
-        typer.echo(json.dumps(result, indent=2))
+        typer.echo(json_out.dumps(json_out.comparison(result)))
         return
 
     # Everything below prints values the user or the run controls (branch names, KPI

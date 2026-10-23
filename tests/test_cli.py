@@ -2830,7 +2830,9 @@ def test_compare_sends_the_runs_in_order_as_one_comma_separated_param(api):
     assert api.params_for("GET", "/api/projects/proj-1/compare") == {"runs": "7f3a91c2-0000-4000-8000-000000000002,7f3a91c2-0000-4000-8000-000000000001"}
 
 
-def test_compare_json_prints_exactly_what_the_api_returned(api):
+def test_compare_json_prints_what_the_api_returned_in_the_named_fields(api):
+    """Every value the API sent comes through; the output is built from the fields in json_out, so the only
+    difference from the raw response is a column field the API left out (`source`) shown as null."""
     api.route("GET", "/api/projects/proj-1/compare", COMPARISON)
 
     result = runner.invoke(
@@ -2838,7 +2840,10 @@ def test_compare_json_prints_exactly_what_the_api_returned(api):
     )
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == COMPARISON
+    expected = json.loads(json.dumps(COMPARISON))
+    for column in expected["columns"]:
+        column.setdefault("source", None)
+    assert json.loads(result.output) == expected
 
 
 def test_compare_says_why_there_is_no_winner(api):

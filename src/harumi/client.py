@@ -658,8 +658,9 @@ class Client:
     def compare_runs(self, project_id: str, run_ids: list[str]) -> dict[str, Any]:
         """KPI table, deltas, winner and inputs verdict for 2-4 runs (first = baseline).
 
-        Returned as the API sent it, not as a model: ``harumi compare --json`` prints
-        it verbatim, and a typed copy would drop whatever the API adds next.
+        Returned as the API sent it, not as a model, so a library caller sees whatever the
+        API adds. ``harumi compare --json`` does not: it prints only the fields named in
+        ``json_out.comparison``.
         """
         response = self.api.request(
             "GET", f"/projects/{project_id}/compare", params={"runs": ",".join(run_ids)}
