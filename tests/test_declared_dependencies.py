@@ -58,12 +58,8 @@ DISTRIBUTION_OF = {
     "typer": "typer",
     "rich": "rich",
     "pydantic": "pydantic",
-    "questionary": "questionary",
     "tomli": "tomli",
 }
-
-# Imported only where the standard library lacks it, and so declared with an environment marker.
-CONDITIONAL = {"tomli": "python_version < "}
 
 
 def third_party_imports() -> dict[str, set[str]]:
@@ -89,17 +85,20 @@ def test_the_scan_finds_the_known_third_party_imports():
     assert "os" not in found and "json" not in found and "pathlib" not in found
 
 
-def test_every_third_party_import_is_a_declared_dependency():
-    declared = declared_dependencies()
+def undeclared_imports(imports: dict[str, set[str]], declared: dict[str, str]) -> dict[str, str]:
+    """The third-party modules in `imports` that no dependency in `declared` accounts for, with where and why."""
     undeclared = {}
-    for module, where in third_party_imports().items():
+    for module, where in imports.items():
         distribution = DISTRIBUTION_OF.get(module)
         if distribution is None:
             undeclared[module] = f"{sorted(where)[0]} (not in DISTRIBUTION_OF: add it, and declare it)"
         elif distribution not in declared:
             undeclared[module] = f"{sorted(where)[0]} (imports {module}, but {distribution} is not in [project] dependencies)"
+    return undeclared
 
-    assert undeclared == {}
+
+def test_every_third_party_import_is_a_declared_dependency():
+    assert undeclared_imports(third_party_imports(), declared_dependencies()) == {}
 
 
 def test_tomli_is_declared_for_the_pythons_that_have_no_tomllib():
@@ -118,16 +117,29 @@ def test_the_import_is_guarded_the_way_the_dependency_is():
     assert re.search(r"if sys\.version_info >= \(3, 11\):\s+import tomllib\s+else:\s+import tomli as tomllib", source)
 
 
-def test_the_check_would_catch_an_undeclared_import(tmp_path, monkeypatch):
-    """The test above is not a rubber stamp: point the scan at a package that imports something nobody declared."""
+def test_the_check_fails_for_an_import_nobody_declared(tmp_path, monkeypatch):
+    """The test above is not a rubber stamp: run the same check on a package that imports something nobody declared,
+    and on one that imports a known library whose dependency line is missing (the original `tomli` bug)."""
     package = tmp_path / "pkg"
     package.mkdir()
-    (package / "mod.py").write_text("import httpx\nimport some_unlisted_library\n")
+    (package / "mod.py").write_text("import httpx\nimport some_unlisted_library\nimport tomli\n")
     monkeypatch.setitem(globals(), "SRC", package)
 
-    found = third_party_imports()
+    found = undeclared_imports(third_party_imports(), declared={"httpx": "httpx>=0.27"})
 
-    assert "some_unlisted_library" in found and "some_unlisted_library" not in DISTRIBUTION_OF
+    assert set(found) == {"some_unlisted_library", "tomli"}
+    assert "not in DISTRIBUTION_OF" in found["some_unlisted_library"]
+    assert "tomli is not in [project] dependencies" in found["tomli"]
+    assert "httpx" not in found
+
+
+def test_the_check_passes_when_everything_is_declared(tmp_path, monkeypatch):
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "mod.py").write_text("import httpx\nimport json\n")
+    monkeypatch.setitem(globals(), "SRC", package)
+
+    assert undeclared_imports(third_party_imports(), declared={"httpx": "httpx>=0.27"}) == {}
 
 
 @pytest.mark.parametrize("module", ["os", "json", "pathlib", "re", "tomllib", "typing", "subprocess", "urllib"])

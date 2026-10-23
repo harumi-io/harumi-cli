@@ -22,10 +22,6 @@ import tempfile
 import venv
 from pathlib import Path
 
-# Packages that would hide a missing dependency if they were present: they are what the test jobs add.
-MASKS = ("pytest", "pytest-asyncio")
-
-
 def run(command: list[str], env: dict[str, str], timeout: int = 300) -> subprocess.CompletedProcess:
     return subprocess.run(command, env=env, capture_output=True, text=True, timeout=timeout)
 
@@ -61,11 +57,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"pip could not install {args.wheel.name}:\n{installed.stdout}{installed.stderr}", file=sys.stderr)
             return 1
 
-        listing = run([python, "-m", "pip", "list", "--format=freeze"], env).stdout.lower()
-        present = [name for name in MASKS if f"\n{name}==" in f"\n{listing}"]
-        if present:
-            print(f"the check environment is not clean: {present} is installed, which could hide a missing dependency", file=sys.stderr)
-            return 1
+        # The venv was created empty, so whatever is installed is the wheel plus what pip resolved for it: nothing
+        # can hide a missing dependency. (A check that "pytest is absent" would be vacuous: a fresh venv never has it.)
+        # Listed for the log, so a failure shows exactly which packages the wheel brought.
+        listing = run([python, "-m", "pip", "list", "--format=freeze"], env).stdout.strip().replace("\n", " ")
+        print(f"installed from the wheel alone: {listing}")
 
         version = run([harumi, "--version"], env)
         if version.returncode != 0:
