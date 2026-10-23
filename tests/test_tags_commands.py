@@ -136,12 +136,14 @@ def test_a_tag_named_like_a_branch_says_so(api):
     assert "cannot share" in result.output
 
 
-def test_a_slash_in_a_tag_name_stays_a_path(api):
+def test_a_slash_in_a_tag_name_is_sent_as_one_encoded_path_segment(api):
+    """The server route takes `{name:path}`, so `%2F` decodes back to the slash there."""
     api.route("PUT", "/api/projects/proj-1/repo/tags/rel/v1", {**TAG, "name": "rel/v1"})
 
     result = runner.invoke(cli.app, ["tags", "set", "rel/v1", "--to", "main", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
+    assert "/repo/tags/rel%2Fv1" in str(api.requests[-1].url)
 
 
 # -- tags rm ---------------------------------------------------------------------------
@@ -311,7 +313,43 @@ def test_schedules_update_refuses_a_tag_with_a_branch(api):
     )
 
     assert result.exit_code == 1
+    assert "--git-tag cannot be combined" in result.output
     assert api.requests == []
+
+
+def test_schedules_update_onto_a_branch_sends_only_the_branch(api):
+    """The server replaces the tag when a branch arrives (and a tag clears the branch and
+    commit), so the CLI sends the one field and nothing to clear the other."""
+    sid = "5c4e1b2a-0000-4000-8000-000000000001"
+    api.route("PUT", f"/api/projects/proj-1/schedules/{sid}", SCHEDULE)
+
+    result = runner.invoke(cli.app, ["schedules", "update", sid, "--git-branch", "dev", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert api.body_for("PUT", f"/api/projects/proj-1/schedules/{sid}") == {"git_branch": "dev"}
+
+
+def test_compare_names_a_winner_that_ran_from_a_tag(api):
+    """The API's compare columns carry `tag` (and a null `branch`) for a run from a tag."""
+    from tests.test_cli import COMPARISON
+
+    winner = COMPARISON["winner_run_id"]
+    body = {
+        **COMPARISON,
+        "columns": [
+            {**c, "branch": None, "tag": "prod"} if c["run_id"] == winner else c
+            for c in COMPARISON["columns"]
+        ],
+    }
+    api.route("GET", "/api/projects/proj-1/compare", body)
+
+    result = runner.invoke(
+        cli.app,
+        ["compare", "7f3a91c2-0000-4000-8000-000000000001", winner, "--project", "proj-1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Winner: tag prod" in " ".join(result.output.split())
 
 
 def test_schedules_list_and_get_show_the_tag_instead_of_a_blank_branch(api):
