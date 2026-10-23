@@ -39,6 +39,32 @@ jobs:
       - name: Test
         run: pytest -q
 
+  # Installs the BUILT wheel into a venv with nothing else and checks `harumi` starts, on both ends of the
+  # supported range. The jobs above install the dev extras, and pytest brings `tomli` in on 3.9, which hid for a
+  # release that the package did not declare it (0.11.0 did not start on 3.9). A user installs exactly the wheel.
+  wheel:
+    name: wheel (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build the wheel
+        run: python -m pip install --upgrade pip build && python -m build --wheel
+
+      - name: Install it alone and start it
+        run: python scripts/check_wheel_installs.py dist/*.whl
+
   # Validates the `requires-python = ">=3.9"` floor advertised in
   # pyproject.toml against both ends of the supported range. Not wired into
   # branch protection as required (only `test` is) — see the note above.
