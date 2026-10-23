@@ -20,6 +20,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [start](#start)
 - [run](#run)
 - [runs](#runs)
+- [tags](#tags)
 - [Editing the repo (git)](#editing-the-repo-git)
 - [check](#check)
 - [files](#files)
@@ -232,7 +233,7 @@ Interactive entry point for a confused or new user. It checks that you are logge
 ## `run`
 
 ```
-harumi run [--branch B] [--commit SHA] [--command C] [--kernel K]
+harumi run [--branch B | --tag T] [--commit SHA] [--command C] [--kernel K]
            [--watch] [--json]
            [--api-url URL] [--git-url URL] [--org ORG]
 ```
@@ -243,18 +244,19 @@ Requires the directory (or a parent) to be bound — via `harumi new`, `harumi i
 |---|---|
 | `--branch, -b` | Run a specific branch. Default: current branch (or scratch branch if dirty/unpushed). |
 | `--commit` | Run a specific commit SHA. |
+| `--tag, -t` | Run the commit a tag points at (`harumi tags list`). Cannot be combined with `--branch` or `--commit`. Nothing local is pushed: the tag is a label on the server. |
 | `--command, -c` | Override the command in `harumi.toml`. |
 | `--kernel, -k` | Override the kernel spec (e.g. `or_python_small`, `gurobi_python_medium`). |
 | `--watch, -w` | Block until the run reaches a terminal status. |
 | `--json` | Print the result as one JSON document on stdout; progress and the failure summary go to stderr. See [Scripts and CI](#scripts-and-ci---json). |
 
-`run` prints `Running project <id> on branch <ref>` and then `Queued run <run-id>` (the run id is the UUID on that line; the internal execution-log id is no longer printed). With `--watch`: at a terminal one live line shows the status and the elapsed time; piped or logged it prints one line each time the status *changes*. Ctrl-C stops watching, never the run: it exits 130 and prints how to follow or cancel it. A succeeded run ends with `Run completed in 1m 12s.` and `harumi runs download <run-id>`; a failed, cancelled or timed-out run exits 1 and prints the cause first (error, exit code, the last 20 lines of stderr and how many were left out) and `harumi runs get <run-id>` for everything. If the server refuses the run for a reason about the project (HTTP 400, 404, 409 or 422), the message ends with `Run harumi check`. (`--output-dir` is deprecated: it still downloads, with a warning.)
+`run` prints `Running project <id> on branch <ref>` (or `on tag <name>`) and then `Queued run <run-id>` (the run id is the UUID on that line; the internal execution-log id is no longer printed). With `--watch`: at a terminal one live line shows the status and the elapsed time; piped or logged it prints one line each time the status *changes*. Ctrl-C stops watching, never the run: it exits 130 and prints how to follow or cancel it. A succeeded run ends with `Run completed in 1m 12s.` and `harumi runs download <run-id>`; a failed, cancelled or timed-out run exits 1 and prints the cause first (error, exit code, the last 20 lines of stderr and how many were left out) and `harumi runs get <run-id>` for everything. If the server refuses the run for a reason about the project (HTTP 400, 404, 409 or 422), the message ends with `Run harumi check`. (`--output-dir` is deprecated: it still downloads, with a warning.)
 
 **Scratch-branch flow (default when tree is dirty or has unpushed commits):**
 
 The CLI detects local changes, creates a temporary branch `harumi-scratch/<user>/<yyyymmdd-HHMMSS>` from HEAD, commits the full working tree to it using a throwaway git index (the user's real index/HEAD are untouched), pushes it to the `harumi` remote, queues the run, then deletes the remote scratch branch when finished (best-effort cleanup). The user never has to commit manually for a quick iteration.
 
-**Calls:** `POST /projects/{id}/execute` with `{ branch, commit?, command?, kernel_spec? }`, which returns `{execution_log_id, status, workflow_run_id?, project_run_id?}`. With `--watch`, the CLI then polls `GET /projects/{id}/runs/{run_id}` until it reaches a terminal status.
+**Calls:** `POST /projects/{id}/execute` with `{ branch, commit?, tag?, command?, kernel_spec? }`, which returns `{execution_log_id, status, workflow_run_id?, project_run_id?}`. With `--watch`, the CLI then polls `GET /projects/{id}/runs/{run_id}` until it reaches a terminal status.
 
 ## `runs`
 
@@ -272,6 +274,22 @@ harumi runs download [RUN_ID] [--output-dir DIR] [--project ID] [--api-url URL] 
 - **`download`**: refuses a run that has not finished ("still running") and one that finished without output, each pointing at `runs get`; otherwise prints the zip's path and size. Downloads the run's output artifacts as a zip via `GET /projects/{id}/runs/{run_id}/output/archive` (proxied by the API from S3 for current runs, or Gitea for pre-migration runs). With no `RUN_ID` it takes the latest run (`GET /projects/{id}/runs`, newest first); errors if the project has no runs. `--output-dir` defaults to the current directory. Replaces `outputs --download` and `run --output-dir`.
 
 `--project` on every subcommand overrides the `.harumi` binding.
+
+## `tags`
+
+```
+harumi tags list [--json] [--project ID] [--api-url URL] [--org ORG]
+harumi tags set NAME [--to BRANCH_OR_SHA] [--message TEXT] [--project ID] [--api-url URL] [--org ORG]
+harumi tags rm NAME [--yes] [--project ID] [--api-url URL] [--org ORG]
+```
+
+A tag is a **movable label** on one commit, such as `prod`. Run it with `harumi run --tag prod` or follow it from a schedule with `harumi schedules add --git-tag prod`. Tags are real git tags in the project's Gitea repo, so `git fetch harumi --tags --force` brings them into a clone (`--force` because a moved tag differs from the one you have).
+
+- **`list`**: `GET /projects/{id}/repo/tags` → table of `tag`, `commit` (first 8 characters) and `message`. `--json` is an array of `{name, commit_sha, message, created_at}`. With none: `No tags yet. Add one with harumi tags set prod.`
+- **`set`**: `PUT /projects/{id}/repo/tags/{name}` with `{target, message?}`. **Creates the tag, or moves it** if it exists (moving prints the same `Tagged` line). `--to` takes a branch or a commit SHA; without it the tag labels the branch you are on, and that branch **must be pushed** (it refuses when `git` has commits the server lacks, since the tag would label older code; push with `git push harumi <branch>` or pass `--to`). A tag cannot share a name with a branch (HTTP 409).
+- **`rm`**: `DELETE /projects/{id}/repo/tags/{name}`, asks first unless `--yes`. Refused (409) while a schedule follows the tag; change or remove the schedule first. The commits are untouched.
+- **What moving a tag changes:** runs and schedules that follow the tag use the new commit from then on. A run already started keeps the commit it resolved (`runs get` shows `tag @ commit`); a run queued from a tag is fixed at the moment it was queued.
+- A tag that does not exist is HTTP 404 (`Tag 'x' does not exist`) on `run --tag`, and a failed run for a schedule whose tag was deleted.
 
 ## `compare`
 
@@ -302,6 +320,7 @@ There is no `harumi repo`. A project's repo is a plain git repo; `harumi clone` 
 | List branches ("versions") | `git fetch harumi && git branch -r` |
 | Create a branch | `git switch -c NAME harumi/main && git push -u harumi NAME` |
 | Delete a branch | `git push harumi --delete NAME` (the old command refused when a schedule pinned the branch: check `harumi schedules list` first) |
+| Tag a version (movable label such as `prod`) | `harumi tags set NAME [--to BRANCH_OR_SHA]` (see [tags](#tags)); `git fetch harumi --tags --force` brings tags into the clone |
 | Promote into live | `git fetch harumi && git switch main && git merge --ff-only harumi/main && git merge --no-ff harumi/NAME && git push harumi main` |
 
 The remote's URL embeds your Gitea token (kept in `.git/config`, printed by `git remote -v`): never paste either into chat, logs or issues.
@@ -439,9 +458,9 @@ Real, project-scoped endpoints (`/projects/{project_id}/schedules`).
 ```
 harumi schedules list [--project ID] [--api-url URL] [--org ORG]
 harumi schedules get [SCHEDULE_ID] [--project ID]
-harumi schedules add --cron CRON --git-branch BRANCH [--start-at ISO] [--git-commit SHA]
+harumi schedules add --cron CRON [--git-branch BRANCH | --git-tag TAG] [--start-at ISO] [--git-commit SHA]
                      [--command C] [--kernel K] [--output-format F] [--email-to E] [--project ID]
-harumi schedules update [SCHEDULE_ID] [--cron CRON] [--start-at ISO] [--git-branch B] [--git-commit SHA]
+harumi schedules update [SCHEDULE_ID] [--cron CRON] [--start-at ISO] [--git-branch B | --git-tag T] [--git-commit SHA]
                         [--command C] [--kernel K] [--output-format F] [--email-to E] [--project ID]
 harumi schedules rm [SCHEDULE_ID] [--yes] [--project ID]
 ```
@@ -454,9 +473,11 @@ harumi schedules rm [SCHEDULE_ID] [--yes] [--project ID]
 
 **`--start-at`** is an ISO-8601 datetime; defaults to "now" (UTC) if omitted on `add`.
 
+**`--git-branch` / `--git-tag`.** A schedule follows a branch (default `main`) **or** a tag, never both; the CLI refuses `--git-tag` with `--git-branch` or `--git-commit` before the request. With `--git-tag prod` it runs whatever `prod` points at **each time it fires** (a deleted tag fails that run). On `update`, passing one replaces the other. `list` shows `tag NAME` in the `branch` column for a tag schedule.
+
 **`--email-to`** accepts `only-me` | `everyone` | a comma-separated list of email addresses (resolved server-side).
 
-**`add`** calls `POST /projects/{project_id}/schedules` with `{cron, start_at, git_branch, git_commit?, command?, kernel_spec?, output_format?, email_to?}` → `Schedule`.
+**`add`** calls `POST /projects/{project_id}/schedules` with `{cron, start_at, git_branch | git_tag, git_commit?, command?, kernel_spec?, output_format?, email_to?}` → `Schedule`.
 
 **`update`** calls `PUT /projects/{project_id}/schedules/{schedule_id}` with only the fields you pass (partial update); errors locally with "No fields to update" if no flags are given.
 
@@ -572,7 +593,7 @@ Every command that deletes or removes something follows one rule, from `projects
 | At a terminal, no `--yes` | Asks `[y/N]`. Enter is **No**. Declining prints `Aborted.` and **exits 1**, so `harumi org rm X && deploy` stops. |
 | No terminal (a script, CI, an agent, a pipe), no `--yes` | **Refuses at once**: `Cannot ask here: no interactive terminal. Run it again with --yes to go ahead.` and exits 1. It never prints a prompt into a log and waits, and a `y` piped to stdin is **not** consent (it was not given to this question). |
 
-The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 0.12.0.
+The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `tags rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 0.12.0.
 
 - **The permanent ones that take other things with them ask you to type the name** instead of `y`: `projects rm` (the project name) and `org rm` (the organization name, exactly: case and spaces count; Enter is a no). An agent passes `--yes` and still must name the project or organization (`--yes` with no name is refused).
 - **The question says which one**, not a UUID: a schedule by its cron, branch and command, a memory by its text, a file by its name and size, a share link by its label.

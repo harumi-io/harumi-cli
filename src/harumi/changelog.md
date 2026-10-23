@@ -17,6 +17,7 @@ A friendlier first session, readable output everywhere, and the same rules for e
 - `-h` works like `--help`, and `-v` like `--version`. The command list is grouped, and about thirty commands end their `--help` with an `Examples:` block.
 - Press TAB after `harumi --install-completion` to complete commands, flags and the values with a fixed list (`--type`, `--role`, `--mode`).
 - `share add|update --comparisons` lets viewers compare runs (it needs `--run-history`).
+- **Tags.** `harumi tags list`, `tags set` and `tags rm` label a version with a movable tag such as `prod`. `harumi run --tag prod` runs whatever the tag points at, and `schedules add --git-tag prod` follows it on every fire (`schedules update` takes it too). Moving a tag changes later runs only: a run keeps the commit it started from (`runs get` shows `prod @ 3f2a9c1e`). A tag cannot share a name with a branch.
 
 ### Changes a script can notice
 

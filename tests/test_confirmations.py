@@ -418,6 +418,6 @@ def test_every_command_that_takes_yes_says_so_in_the_reference(command):
 
 
 def test_the_list_of_commands_that_confirm_is_the_one_the_reference_documents():
-    documented = {"projects rm", "files rm", "share rm", "share rotate", "share update", "datasources rm", "schedules rm", "secrets rm", "memories rm", "org rm", "org rm-member"}
+    documented = {"projects rm", "files rm", "share rm", "share rotate", "share update", "datasources rm", "tags rm", "schedules rm", "secrets rm", "memories rm", "org rm", "org rm-member"}
 
     assert documented <= set(_commands_with_yes())

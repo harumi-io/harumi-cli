@@ -2902,6 +2902,19 @@
         },
         {
           "opts": [
+            "--tag",
+            "-t"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run the commit a tag points at (see `harumi tags list`)."
+        },
+        {
+          "opts": [
             "--command",
             "-c"
           ],
@@ -3296,8 +3309,20 @@
           "type": "str",
           "required": false,
           "multiple": false,
-          "default": "main",
-          "help": "Branch to run on each fire."
+          "default": null,
+          "help": "Branch to run on each fire (default: main)."
+        },
+        {
+          "opts": [
+            "--git-tag"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run whatever this tag points at on each fire, instead of a branch."
         },
         {
           "opts": [
@@ -3638,7 +3663,19 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Branch to run on each fire."
+          "help": "Branch to run on each fire (replaces a tag)."
+        },
+        {
+          "opts": [
+            "--git-tag"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run whatever this tag points at on each fire (replaces the branch)."
         },
         {
           "opts": [
@@ -4650,6 +4687,209 @@
       "path": "status",
       "help": "Show the live status of the Harumi platform (from the public status page).",
       "params": []
+    },
+    {
+      "path": "tags list",
+      "help": "List a project's tags and the commit each one points at.",
+      "params": [
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Print JSON on stdout instead of a table, for scripts."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
+    },
+    {
+      "path": "tags rm",
+      "help": "Delete a tag.",
+      "params": [
+        {
+          "opts": [
+            "name"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Tag to delete."
+        },
+        {
+          "opts": [
+            "--yes",
+            "-y"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Skip the confirmation prompt."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
+    },
+    {
+      "path": "tags set",
+      "help": "Create a tag, or move it if it already exists.",
+      "params": [
+        {
+          "opts": [
+            "name"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Tag name, for example prod."
+        },
+        {
+          "opts": [
+            "--to"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Branch or commit SHA to point the tag at. Default: the branch you are on (it must be pushed)."
+        },
+        {
+          "opts": [
+            "--message",
+            "-m"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "A note stored with the tag."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
     },
     {
       "path": "usage",

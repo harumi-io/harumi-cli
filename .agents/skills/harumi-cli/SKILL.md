@@ -1,6 +1,6 @@
 ---
 name: harumi-cli
-description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to select the backend environment (production vs internal staging), start a new project, import an existing folder of code as a new project, clone an existing project locally, bind a directory to a project, edit the project's repo with git in a clone, install preset skills from the Harumi skill library, inspect, cancel and download runs, manage the project's dashboard widgets and public share link, manage datasources, schedules, secrets, organizations, and your profile. Use when the user wants to run, import, or debug a local script against a Harumi project, mentions `harumi start`, `harumi new`, `harumi import`, `harumi clone`, `harumi link`, `harumi run`, `harumi runs`, `harumi check`, `harumi dashboard`, `harumi share`, `harumi blueprints`, `harumi env`, `harumi projects`, `harumi datasources`, `harumi schedules`, `harumi secrets`, `harumi memories`, `harumi skills`, `harumi agent-skills`, `harumi org`, `harumi profile`, asks about switching between production and staging, creating a new Harumi project, turning an existing local folder/repo into a Harumi project, getting an existing Harumi project's code onto their machine, Harumi kernel specs, project blueprints, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, managing environment variables/secrets, organization members, dashboard widgets (metric/table/line-chart/bar-chart/gantt-chart), `dashboard.toml`, `dashboard/*.toml`, multiple dashboards per project, the dashboard picker, `output.json`, what components/widgets the platform dashboard can render, sharing/publishing a project's dashboard publicly, or needs to fetch/download results or files from a Harumi run/repo.
+description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to select the backend environment (production vs internal staging), start a new project, import an existing folder of code as a new project, clone an existing project locally, bind a directory to a project, edit the project's repo with git in a clone, install preset skills from the Harumi skill library, inspect, cancel and download runs, manage the project's dashboard widgets and public share link, manage datasources, schedules, secrets, organizations, and your profile. Use when the user wants to run, import, or debug a local script against a Harumi project, mentions `harumi start`, `harumi new`, `harumi import`, `harumi clone`, `harumi link`, `harumi run`, `harumi runs`, `harumi tags`, `harumi check`, `harumi dashboard`, `harumi share`, `harumi blueprints`, `harumi env`, `harumi projects`, `harumi datasources`, `harumi schedules`, `harumi secrets`, `harumi memories`, `harumi skills`, `harumi agent-skills`, `harumi org`, `harumi profile`, asks about switching between production and staging, creating a new Harumi project, turning an existing local folder/repo into a Harumi project, getting an existing Harumi project's code onto their machine, Harumi kernel specs, project blueprints, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, managing environment variables/secrets, organization members, dashboard widgets (metric/table/line-chart/bar-chart/gantt-chart), `dashboard.toml`, `dashboard/*.toml`, multiple dashboards per project, the dashboard picker, `output.json`, what components/widgets the platform dashboard can render, sharing/publishing a project's dashboard publicly, or needs to fetch/download results or files from a Harumi run/repo.
 ---
 
 # Harumi CLI
@@ -74,6 +74,7 @@ If the tree is clean and fully pushed, it runs the current branch directly — n
 ```bash
 harumi run --branch feature/solver-v2
 harumi run --commit abc123f
+harumi run --tag prod                    # whatever the "prod" tag points at (see Tag versions)
 ```
 
 **Override the `harumi.toml` command or kernel:**
@@ -172,6 +173,23 @@ harumi datasources query <name> --sql "SELECT * FROM orders LIMIT 10"
 
 All `datasources` subcommands accept `--project` to override the `.harumi` binding.
 
+## Tag versions
+
+A tag is a **movable label** on a commit (for example `prod`), so you can run or schedule "whatever is in production" without remembering a branch or SHA.
+
+```bash
+harumi tags list                          # tag, commit, message (--json for scripts)
+harumi tags set prod                      # label the branch you are on (it must be pushed)
+harumi tags set prod --to release-2       # label another branch, or a commit SHA, creating or MOVING the tag
+harumi tags rm prod                       # delete it (asks; --yes skips; refused while a schedule follows it)
+harumi run --tag prod --watch             # run what prod points at now
+harumi schedules add --cron "0 9 * * *" --git-tag prod   # follow it on every fire
+```
+
+- Moving a tag changes what *future* runs and schedule fires use. A run already started keeps the commit it resolved, and `harumi runs get` shows `tag @ commit`.
+- `--tag` cannot be combined with `--branch` or `--commit` (on `run`) or `--git-branch`/`--git-commit` (on `schedules`).
+- A tag cannot have the same name as a branch. Tags are ordinary git tags: `git fetch harumi --tags --force` brings them into a clone.
+
 ## Schedule runs
 
 `harumi schedules` manages project-scoped cron schedules for git-ref runs (`/projects/{project_id}/schedules`).
@@ -179,7 +197,7 @@ All `datasources` subcommands accept `--project` to override the `.harumi` bindi
 ```bash
 harumi schedules list                                       # table of schedules for the bound project
 harumi schedules get [SCHEDULE_ID]                           # detail view; the id, or the start of it (what `list` shows); omit it to pick
-harumi schedules add --cron "0 9 * * *" --git-branch main [--start-at ISO] [--kernel ...] [--email-to ...]
+harumi schedules add --cron "0 9 * * *" [--git-branch main | --git-tag prod] [--start-at ISO] [--kernel ...] [--email-to ...]
 harumi schedules update [SCHEDULE_ID] --cron "0 */6 * * *"
 harumi schedules rm [SCHEDULE_ID]                            # `--yes` needs the id: it never picks for you
 ```
@@ -187,6 +205,7 @@ harumi schedules rm [SCHEDULE_ID]                            # `--yes` needs the
 Key semantics:
 
 - **Cron is a raw 5-field expression, interpreted in UTC, and may not fire more often than every 5 minutes.** The CLI does not validate it client-side — the server validates with `croniter` and returns a clear 400 on a bad expression or a too-short interval. Don't try to build a calendar/human-friendly UI; just pass the cron string.
+- **A schedule follows a branch (default `main`) or a tag, not both.** With `--git-tag` it runs whatever the tag points at each time it fires.
 - **No pause/enable flag exists.** The only way to stop a schedule from firing is `harumi schedules rm`.
 - **No separate "run now" for a schedule.** Immediate execution is already covered by `harumi run` (git-ref based); schedules only control recurring runs.
 
