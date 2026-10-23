@@ -172,6 +172,31 @@ def current_credentials() -> Optional[dict]:
     return load_credentials()
 
 
+def signing_session(
+    config: Config, *, transport: Optional[httpx.BaseTransport] = None
+) -> tuple[str, Optional[str]]:
+    """(the access token a request is signed with, the refresh token that belongs to it).
+
+    A request that comes back 401 is renewed with the refresh token its access token came with. If the two are read
+    at different moments they can come from different sessions: another thread renews in between, and this one signs
+    with the old access token but records the new refresh token. Its 401 then "renews" with a token that was not
+    stale and throws away the pair the other thread had just obtained. (Four threads sharing a login could make
+    three refreshes where one was needed, and one of them could end with the user told to log in again.)
+
+    So both are read while holding the credentials lock, which `renew_session` also takes: nobody can renew between
+    the two reads. The lock is re-entrant within a thread, so the renewal `get_valid_access_token` may itself do for
+    a token near expiry does not deadlock.
+
+    The guarantee is only as good as the lock: `credentials_lock` carries on without it after its timeout (30
+    seconds), when the home folder is read-only, or on a platform with no file locking. There the pairing is best
+    effort again, which is no worse than before; it is not a promise.
+    """
+    with credentials_lock():
+        token = get_valid_access_token(config, allow_refresh=True, transport=transport)
+        refresh = (load_credentials() or {}).get("refresh_token") or None
+        return token, refresh
+
+
 def _persist(user: LoggedUser, *, replace: bool = False) -> None:
     if not user.access_token or not user.refresh_token:
         raise ApiError(500, "harumi-api did not return a full session (missing tokens)")
