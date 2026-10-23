@@ -22,6 +22,7 @@ import tempfile
 import venv
 from pathlib import Path
 
+
 def run(command: list[str], env: dict[str, str], timeout: int = 300) -> subprocess.CompletedProcess:
     return subprocess.run(command, env=env, capture_output=True, text=True, timeout=timeout)
 
