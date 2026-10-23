@@ -216,7 +216,7 @@
           "required": false,
           "multiple": false,
           "default": false,
-          "help": "Print the API's comparison as JSON, for scripts."
+          "help": "Print the comparison as JSON, for scripts."
         },
         {
           "opts": [

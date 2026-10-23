@@ -250,9 +250,51 @@ def test_a_winner_names_the_command_that_gets_its_files(server):
 
 
 def test_json_output_is_untouched_by_all_of_this(server, no_terminal):
+    """Everything the API sent is still there, unchanged; the only addition is that a column field the API left out
+    (`source`) is now an explicit null instead of missing, so a script can index it without a KeyError."""
     result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", P, "--json"])
 
-    assert json.loads(result.output) == COMPARISON
+    expected = copy.deepcopy(COMPARISON)
+    for column in expected["columns"]:
+        column.setdefault("source", None)
+    assert json.loads(result.output) == expected
+
+
+def test_json_has_exactly_the_documented_fields(server, no_terminal):
+    """Named, like every other --json: what a script can rely on is the list in json_out, not whatever the server sends."""
+    server.comparison = copy.deepcopy(COMPARISON)
+    server.comparison["columns"][0]["source"] = "manual"
+
+    out = json.loads(runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", P, "--json"]).output)
+
+    assert set(out) == {"columns", "kpis", "winner_run_id", "no_winner_reason", "warnings", "fairness"}
+    assert set(out["columns"][0]) == {"run_id", "branch", "commit", "status", "runtime_s", "source"}
+    assert out["columns"][0]["source"] == "manual" and out["columns"][1]["source"] is None  # absent is null, not missing
+    assert set(out["kpis"][0]) == {"key", "label", "unit", "direction", "primary", "values", "deltas"}
+    assert set(out["fairness"]) == {"verdict", "files"}
+
+
+def test_a_field_the_api_adds_later_does_not_reach_a_script(server, no_terminal):
+    """A signed URL or a storage key added to the response must not become part of the output by accident."""
+    leaky = copy.deepcopy(COMPARISON)
+    leaky["output_url"] = "https://bucket.s3.amazonaws.com/x?X-Amz-Signature=secret"
+    leaky["columns"][0]["storage_key"] = "tenant/abc/run-1/out.zip"
+    leaky["kpis"][0]["internal_note"] = "not for scripts"
+    leaky["fairness"]["fingerprint"] = "deadbeef"
+    server.comparison = leaky
+
+    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", P, "--json"])
+
+    for leaked in ("X-Amz-Signature", "storage_key", "tenant/abc", "internal_note", "fingerprint", "output_url"):
+        assert leaked not in result.output
+
+
+def test_json_keeps_the_values_and_the_winner_as_the_api_sent_them(server, no_terminal):
+    out = json.loads(runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", P, "--json"]).output)
+
+    assert out["winner_run_id"] == "run-2"
+    assert out["kpis"][0]["values"] == [100, 80] and out["kpis"][0]["deltas"] == [None, -20]
+    assert out["fairness"] == {"verdict": "same", "files": []}
 
 
 # -- the arguments are checked before anything else is needed ----------------------------------------------

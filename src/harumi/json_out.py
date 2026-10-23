@@ -33,6 +33,10 @@ MEMORY = ("id", "scope", "content", "retrieval_mode", "source", "updated_at")
 MEMBER = ("user_id", "email", "first_name", "last_name", "role", "pending")
 BLUEPRINT = ("slug", "name", "description")
 SKILL_PRESET = ("slug", "name", "description", "category", "tags", "version")
+COMPARE = ("columns", "kpis", "winner_run_id", "no_winner_reason", "warnings", "fairness")
+COMPARE_COLUMN = ("run_id", "branch", "commit", "status", "runtime_s", "source")
+COMPARE_KPI = ("key", "label", "unit", "direction", "primary", "values", "deltas")
+COMPARE_FAIRNESS = ("verdict", "files")
 USAGE = (
     "plan_code", "tier", "unlimited", "balance_credits", "included_credits", "period_start", "period_end", "weekly_used_pct",
     "monthly_used_pct", "weekly_resets_at", "monthly_resets_at", "overage_allowed", "overage_enabled", "overage_paused",
@@ -106,6 +110,26 @@ def blueprint(b: Any) -> dict:
 def skill_preset(p: Any) -> dict:
     """A library preset as a script sees it: never its content, which `skills add` writes to a file."""
     return _pick(p, SKILL_PRESET)
+
+
+def _pick_dict(data: Any, fields: Iterable[str]) -> dict:
+    """Like `_pick`, for a plain dict (the comparison is passed through untyped). A missing field is null, never absent."""
+    data = data if isinstance(data, dict) else {}
+    return {name: data.get(name) for name in fields}
+
+
+def comparison(c: dict) -> dict:
+    """`harumi compare --json`: the fields in COMPARE and the three records inside it, and nothing else the server
+    may add. A field that is a list stays a list (empty when the server sent none), so a script can always loop."""
+    out = _pick_dict(c, COMPARE)
+    out["columns"] = [_pick_dict(col, COMPARE_COLUMN) for col in c.get("columns") or []]
+    out["kpis"] = [_pick_dict(kpi, COMPARE_KPI) for kpi in c.get("kpis") or []]
+    out["warnings"] = list(c.get("warnings") or [])
+    fairness = _pick_dict(c.get("fairness"), COMPARE_FAIRNESS)
+    fairness["files"] = list(fairness["files"] or [])
+    fairness["verdict"] = fairness["verdict"] or "unknown"
+    out["fairness"] = fairness
+    return out
 
 
 def usage(u: Any) -> dict:
