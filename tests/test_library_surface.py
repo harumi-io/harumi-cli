@@ -338,7 +338,7 @@ def test_many_threads_sharing_one_client_refresh_an_expired_login_once():
     """The docs promise a Client works on any thread. Six threads that all find the access token expired must spend
     the single-use refresh token once between them (the credentials lock), not race and log each other out.
 
-    This is a smoke test of the shape, not proof of the property: it failed about 1 run in 15 on Python 3.9 because
+    This is a smoke test of the shape, not proof of the property: it failed 2 runs in 30 on Python 3.9 because
     of a race it could not reliably trigger (see `tests/test_refresh_race.py`, which makes the interleaving
     deterministic and is the real check)."""
     log_in("production", "OLD")
