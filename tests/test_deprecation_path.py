@@ -1,9 +1,10 @@
 """The way out for deprecated names: warn while they work, say so in their help, and explain once they are gone.
 
 0.11 deprecated 28 names (`push`, `repo ...`, `outputs`, the `remove`/`delete` verbs, ...) and promised their
-removal in 0.12.0. Each still runs and warns. What was missing is the day after: a script that calls `harumi push`
-would get a bare "No such command". `harumi env` shows the model that works (it says it was removed and what to
-use), so every retired name gets the same, from the same table that drives the warnings.
+removal in 0.12.0, which removed them. A script that still calls `harumi push` is told it was removed and what to
+use, from the same table (`_RETIRED`) that drove the warnings, instead of a bare "No such command". `harumi env`
+was the model. `blueprints` and `new --blueprint` were deprecated in 0.12.0 and are removed in 0.13.0: until then
+they run and warn, which is what the "while it still works" tests below check.
 """
 
 from __future__ import annotations
@@ -38,6 +39,26 @@ def quiet(tmp_path, monkeypatch):
 
 def version_tuple(text: str):
     return tuple(int(part) for part in re.findall(r"\d+", text)[:3])
+
+
+def due_keys(release: str):
+    """Every entry in `_RETIRED` (commands, groups and options) that `release` has removed, or removes."""
+    return [key for key in cli._RETIRED if version_tuple(cli._removal_version(key)) <= version_tuple(release)]
+
+
+def removed_names(by=None):
+    """The paths of the retired *commands* (not options) that release `by` removes: ("push",), ("repo", "ls"), ("repo",).
+    Taken from the table, because the commands themselves are deleted: there is nothing left to scan for."""
+    return [tuple(key.split()[1:]) for key in due_keys(by or cli._REMOVAL_VERSION) if " --" not in key]
+
+
+def exists_in_tree(path) -> bool:
+    command = get_command(cli.app)
+    for name in path:
+        if name not in getattr(command, "commands", {}):
+            return False
+        command = command.commands[name]
+    return True
 
 
 def due_by(path, release: str) -> bool:
@@ -77,26 +98,27 @@ def required_args(command):
     return out
 
 
-OLD_NAMES = [pytest.param(path, id=" ".join(path)) for path, _ in hidden_leaves()]  # every old name, due or not
-REMOVED_IN_THIS_RELEASE = [pytest.param(path, id=" ".join(path)) for path, _ in hidden_leaves(by=cli._REMOVAL_VERSION)]
+OLD_NAMES = [pytest.param(path, id=" ".join(path)) for path, _ in hidden_leaves()]  # still registered: deprecated, not yet removed
+REMOVED_IN_THIS_RELEASE = [pytest.param(path, id=" ".join(path)) for path in removed_names()]
 
 
 # -- one table ----------------------------------------------------------------------------------------------------
 
 
 def test_the_audit_found_the_old_names():
-    assert len(OLD_NAMES) >= 28, "discovery found too few hidden commands, so every test below would prove little"
+    assert len(REMOVED_IN_THIS_RELEASE) >= 28, "the table lost names, so every test below would prove little"
+    assert [p.id for p in OLD_NAMES] == ["blueprints"], "the one deprecated name left; it goes in 0.13.0"
 
 
-def test_every_hidden_old_name_is_in_the_retired_table_and_nothing_else_is():
+def test_every_hidden_old_name_is_in_the_retired_table_and_the_removed_ones_are_really_gone():
     leaves = {"harumi " + " ".join(path) for path, _ in hidden_leaves()}
     commands_in_table = {key for key in cli._RETIRED if " --" not in key}  # an option, not a command (see below)
-    groups_in_table = {key for key in commands_in_table if key not in leaves}
+    removed = {"harumi " + " ".join(path) for path in removed_names()}
 
     assert sorted(leaves - commands_in_table) == [], "hidden but nothing says where it went"
-    # What is left is a group-level answer (`harumi repo`): it must cover commands that are really there.
-    stale = [key for key in groups_in_table if not any(leaf.startswith(key + " ") for leaf in leaves)]
-    assert stale == [], "in the table but there is no such command or group: a stale entry"
+    assert leaves.isdisjoint(removed), "removed in 0.12.0 but still registered as a command"
+    still_registered = [key for key in removed if exists_in_tree(tuple(key.split()[1:]))]
+    assert still_registered == [], "in the table as removed, but the command (or group) is still there"
 
 
 def test_the_removed_output_dir_option_is_in_the_table_too():
@@ -343,11 +365,11 @@ def test_the_names_promised_gone_in_the_removal_version_are_gone_by_then():
 
 
 def test_the_tripwire_does_fire_when_the_version_is_reached(monkeypatch):
-    """Today it passes only because 0.11 is before 0.12. The same check, run as if this were the release that
-    removes them (the installed version set to the removal version), must report every name left behind."""
-    monkeypatch.setattr(sys.modules[__name__], "__version__", cli._REMOVAL_VERSION)
+    """Today it passes only because 0.12 is before 0.13. The same check, run as if this were the release that
+    removes `blueprints` (the installed version set to 0.13.0), must report it left behind."""
+    monkeypatch.setattr(sys.modules[__name__], "__version__", "0.13.0")
 
-    assert len(still_here_after(cli._REMOVAL_VERSION)) >= 28
+    assert still_here_after("0.13.0") == ["blueprints"]
 
 
 def release_notes(version: str):
@@ -376,7 +398,7 @@ def release_gaps(removal_version: str, current_version: str):
     # Only a span written with a trailing "..." is a group (`harumi repo ...`). A stray `projects` in the prose is
     # not: it would otherwise stand in for every name that starts with it.
     groups = {normalised_name(span) for span in spans if span.strip().endswith("...")}
-    for key in cli._RETIRED:
+    for key in due_keys(removal_version):
         name = normalised_name(key)
         # The full name, or the group it belongs to. A bare last word is not enough: `delete` is the end of two
         # names, so one mention would stand in for both.
@@ -396,20 +418,25 @@ def test_the_release_notes_are_complete_by_the_time_the_version_is_bumped():
     assert release_gaps(cli._REMOVAL_VERSION, __version__) == []
 
 
-def test_the_release_check_does_fire_when_the_notes_are_left_as_drafted():
-    """Same check with the current version standing in for the release: the draft has no date and lists none of the
-    names, so it must report both."""
+def test_the_release_check_does_fire_when_the_notes_are_left_as_drafted(monkeypatch):
+    """The check must be able to fail: notes drafted ahead of a release (no date, none of the removed names listed)
+    are reported on both counts. Built here rather than read from the changelog, which is complete by now."""
+    from harumi.changelog import Release
+
+    drafted = Release(cli._REMOVAL_VERSION, None, "### Removed\n\n- `harumi env`.\n")
+    monkeypatch.setattr(sys.modules[__name__], "release_notes", lambda version: drafted)
+
     gaps = release_gaps(cli._REMOVAL_VERSION, cli._REMOVAL_VERSION)
 
     assert any("no date" in g for g in gaps)
-    assert sum("do not list" in g for g in gaps) == len(cli._RETIRED)  # none of them, whatever the table grows to
+    assert sum("do not list" in g for g in gaps) == len(due_keys(cli._REMOVAL_VERSION))  # none of them, whatever the table grows to
 
 
 def test_a_complete_release_entry_satisfies_the_check(monkeypatch):
     """So the release step can go green: a dated entry that lists every retired name passes."""
     from harumi.changelog import Release
 
-    names = ", ".join(f"`{key.removeprefix('harumi ')}`" for key in cli._RETIRED)
+    names = ", ".join(f"`{key.removeprefix('harumi ')}`" for key in due_keys(cli._REMOVAL_VERSION))
     complete = Release(cli._REMOVAL_VERSION, "2026-11-01", f"### Removed\n\n- {names}\n")
     monkeypatch.setattr(sys.modules[__name__], "release_notes", lambda version: complete)
 
@@ -439,6 +466,9 @@ def unresolved_in_notes(notes: str):
         words = re.sub(r"\s+\.\.\.|<[^>]*>", "", span).split()
         if not words:
             continue
+        named = " ".join(words)
+        if any(named == key or named.startswith(key + " ") for key in cli._RETIRED if " --" not in key):
+            continue  # a removed name, quoted to say it was removed: it is meant not to exist
         if words[0] == "harumi":
             command, i = root, 1
             while i < len(words) and not words[i].startswith("-") and hasattr(command, "commands"):
@@ -498,20 +528,20 @@ def gaps_for(monkeypatch):
 def test_names_written_with_the_program_name_count_as_listed(gaps_for):
     """The draft already writes `harumi env`; a release author who writes `harumi push` must not be told it is
     missing and then reword correct notes to satisfy a test."""
-    every_name = ", ".join(f"`{key}`" for key in cli._RETIRED)
+    every_name = ", ".join(f"`{key}`" for key in due_keys(cli._REMOVAL_VERSION))
 
     assert gaps_for(every_name) == []
 
 
 def test_names_written_without_the_program_name_count_as_listed(gaps_for):
-    every_name = ", ".join(f"`{key.removeprefix('harumi ')}`" for key in cli._RETIRED)
+    every_name = ", ".join(f"`{key.removeprefix('harumi ')}`" for key in due_keys(cli._REMOVAL_VERSION))
 
     assert gaps_for(every_name) == []
 
 
 def test_a_group_written_once_covers_its_commands(gaps_for):
-    leaves = [key for key in cli._RETIRED if key.startswith("harumi repo ")]
-    others = ", ".join(f"`{key}`" for key in cli._RETIRED if not key.startswith("harumi repo"))
+    leaves = [key for key in due_keys(cli._REMOVAL_VERSION) if key.startswith("harumi repo ")]
+    others = ", ".join(f"`{key}`" for key in due_keys(cli._REMOVAL_VERSION) if not key.startswith("harumi repo"))
 
     assert len(leaves) >= 10 and gaps_for(others + ", `harumi repo ...`") == []
     assert len(gaps_for(others)) == len(leaves) + 1  # without it, the group and each of its commands are missing
@@ -521,13 +551,13 @@ def test_one_shared_last_word_does_not_stand_in_for_every_name_that_ends_with_it
     """`delete` ends `projects delete` and `org delete`; listing the word once must not satisfy both."""
     missing = gaps_for("`delete`, `remove`, `create`, `list`")
 
-    assert len(missing) == len(cli._RETIRED), "a bare word counted as listing a name"
+    assert len(missing) == len(due_keys(cli._REMOVAL_VERSION)), "a bare word counted as listing a name"
 
 
 def test_a_stray_word_in_the_prose_is_not_a_group(gaps_for):
     """`projects` and `run` mentioned in passing must not stand in for `projects create`, `projects delete` and
     `run --output-dir`."""
-    listed = ", ".join(f"`{key}`" for key in cli._RETIRED if not key.startswith(("harumi projects", "harumi run")))
+    listed = ", ".join(f"`{key}`" for key in due_keys(cli._REMOVAL_VERSION) if not key.startswith(("harumi projects", "harumi run")))
     missing = gaps_for(listed + ", and `projects` and `run` were touched")
 
     assert sorted(missing) == [

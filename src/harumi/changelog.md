@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.12.0
+## 0.12.0 - 2026-10-23
 
 A friendlier first session, readable output everywhere, and the same rules for every command: how it confirms, how it fails, what it prints for a script.
 
@@ -27,6 +27,7 @@ A friendlier first session, readable output everywhere, and the same rules for e
 - `org rm` asks you to type the organization's name; `share update --no-password` asks first. A permanent delete by id needs the exact name or 8 or more characters of the id.
 - **`files rm` of a file that is not there exits 1** (harumi-api says "deleted" for any path). Pass `--missing-ok` for the old idempotent behaviour.
 - `harumi check` exits 1 when the project cannot run.
+- **The 28 names removed below now exit 2 and say what to use instead,** without calling the API. In 0.11 they ran and warned, so a script that still uses `harumi projects delete` or `harumi repo rm` stops deleting and starts failing. `harumi run --output-dir` exits 1 before anything runs.
 - `compare --json` prints named fields (`columns`, `kpis`, `winner_run_id`, `no_winner_reason`, `warnings`, `fairness`) instead of the API's response as it came, so a field the server adds later does not reach your script. Today's output has the same fields; a column's `source` is `null` when the API sent none, instead of missing.
 - `runs list`, `schedules list`, `memories list`, `share list` and `org members` print the first 8 characters of an id, and the commands that take one accept the start of it (`projects list` still prints whole ids). Their columns changed: `runs list` shows `started` and `took`, `schedules list` no longer shows the kernel, and `share list` no longer prints tokens.
 - Errors say what failed, whose problem it is and what to do: your network, a company TLS proxy (`SSL_CERT_FILE`), a refused connection and a cut-off reply each read differently, and when a change may have gone through before the connection dropped, it says so, so you can check before you repeat it. `HARUMI_DEBUG=1` shows the full trace.
@@ -42,6 +43,19 @@ A friendlier first session, readable output everywhere, and the same rules for e
 ### Removed
 
 - `harumi env`. Set `HARUMI_ENV=staging` for scripts, or pass `--env`.
+- The 28 names that 0.11 deprecated. Running one exits 2 and prints what replaced it ("harumi push was removed in 0.12.0. Use: harumi import"):
+  - `harumi push` -> `harumi import`
+  - `harumi outputs` -> `harumi runs list` and `harumi runs download`
+  - `harumi projects create` -> `harumi new <NAME> --no-clone`
+  - `harumi profile show` -> `harumi whoami`
+  - `harumi config ...` (`harumi config set-org`) -> `harumi org use`
+  - `harumi skill ...` (`harumi skill path`, `harumi skill install`) -> `harumi agent-skills install`
+  - `harumi repo ...` (all twelve commands, from `harumi repo ls` to `harumi repo readiness`) -> git in your clone; `harumi repo readiness` -> `harumi check`
+  - `harumi share set-password` and `harumi share rm-password` -> `harumi share update --password` and `--no-password`
+  - `harumi projects delete`, `harumi share remove`, `harumi datasources remove`, `harumi schedules remove` and `harumi org delete` -> the same command with `rm`; `harumi org remove` -> `harumi org rm-member`
+- `harumi run --output-dir`. Use `harumi runs download`.
+
+`harumi blueprints` and `harumi new --blueprint` are deprecated in this release and still work until 0.13.0.
 
 ## 0.11.1 - 2026-10-23
 

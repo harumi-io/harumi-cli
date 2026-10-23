@@ -200,14 +200,12 @@ def test_organization_deletion_still_says_it_is_permanent(monkeypatch):
 # -- repo rm is a commit, so it can be undone --------------------------------------------------------------
 
 
-def test_removing_files_from_the_repo_says_it_is_a_commit_that_can_be_reverted(api, monkeypatch):
-    prompts = []
-    monkeypatch.setattr(cli.typer, "confirm", lambda text, **k: prompts.append(text) or False)
+def test_repo_rm_is_removed_and_deletes_nothing(api):
+    """It used to ask first and say a removal is a commit that can be reverted. Gone since 0.12.0: git does it now."""
+    result = runner.invoke(cli.app, ["repo", "rm", "old.py", "--project", "proj-1"])
 
-    runner.invoke(cli.app, ["repo", "rm", "old.py", "--project", "proj-1"])
-
-    assert prompts and "cannot be undone" not in prompts[0]
-    assert "commit" in prompts[0] and "git revert" in prompts[0]
+    assert result.exit_code == 2 and "removed in 0.12.0" in result.output and "git rm" in " ".join(result.output.split())
+    assert api.deleted == []
 
 
 # -- the skill reference says the same thing ---------------------------------------------------------------
