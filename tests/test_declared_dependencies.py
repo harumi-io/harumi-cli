@@ -27,9 +27,13 @@ STDLIB_ROOTS = {pathlib.Path(sys.modules["os"].__file__).resolve().parent}
 # imported behind a version check (the test below pins that), and what stands in for them is a dependency.
 NEWER_STANDARD_LIBRARY = {"tomllib"}
 
+# Standard-library modules that exist only on some operating systems, so this interpreter may not find them. config.py
+# imports msvcrt (Windows file locking) behind a try, and the stdlib needs no declaring.
+PLATFORM_STANDARD_LIBRARY = {"msvcrt"}
+
 
 def is_standard_library(module: str) -> bool:
-    if module in sys.builtin_module_names or module == "__future__" or module in NEWER_STANDARD_LIBRARY:
+    if module in sys.builtin_module_names or module == "__future__" or module in NEWER_STANDARD_LIBRARY or module in PLATFORM_STANDARD_LIBRARY:
         return True
     spec = __import__("importlib.util", fromlist=["util"]).find_spec(module)
     if spec is None:
@@ -58,6 +62,7 @@ DISTRIBUTION_OF = {
     "typer": "typer",
     "rich": "rich",
     "pydantic": "pydantic",
+    "questionary": "questionary",
     "tomli": "tomli",
 }
 
