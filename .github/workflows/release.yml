@@ -154,9 +154,43 @@ jobs:
           name: cli-surface
           path: cli-surface.json
 
+  # The gate in front of PyPI. A version number can never be reused, so a wheel that does not start must not be
+  # uploaded. Installs the exact file that will be published into a venv with nothing else, on both ends of the
+  # supported range (0.11.0 shipped unable to start on Python 3.9 because only 3.12 ever installed the wheel).
+  smoke:
+    name: Smoke test the wheel (${{ matrix.python-version }})
+    needs: [resolve, build]
+    if: needs.resolve.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.tag }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download distribution artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install the wheel alone and start it
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: python scripts/check_wheel_installs.py dist/*.whl --expect-version "${TAG#v}"
+
   publish:
     name: Publish to PyPI
-    needs: build
+    needs: [build, smoke]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

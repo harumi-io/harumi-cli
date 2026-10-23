@@ -46,6 +46,10 @@ dependencies = [
     # works on macOS, Linux and Windows. 2.1 is the version this was developed and
     # tested against, and it supports the Python 3.9 floor above.
     "questionary>=2.1",
+    # `tomllib` joined the standard library in 3.11; below that, dashboard.py imports this instead. It was
+    # imported without being declared, so a clean install on Python 3.9 died at startup (CI never saw it: the
+    # dev extras bring tomli in on 3.9 through pytest). Guarded by tests/test_declared_dependencies.py.
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.urls]
