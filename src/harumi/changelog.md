@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.1 - 2026-10-23
+
+A fix for installs on Python 3.9 and 3.10.
+
+### Fixed
+
+- `harumi` did not start on Python older than 3.11 after a plain `pip install harumi` (`ModuleNotFoundError: No module named 'tomli'`). The missing dependency is now declared. If you are on 3.9 or 3.10 and have 0.11.0, run `pip install --upgrade harumi` (or `pipx upgrade harumi`).
+
 ## 0.11.0 - 2026-10-13
 
 A smaller, more consistent command set, real `skills` commands, and update notices.
