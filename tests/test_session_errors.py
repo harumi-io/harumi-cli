@@ -232,7 +232,7 @@ def test_a_command_without_a_login_fails_before_printing_anything_else(monkeypat
     assert "harumi login" in result.output
 
 
-@pytest.mark.parametrize("argv", [["whoami"], ["specs"], ["blueprints"], ["projects", "list"], ["usage"]])
+@pytest.mark.parametrize("argv", [["whoami"], ["specs"], ["examples"], ["projects", "list"], ["usage"]])
 def test_every_kind_of_command_says_how_to_log_in_when_there_is_no_login(argv):
     result = runner.invoke(cli.app, argv)
 

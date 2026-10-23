@@ -113,7 +113,7 @@ def test_the_width_helper_really_changes_the_width(at_width):
     assert cli.console.width == 120  # if this fails, every width test below measures nothing
 
 
-@pytest.mark.parametrize("args", [["runs", "list"], ["blueprints"], ["skills", "library"]])
+@pytest.mark.parametrize("args", [["runs", "list"], ["examples"], ["skills", "library"]])
 def test_a_rich_tag_in_a_table_cell_is_shown_as_typed(api, args):
     out = plain(runner.invoke(cli.app, args).stdout)
 
@@ -127,7 +127,7 @@ def test_a_project_name_with_a_rich_tag_is_shown_as_typed(api, at_width):
     assert f"Q3 {TAG}" in plain(runner.invoke(cli.app, ["projects", "list"]).stdout)
 
 
-@pytest.mark.parametrize("args", [["runs", "list"], ["blueprints"], ["skills", "library"], ["projects", "list"]])
+@pytest.mark.parametrize("args", [["runs", "list"], ["examples"], ["skills", "library"], ["projects", "list"]])
 def test_a_stray_closing_tag_cannot_crash_a_table(api, monkeypatch, args):
     for row in api.runs:
         row["git_branch"] = "bad[/oops]"
