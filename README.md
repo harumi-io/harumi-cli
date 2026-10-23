@@ -63,6 +63,7 @@ harumi dashboard validate --latest
 - `harumi whats-new` — release notes for the installed version (`--all` for the history). harumi also tells you, at most once a day and only in an interactive terminal, when a newer version is on PyPI.
 - `harumi blueprints` — list project blueprints to pass as `harumi new --blueprint`.
 - `harumi datasources` — CRUD project database connections, test them, and run read-only SQL queries against them.
+- `harumi tags` — label a version with a movable tag such as `prod`, then `harumi run --tag prod` or `harumi schedules add --git-tag prod`.
 - `harumi schedules` — CRUD cron schedules that trigger git-ref runs.
 - `harumi secrets` — CRUD project-scoped environment variables.
 - `harumi memories` — list/add/edit/remove the project's memories. (Project skills are files in the repo under `skills/<slug>/SKILL.md`; run `harumi skills` for how to edit them.)
@@ -75,7 +76,7 @@ Ask any command for help with `-h` or `--help` (`harumi projects rm -h`); the co
 
 ## Execution model
 
-Every run is git-ref based: code lives in the project's Harumi Git (Gitea) repo. If your working tree is dirty or has unpushed commits when you run `harumi run`, the CLI transparently pushes a throwaway scratch branch so you can iterate without committing manually — your real branches are never touched. Pass `--branch`/`--commit` to run a specific ref instead.
+Every run is git-ref based: code lives in the project's Harumi Git (Gitea) repo. If your working tree is dirty or has unpushed commits when you run `harumi run`, the CLI transparently pushes a throwaway scratch branch so you can iterate without committing manually — your real branches are never touched. Pass `--branch`/`--commit`/`--tag` to run a specific ref instead.
 
 ## Configuration & environments
 

@@ -13,8 +13,9 @@
     harumi import [path] [--from-git <url>] [--project-name <name>]
     harumi clone <PROJECT_ID> [--dir <path>]
     harumi link --project <id> [--api-url <url>] [--git-url <url>]
-    harumi run [--branch <b>] [--commit <sha>] [--command <c>] [--kernel <k>] [--watch]
+    harumi run [--branch <b> | --tag <t>] [--commit <sha>] [--command <c>] [--kernel <k>] [--watch]
     harumi runs list|get|cancel|download [--project <id>]
+    harumi tags list|set|rm [--project <id>]
     harumi compare <run-id>... [--json] [--project <id>]
     harumi check [--ref <ref>] [--project <id>]
     harumi agent-skills install
@@ -812,6 +813,11 @@ def _cell(value: object) -> Text:
     return Text(_printable(value))
 
 
+def _ref_label(branch: Optional[str], tag: Optional[str]) -> str:
+    """What a run or schedule follows, for a table: its branch, or `tag NAME`. A run from a tag has no branch."""
+    return f"tag {tag}" if tag and not branch else (branch or "")
+
+
 def _format_bytes(num_bytes: int) -> str:
     if num_bytes < 1024:
         return f"{num_bytes} B"
@@ -1604,7 +1610,7 @@ def _newest_runs_first(runs):
 
 def _run_option(r) -> interactive.Option:
     """One run as a menu row: a short id and its status, with its branch and age beside it."""
-    hint = "  ".join(p for p in (r.git_branch or "", f"started {_run_started(r)}" if _run_started(r) else "") if p)
+    hint = "  ".join(p for p in (_ref_label(r.git_branch, r.git_tag), f"started {_run_started(r)}" if _run_started(r) else "") if p)
     return interactive.Option(f"{r.id[:8]}  {r.status}", r.id, hint=hint)
 
 
@@ -3257,6 +3263,7 @@ def projects_rm(
 def run(
     branch: Optional[str] = typer.Option(None, "--branch", "-b", help="Run a specific branch."),
     commit: Optional[str] = typer.Option(None, "--commit", help="Run a specific commit SHA."),
+    tag: Optional[str] = typer.Option(None, "--tag", "-t", help="Run the commit a tag points at (see `harumi tags list`)."),
     command: Optional[str] = typer.Option(None, "--command", "-c", help="Override the harumi.toml command."),
     kernel: Optional[str] = typer.Option(None, "--kernel", "-k", help="Kernel to run on (see `harumi specs`), overriding harumi.toml."),
     watch: bool = typer.Option(False, "--watch", "-w", help="Block until the run finishes."),
@@ -3277,14 +3284,18 @@ def run(
     """Run the project via its Harumi Git repo.
 
     By default, automatically pushes the working tree to a scratch branch so
-    you can iterate without committing manually.  Pass --branch or --commit
-    to run a specific ref instead.
+    you can iterate without committing manually.  Pass --branch, --commit or
+    --tag to run a specific ref instead. A tag (for example prod) is looked up
+    when the run starts and the run records the commit it found, so moving the
+    tag afterwards does not change that run.
 
     Requires a working directory produced by `harumi new`/`harumi import`/
     `harumi clone` (or `harumi link`, if the checkout already exists).
     """
     if output_dir:
         _warn_deprecated("harumi run --output-dir", _RETIRED["harumi run --output-dir"])
+    if tag and (branch or commit):
+        _fail("--tag cannot be combined with --branch or --commit: run a tag, a branch or a commit.")
     binding = ProjectBinding.load()
     if binding is None:
         _fail(
@@ -3299,8 +3310,15 @@ def run(
     repo = binding.repo  # type: ignore[union-attr]
 
     scratch_branch: Optional[str] = None
+    run_tag: Optional[str] = None
 
-    if branch or commit:
+    if tag:
+        # A tag names a commit on the server: nothing local to push, and the server resolves it.
+        run_branch = None
+        run_commit = None
+        run_tag = tag
+        console.print(_running_line(project_id, None, None, tag=tag))
+    elif branch or commit:
         # Explicit ref — run it directly, no scratch needed.
         run_branch = branch
         run_commit = commit
@@ -3352,6 +3370,7 @@ def run(
                 commit=run_commit,
                 command=command,
                 kernel_spec=kernel,
+                tag=run_tag,
             )
         except ApiError as exc:
             # A failed token refresh is the login's problem, not the project's, whatever
@@ -3426,10 +3445,11 @@ _RUN_REJECTED = {400, 404, 409, 422}
 _STDERR_SHOWN = 20  # lines of a failed run's stderr shown before pointing at `runs get`
 
 
-def _running_line(project_id: str, branch: Optional[str], commit: Optional[str]) -> str:
+def _running_line(project_id: str, branch: Optional[str], commit: Optional[str], *, tag: Optional[str] = None) -> str:
     where = " ".join(
         part
         for part in (
+            f"tag [bold]{escape(tag)}[/bold]" if tag else "",
             f"branch [bold]{branch}[/bold]" if branch else "",
             f"commit [bold]{commit[:8]}[/bold]" if commit else "",
         )
@@ -3593,7 +3613,7 @@ def runs_list(
             _cell(r.id[:8]),
             _status_markup(r.status),  # our own markup, from a fixed set of statuses
             _cell(r.source or ""),
-            _cell(r.git_branch or ""),
+            _cell(_ref_label(r.git_branch, r.git_tag)),
             _run_started(r),
             _duration(_run_duration(r)),
         )
@@ -3639,7 +3659,7 @@ def runs_get(
         ("Took", took + (f"  [dim](started {started})[/dim]" if started else "") if took else (f"started {started}" if started else "")),
         (
             "Code",
-            " @ ".join(p for p in (escape(r.git_branch or ""), escape((r.git_commit or "")[:8])) if p),
+            " @ ".join(p for p in (escape(_ref_label(r.git_branch, r.git_tag)), escape((r.git_commit or "")[:8])) if p),
         ),
         ("Command", escape(r.command or "")),
         ("Kernel", escape(r.kernel_spec or "")),
@@ -3730,6 +3750,104 @@ def runs_cancel(
         console.print(f"Run {escape(r.id)} had already {_status_markup(r.status)}; there was nothing to cancel.")
         return
     console.print(f"Run [bold]{escape(r.id)}[/bold] is now {_status_markup(r.status)}.")
+
+
+# ---------------------------------------------------------------------------
+# harumi tags
+# ---------------------------------------------------------------------------
+
+tags_app = _typer(help="Label versions (branches or commits) with movable tags such as prod.")
+app.add_typer(tags_app, name="tags")
+
+
+@tags_app.command("list")
+@_handle_errors
+def tags_list(
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """List a project's tags and the commit each one points at."""
+    project_id = _resolve_project(project)
+    client = _get_client(api_url=api_url, org=org)
+
+    tags = client.list_repo_tags(project_id)
+    if as_json:
+        _emit_json([json_out.tag(t) for t in tags])
+        return
+    if not tags:
+        console.print("No tags yet. Add one with [bold]harumi tags set prod[/bold].")
+        return
+    table = Table("tag", "commit", "message")
+    for t in tags:
+        table.add_row(_cell(t.name), _cell((t.commit_sha or "")[:8]), _cell(t.message or ""))
+    console.print(table)
+    console.print("[dim]Run one with [bold]harumi run --tag NAME[/bold].[/dim]")
+
+
+@tags_app.command("set")
+@_handle_errors
+def tags_set(
+    name: str = typer.Argument(..., help="Tag name, for example prod."),
+    to: Optional[str] = typer.Option(
+        None, "--to", help="Branch or commit SHA to point the tag at. Default: the branch you are on (it must be pushed)."
+    ),
+    message: Optional[str] = typer.Option(None, "--message", "-m", help="A note stored with the tag."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Create a tag, or move it if it already exists.
+
+    Moving a tag changes what the runs and schedules that follow it run
+    from now on. Runs already started keep the commit they resolved. A tag
+    cannot have the name of a branch.
+    """
+    project_id = _resolve_project(project)
+
+    if to is None:
+        # The tag lives on the server, so it can only label what the server has.
+        to = current_branch()
+        if to is None:
+            _fail("You are not on a branch (detached HEAD). Say what to tag: [bold]harumi tags set NAME --to BRANCH_OR_COMMIT[/bold].")
+        if has_unpushed_commits():
+            _fail(
+                f"Branch '{escape(str(to))}' has commits the server does not have, so a tag would label older code. "
+                f"Push first with [bold]git push harumi {escape(str(to))}[/bold], or say what to tag with [bold]--to[/bold]."
+            )
+        if is_dirty():
+            console.print("[yellow]Note:[/yellow] uncommitted changes are not part of the tag; it labels the pushed commit.")
+
+    client = _get_client(api_url=api_url, org=org)
+    with _pointing_to("harumi tags list"):
+        tag = client.set_repo_tag(project_id, name, to, message=message)
+    console.print(
+        f"[bold green]Tagged[/bold green] [bold]{escape(tag.name)}[/bold] at "
+        f"[bold]{escape((tag.commit_sha or '')[:8])}[/bold] ({escape(to)})."
+    )
+    console.print(f"[dim]Run it with [bold]harumi run --tag {escape(tag.name)}[/bold].[/dim]")
+
+
+@tags_app.command("rm")
+@_handle_errors
+def tags_rm(
+    name: str = typer.Argument(..., help="Tag to delete."),
+    yes: bool = _YES,
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Delete a tag. The commits it labelled are untouched; a schedule that follows it must be changed first."""
+    project_id = _resolve_project(project)
+    _confirm(
+        f"Delete tag '{_printable(name)}'? Anything that runs it by name stops working until you set it again.",
+        yes=yes,
+    )
+    client = _get_client(api_url=api_url, org=org)
+    with _pointing_to("harumi tags list"):
+        client.delete_repo_tag(project_id, name)
+    console.print(f"[bold red]Deleted[/bold red] tag [bold]{escape(name)}[/bold].")
 
 
 # ---------------------------------------------------------------------------
@@ -3899,7 +4017,10 @@ def compare(
     console.print(table)
 
     if winner:
-        branch = next((c.get("branch") for c in columns if c.get("run_id") == winner), None) or winner
+        branch = next(
+            (c.get("branch") or (f"tag {c['tag']}" if c.get("tag") else None) for c in columns if c.get("run_id") == winner),
+            None,
+        ) or winner
         note = " (best value of the primary KPI, marked *)" if any_primary else ""
         console.print(f"Winner: [bold]{escape(str(branch))}[/bold]{note}")
         console.print(f"[dim]Get its files: [bold]harumi runs download {escape(str(winner))}[/bold][/dim]", soft_wrap=True)
@@ -3975,7 +4096,7 @@ def outputs(
             r.status or "",
             str(r.started or ""),
             str(r.ended or ""),
-            r.git_branch or "",
+            _ref_label(r.git_branch, r.git_tag),
         )
     console.print(table)
 
@@ -5686,6 +5807,12 @@ def _run_id(client: Client, project_id: str, typed: str) -> str:
     return _match_by_id(client.list_runs(project_id), typed, "run", "harumi runs list").id
 
 
+def _one_ref(*, git_tag: Optional[str], git_branch: Optional[str], git_commit: Optional[str]) -> None:
+    """A schedule follows a tag or a branch/commit, never both."""
+    if git_tag and (git_branch or git_commit):
+        _fail("--git-tag cannot be combined with --git-branch or --git-commit: a schedule follows a tag or a branch, not both.")
+
+
 def _schedule_id(client: Client, project_id: str, typed: str) -> str:
     """The full id for what the user typed: a full id as given, or the start of exactly one."""
     if _FULL_ID.match(typed):
@@ -5696,7 +5823,7 @@ def _schedule_id(client: Client, project_id: str, typed: str) -> str:
 def _pick_schedule(client: Client, project_id: str, action: str) -> Optional[str]:
     return _pick_row(
         client.list_schedules(project_id), action, "schedule", "harumi schedules add",
-        label=lambda sc: f"{sc.cron}  {sc.git_branch}",
+        label=lambda sc: f"{sc.cron}  {_ref_label(sc.git_branch, sc.git_tag)}",
         hint=lambda sc: sc.command or "the project's command",
         flag="the SCHEDULE_ID argument",
     )
@@ -5731,7 +5858,7 @@ def schedules_list(
         table.add_row(
             _cell(sc.id[:8]),
             _cell(sc.cron),
-            _cell(sc.git_branch),
+            _cell(_ref_label(sc.git_branch, sc.git_tag)),
             _cell(sc.last_executed_at.strftime("%Y-%m-%d %H:%M") if sc.last_executed_at else "never"),
             _cell(sc.command or "the project's command"),
         )
@@ -5768,6 +5895,7 @@ def schedules_get(
         "cron",
         "start_at",
         "git_branch",
+        "git_tag",
         "git_commit",
         "command",
         "kernel_spec",
@@ -5776,7 +5904,10 @@ def schedules_get(
         "status",
         "last_executed_at",
     ):
-        table.add_row(field, _cell(getattr(s, field, "") or ""))
+        value = getattr(s, field, "")
+        if field in ("git_branch", "git_tag") and not value:
+            continue  # a schedule follows a branch or a tag: show only the one it has
+        table.add_row(field, _cell(value or ""))
     console.print(table)
 
 
@@ -5785,7 +5916,8 @@ def schedules_get(
 def schedules_add(
     cron: str = typer.Option(..., "--cron", help='Raw 5-field cron expression, interpreted in UTC (e.g. "0 9 * * *").'),
     start_at: Optional[str] = typer.Option(None, "--start-at", help="ISO-8601 datetime. Defaults to now (UTC)."),
-    git_branch: str = typer.Option("main", "--git-branch", help="Branch to run on each fire."),
+    git_branch: Optional[str] = typer.Option(None, "--git-branch", help="Branch to run on each fire (default: main)."),
+    git_tag: Optional[str] = typer.Option(None, "--git-tag", help="Run whatever this tag points at on each fire, instead of a branch."),
     git_commit: Optional[str] = typer.Option(None, "--git-commit", help="Pin to a specific commit instead of the branch tip."),
     command: Optional[str] = typer.Option(None, "--command", help="Override the harumi.toml command."),
     kernel: Optional[str] = typer.Option(None, "--kernel", help="Kernel to run on (see `harumi specs`), overriding the project's."),
@@ -5800,7 +5932,11 @@ def schedules_add(
     Cron is validated server-side (croniter) — an invalid expression returns
     a clear 400 error. The cron is interpreted in UTC, and a schedule cannot
     fire more often than every 5 minutes.
+
+    A schedule follows a branch (default main) or a tag, not both: with
+    --git-tag it runs whatever the tag points at each time it fires.
     """
+    _one_ref(git_tag=git_tag, git_branch=git_branch, git_commit=git_commit)
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -5809,8 +5945,11 @@ def schedules_add(
     body: dict = {
         "cron": cron,
         "start_at": start_at or datetime.now(timezone.utc).isoformat(),
-        "git_branch": git_branch,
     }
+    if git_tag:
+        body["git_tag"] = git_tag
+    else:
+        body["git_branch"] = git_branch or "main"
     if git_commit:
         body["git_commit"] = git_commit
     if command:
@@ -5835,7 +5974,8 @@ def schedules_update(
     schedule_id: Optional[str] = typer.Argument(None, help="Schedule id, or the start of it. Pick from a list if omitted."),
     cron: Optional[str] = typer.Option(None, "--cron", help='Raw 5-field cron expression, interpreted in UTC (e.g. "0 9 * * *").'),
     start_at: Optional[str] = typer.Option(None, "--start-at", help="ISO-8601 datetime."),
-    git_branch: Optional[str] = typer.Option(None, "--git-branch", help="Branch to run on each fire."),
+    git_branch: Optional[str] = typer.Option(None, "--git-branch", help="Branch to run on each fire (replaces a tag)."),
+    git_tag: Optional[str] = typer.Option(None, "--git-tag", help="Run whatever this tag points at on each fire (replaces the branch)."),
     git_commit: Optional[str] = typer.Option(None, "--git-commit", help="Pin to a specific commit instead of the branch tip."),
     command: Optional[str] = typer.Option(None, "--command", help="Override the harumi.toml command."),
     kernel: Optional[str] = typer.Option(None, "--kernel", help="Kernel to run on (see `harumi specs`), overriding the project's."),
@@ -5846,6 +5986,7 @@ def schedules_update(
     org: Optional[str] = _ORG,
 ) -> None:
     """Partially update a cron schedule. Only provided fields are changed."""
+    _one_ref(git_tag=git_tag, git_branch=git_branch, git_commit=git_commit)
     project_id = _resolve_project(project)
     client = _get_client(api_url=api_url, org=org)
 
@@ -5856,6 +5997,8 @@ def schedules_update(
         body["start_at"] = start_at
     if git_branch:
         body["git_branch"] = git_branch
+    if git_tag:
+        body["git_tag"] = git_tag
     if git_commit:
         body["git_commit"] = git_commit
     if command:
@@ -5905,7 +6048,7 @@ def schedules_rm(
     if not yes:
         try:
             sc = client.get_schedule(project_id, schedule_id)
-            what = f"'{_printable(sc.cron)}' on {_printable(sc.git_branch)}" + (f" running {_printable(sc.command)}" if sc.command else "") + f" ({schedule_id[:8]})"
+            what = f"'{_printable(sc.cron)}' on {_printable(_ref_label(sc.git_branch, sc.git_tag))}" + (f" running {_printable(sc.command)}" if sc.command else "") + f" ({schedule_id[:8]})"
         except ApiError:
             pass  # the delete below says what is wrong; the question can do without the description
     _confirm(f"Delete schedule {what}? It stops firing for good. This cannot be undone.", yes=yes)
@@ -6548,7 +6691,7 @@ _PANELS: dict[str, list[str]] = {
     # `blueprints` and `specs` are lists you look things up in before `new` and `run`, so they sit with them.
     "Get started": ["login", "start", "new", "import", "clone", "link", "blueprints"],
     "Run and results": ["run", "runs", "compare", "check", "specs", "usage"],
-    "Project": ["projects", "files", "dashboard", "share", "datasources", "schedules", "secrets", "memories", "skills"],
+    "Project": ["projects", "files", "dashboard", "share", "datasources", "tags", "schedules", "secrets", "memories", "skills"],
     "Account and team": ["whoami", "logout", "profile", "org", "agent-skills"],
     "Help and updates": ["status", "whats-new"],
 }
@@ -6587,7 +6730,15 @@ _EXAMPLES: dict[str, list[tuple[str, str]]] = {
         ("harumi run", "run your working tree, no commit needed"),
         ("harumi run --watch", "stay and follow it until it ends"),
         ("harumi run --branch main --watch", "run a branch as it is on the server"),
+        ("harumi run --tag prod --watch", "run whatever the prod tag points at"),
     ],
+    "tags list": [("harumi tags list", ""), ("harumi tags list --json", "for scripts")],
+    "tags set": [
+        ("harumi tags set prod", "label the branch you are on, once it is pushed"),
+        ("harumi tags set prod --to release-2", "label another branch"),
+        ("harumi tags set prod --to 3f2a9c1e", "label a commit"),
+    ],
+    "tags rm": [("harumi tags rm prod", "")],
     "runs list": [("harumi runs list", ""), ("harumi runs list --all --limit 50", ""), ("harumi runs list --json", "for scripts")],
     "runs get": [("harumi runs get", "the latest run"), ("harumi runs get 3f2a9c1e", "the first 8 characters are enough")],
     "runs cancel": [("harumi runs cancel 3f2a9c1e", "")],
@@ -6603,7 +6754,11 @@ _EXAMPLES: dict[str, list[tuple[str, str]]] = {
         ('harumi datasources query wh --sql "SELECT * FROM orders" --limit 20', ""),
         ('harumi datasources query wh --sql "SELECT 1" --csv out.csv', "to a file"),
     ],
-    "schedules add": [('harumi schedules add --cron "0 9 * * *"', "every day at 09:00 UTC"), ('harumi schedules add --cron "*/30 * * * *"', "every 30 minutes")],
+    "schedules add": [
+        ('harumi schedules add --cron "0 9 * * *"', "every day at 09:00 UTC"),
+        ('harumi schedules add --cron "*/30 * * * *"', "every 30 minutes"),
+        ('harumi schedules add --cron "0 9 * * *" --git-tag prod', ""),
+    ],
     "secrets set": [("harumi secrets set GUROBI_LICENSE", "asks for the value; never a flag")],
     "memories add": [('harumi memories add "Costs are in euros"', ""), ('harumi memories add "Costs are in euros" --mode always', "in every chat")],
     "org invite": [("harumi org invite Acme --email ana@example.com", ""), ("harumi org invite Acme --email ana@example.com --role admin", "")],

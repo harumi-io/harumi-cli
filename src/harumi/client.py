@@ -27,6 +27,7 @@ from harumi.errors import (
 )
 from harumi.models import (
     BranchInfo,
+    TagInfo,
     BlueprintSummary,
     ConnectionTestResponse,
     CreditUsage,
@@ -486,6 +487,27 @@ class Client:
     def delete_repo_branch(self, project_id: str, name: str) -> None:
         self.api.request("DELETE", f"/projects/{project_id}/repo/branches/{_q(name)}")
 
+    # -- Tags: movable labels on a commit (`prod`) that runs and schedules can follow ---
+
+    def list_repo_tags(self, project_id: str) -> list[TagInfo]:
+        response = self.api.request("GET", f"/projects/{project_id}/repo/tags")
+        return [TagInfo.model_validate(t) for t in response.json()]
+
+    def set_repo_tag(
+        self, project_id: str, name: str, target: str, message: Optional[str] = None
+    ) -> TagInfo:
+        """Point `name` at `target` (a branch or commit SHA): creates the tag, or moves it."""
+        body: dict[str, Any] = {"target": target}
+        if message:
+            body["message"] = message
+        response = self.api.request(
+            "PUT", f"/projects/{project_id}/repo/tags/{_q(name)}", json=body
+        )
+        return TagInfo.model_validate(response.json())
+
+    def delete_repo_tag(self, project_id: str, name: str) -> None:
+        self.api.request("DELETE", f"/projects/{project_id}/repo/tags/{_q(name)}")
+
     def promote_repo_branch(
         self,
         project_id: str,
@@ -621,13 +643,16 @@ class Client:
         command: Optional[str] = None,
         kernel_spec: Optional[str] = None,
         source: str = "cli",
+        tag: Optional[str] = None,
     ) -> ProjectExecuteResponse:
-        """Queue a git-ref-based run for a project."""
+        """Queue a git-ref-based run for a project. `tag` runs the commit a tag points at."""
         body: dict[str, Any] = {"source": source}
         if branch:
             body["branch"] = branch
         if commit:
             body["commit"] = commit
+        if tag:
+            body["tag"] = tag
         if command:
             body["command"] = command
         if kernel_spec:

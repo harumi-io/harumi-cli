@@ -121,6 +121,18 @@ class BranchInfo(BaseModel):
     is_live: bool = False
 
 
+class TagInfo(BaseModel):
+    """One entry from GET /projects/{id}/repo/tags: a movable label (like `prod`)
+    on one commit. A run or schedule that names a tag runs the commit it points at."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    commit_sha: Optional[str] = None
+    message: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
 class PromoteResult(BaseModel):
     """Response from POST /projects/{id}/repo/promote."""
 
@@ -306,6 +318,8 @@ class ProjectRun(BaseModel):
     run_type: Optional[str] = None
     source: Optional[str] = None
     git_branch: Optional[str] = None
+    # Set when the run was started from a tag; git_commit is then what it resolved to.
+    git_tag: Optional[str] = None
     git_commit: Optional[str] = None
     command: Optional[str] = None
     kernel_spec: Optional[str] = None
@@ -399,7 +413,9 @@ class Schedule(BaseModel):
     project_id: str
     cron: str
     start_at: Optional[datetime] = None
-    git_branch: str = "main"
+    # A schedule follows a branch or a tag, never both: git_branch is None for a tag.
+    git_branch: Optional[str] = "main"
+    git_tag: Optional[str] = None
     git_commit: Optional[str] = None
     command: Optional[str] = None
     kernel_spec: str = "or_python_small"
