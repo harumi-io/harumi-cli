@@ -1105,7 +1105,7 @@ def test_import_never_overwrites_an_existing_manifest(api, git_ops, tmp_path):
 def test_import_shows_a_folder_name_with_brackets_as_typed(api, git_ops, tmp_path):
     """`Creating project route [v2]...` lost its `[v2]`: rich read it as a tag. (A `[/x]` closing tag cannot be in
     a folder name, since `/` separates path parts; that case is covered where the name is plain text, in
-    `test_blueprints.py`.)"""
+    `test_examples.py`.)"""
     from harumi.config import save_git_token
 
     save_git_token("gitea-token", username="dev@harumi.test")

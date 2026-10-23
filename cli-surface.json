@@ -57,48 +57,6 @@
       ]
     },
     {
-      "path": "blueprints",
-      "help": "List project blueprints.",
-      "params": [
-        {
-          "opts": [
-            "--json"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "boolean",
-          "required": false,
-          "multiple": false,
-          "default": false,
-          "help": "Print JSON on stdout instead of a table, for scripts."
-        },
-        {
-          "opts": [
-            "--api-url"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Use another harumi-api (self-hosted or local)."
-        },
-        {
-          "opts": [
-            "--org"
-          ],
-          "secondary_opts": [],
-          "kind": "option",
-          "type": "str",
-          "required": false,
-          "multiple": false,
-          "default": null,
-          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
-        }
-      ]
-    },
-    {
       "path": "check",
       "help": "Report everything blocking this project from running, before you run it.",
       "params": [
@@ -1287,6 +1245,48 @@
       ]
     },
     {
+      "path": "examples",
+      "help": "List example projects: finished Harumi projects you can start a copy of with `new --example`.",
+      "params": [
+        {
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Print JSON on stdout instead of a table, for scripts."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
+    },
+    {
       "path": "files get",
       "help": "Download a file to a local path.",
       "params": [
@@ -2147,7 +2147,7 @@
         },
         {
           "opts": [
-            "--blueprint"
+            "--example"
           ],
           "secondary_opts": [],
           "kind": "option",
@@ -2155,7 +2155,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Blueprint slug to seed the project from (see `harumi blueprints`, optional)."
+          "help": "Start from a copy of this example (a slug from `harumi examples`, optional)."
         },
         {
           "opts": [

@@ -87,7 +87,7 @@ TIERS: dict[str, tuple[str, str]] = {
     "profile set": (MANUAL, "would mutate the real signed-in user's name/bio"),
     # -- discovery ------------------------------------------------------------
     "specs": (READ, "proves real API reachability"),
-    "blueprints": (READ, ""),
+    "examples": (READ, ""),
     # -- organizations --------------------------------------------------------
     "org list": (READ, ""),
     "org members": (READ, ""),
@@ -217,7 +217,7 @@ PLAN: tuple[Step, ...] = (
     Step("status"),
     Step("whats-new"),
     Step("specs"),
-    Step("blueprints"),
+    Step("examples"),
     Step("org list"),
     # Skipped automatically for a personal-workspace session, where {org} is empty.
     Step("org members", ("{org}",)),

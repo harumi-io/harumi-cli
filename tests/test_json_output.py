@@ -139,7 +139,7 @@ COMMANDS = [
     ["org", "list"],
     ["org", "members", ORG],
     ["specs"],
-    ["blueprints"],
+    ["examples"],
     ["usage"],
     ["whoami"],
 ]

@@ -1,6 +1,6 @@
 ---
 name: harumi-cli
-description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to select the backend environment (production vs internal staging), start a new project, import an existing folder of code as a new project, clone an existing project locally, bind a directory to a project, edit the project's repo with git in a clone, install preset skills from the Harumi skill library, inspect, cancel and download runs, manage the project's dashboard widgets and public share link, manage datasources, schedules, secrets, organizations, and your profile. Use when the user wants to run, import, or debug a local script against a Harumi project, mentions `harumi start`, `harumi new`, `harumi import`, `harumi clone`, `harumi link`, `harumi run`, `harumi runs`, `harumi check`, `harumi dashboard`, `harumi share`, `harumi blueprints`, `harumi env`, `harumi projects`, `harumi datasources`, `harumi schedules`, `harumi secrets`, `harumi memories`, `harumi skills`, `harumi agent-skills`, `harumi org`, `harumi profile`, asks about switching between production and staging, creating a new Harumi project, turning an existing local folder/repo into a Harumi project, getting an existing Harumi project's code onto their machine, Harumi kernel specs, project blueprints, Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, managing environment variables/secrets, organization members, dashboard widgets (metric/table/line-chart/bar-chart/gantt-chart), `dashboard.toml`, `dashboard/*.toml`, multiple dashboards per project, the dashboard picker, `output.json`, what components/widgets the platform dashboard can render, sharing/publishing a project's dashboard publicly, or needs to fetch/download results or files from a Harumi run/repo.
+description: Guide for using the `harumi` CLI to run local optimization/solver code (Gurobi, OR-Tools, plain Python) on Harumi's infrastructure via the project's self-hosted Gitea repo, to select the backend environment (production vs internal staging), start a new project, import an existing folder of code as a new project, clone an existing project locally, bind a directory to a project, edit the project's repo with git in a clone, install preset skills from the Harumi skill library, inspect, cancel and download runs, manage the project's dashboard widgets and public share link, manage datasources, schedules, secrets, organizations, and your profile. Use when the user wants to run, import, or debug a local script against a Harumi project, mentions `harumi start`, `harumi new`, `harumi import`, `harumi clone`, `harumi link`, `harumi run`, `harumi runs`, `harumi check`, `harumi dashboard`, `harumi share`, `harumi examples`, `harumi env`, `harumi projects`, `harumi datasources`, `harumi schedules`, `harumi secrets`, `harumi memories`, `harumi skills`, `harumi agent-skills`, `harumi org`, `harumi profile`, asks about switching between production and staging, creating a new Harumi project, turning an existing local folder/repo into a Harumi project, getting an existing Harumi project's code onto their machine, Harumi kernel specs, example projects (formerly called blueprints), Gitea remotes, scratch branches, database connections, running SQL queries against a project datasource, scheduling/cron runs, managing environment variables/secrets, organization members, dashboard widgets (metric/table/line-chart/bar-chart/gantt-chart), `dashboard.toml`, `dashboard/*.toml`, multiple dashboards per project, the dashboard picker, `output.json`, what components/widgets the platform dashboard can render, sharing/publishing a project's dashboard publicly, or needs to fetch/download results or files from a Harumi run/repo.
 ---
 
 # Harumi CLI
@@ -36,7 +36,7 @@ Every project starts one of three ways. Pick the command that matches what the u
 
 ```bash
 harumi start                       # interactive: asks which of the three, then dispatches
-harumi new "My Project" [--dir PATH] [--blueprint SLUG] [--customer-id ID]
+harumi new "My Project" [--dir PATH] [--example SLUG] [--customer-id ID]
 harumi import [PATH] [--project-name NAME] [--from-git URL]
 harumi clone <PROJECT_ID> [--dir PATH]
 ```
@@ -53,7 +53,7 @@ harumi link --project <PROJECT_ID>
 
 > **`harumi import` creates a NEW project.** It is not how you send edits to a project that already exists — that is `git push harumi <branch>` from the clone. Never run `import` on a folder that is already a clone.
 
-Find project IDs with `harumi projects list`. Run `harumi blueprints` to list available `--blueprint` values for `harumi new`.
+Find project IDs with `harumi projects list`. Run `harumi examples` to list the `--example` values for `harumi new` (finished projects you can start a copy of).
 
 ## Run and inspect code
 

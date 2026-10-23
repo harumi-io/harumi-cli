@@ -11,7 +11,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [profile](#profile)
 - [usage](#usage)
 - [specs](#specs)
-- [blueprints](#blueprints)
+- [examples](#examples)
 - [projects](#projects)
 - [new](#new)
 - [import](#import)
@@ -121,13 +121,13 @@ harumi specs [--json] [--api-url URL] [--org ORG]
 
 `--json` is an array of `{name, display_name, language, description, cpu, memory, gpu, subscription_required}`. Lists kernel specs from `GET /sandbox/specs` as a table of `name`, `cpu`, `memory`, `gpu` (yes/no), `plan` (`any` = every plan includes it, `paid` = it needs a subscription) and `label`. `name` is what you pass to `run --kernel` and `schedules add/update --kernel`; it is never shortened, whatever the terminal width. It ends with a line saying how to use one. An empty list prints `No kernels are available to this workspace.`
 
-## `blueprints`
+## `examples`
 
 ```
-harumi blueprints [--json] [--api-url URL] [--org ORG]
+harumi examples [--json] [--api-url URL] [--org ORG]
 ```
 
-`--json` is an array of those three fields. Lists project blueprints (`slug`, `name`, `description`) from `GET /blueprints`. Pass a blueprint's `slug` as `new --blueprint`.
+`--json` is an array of those three fields. Lists example projects (`slug`, `name`, `description`): finished Harumi projects you can start a copy of. Pass an example's `slug` as `new --example`. They were called blueprints until 0.12.0 and the API still calls them that (`GET /blueprints`), so that is what is asked for. `harumi blueprints` and `new --blueprint` still work, hidden, with a `deprecated:` line on stderr, and are removed in 0.13.0.
 
 ## `projects`
 
@@ -152,13 +152,13 @@ Three journeys, three commands — plus the narrower `link` primitive and the in
 ### `new`
 
 ```
-harumi new [NAME] [--dir PATH] [--customer-id ID] [--personal] [--blueprint SLUG] [--no-clone]
+harumi new [NAME] [--dir PATH] [--customer-id ID] [--personal] [--example SLUG] [--no-clone]
           [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
 Use when there's nothing yet. With `NAME` omitted it asks for one at a terminal; with no terminal it fails showing `harumi new "My Project"`. When it finishes it prints the exact next step (`Next: cd my-project then harumi run --watch`, with a relative path when that is shorter).
 
-1. `POST /projects` to create the project (seeds a runnable `harumi.toml` + `main.py` + `dashboard.toml` server-side, or a blueprint's files if `--blueprint` is given — see `harumi blueprints`).
+1. `POST /projects` to create the project (seeds a runnable `harumi.toml` + `main.py` + `dashboard.toml` server-side, or a copy of an example if `--example` is given — see `harumi examples`; a slug that is not in the list is refused before anything is created, with the nearest one suggested).
 2. `GET /projects/{id}/repo` to fetch the Gitea repo.
 3. Clones that repo into `--dir` (default: `./<slugified-name>`, refuses to clone into an existing non-empty directory).
 4. Binds the clone the same way `link` does (writes `.harumi/config.json`, configures the `harumi` git remote).
@@ -541,7 +541,7 @@ harumi org use [ORG | --personal]
 
 A table printed for a person never rewrites what is stored: `[red]` in a branch or project name is shown as typed (Rich would have taken it for a colour), and control characters are removed.
 
-Every command that reads data takes `--json`: `projects list|get`, `runs list|get`, `files ls`, `share list|get`, `datasources list|get`, `schedules list|get`, `secrets list`, `memories list`, `org list|members`, `specs`, `blueprints`, `usage`, `whoami`, and `compare` (which prints the API's response unchanged). `run --json` is below.
+Every command that reads data takes `--json`: `projects list|get`, `runs list|get`, `files ls`, `share list|get`, `datasources list|get`, `schedules list|get`, `secrets list`, `memories list`, `org list|members`, `specs`, `examples`, `usage`, `whoami`, and `compare` (which prints the API's response unchanged). `run --json` is below.
 
 ```bash
 harumi run --watch --json | jq -e '.succeeded'      # exit 1 if the run failed or the JSON says it did not succeed
@@ -690,8 +690,8 @@ client.create_secret(binding.project_id, "API_KEY", "s3cr3t")
 # Organizations
 orgs = client.list_organizations()
 
-# Blueprints
-blueprints = client.list_blueprints()
+# Examples (the API, and so the library, still call them blueprints)
+examples = client.list_blueprints()
 
 # Dashboard spec discovery, widget contract + validation
 from harumi.dashboard import (

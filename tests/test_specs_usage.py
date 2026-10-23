@@ -210,7 +210,7 @@ def reference_section(heading: str, until: str) -> str:
 
 @pytest.mark.parametrize(
     "command, heading, until",
-    [("specs", "## `specs`", "## `blueprints`"), ("usage", "## `usage`", "## `specs`"), ("compare", "## `compare`", "## Editing the repo")],
+    [("specs", "## `specs`", "## `examples`"), ("usage", "## `usage`", "## `specs`"), ("compare", "## `compare`", "## Editing the repo")],
 )
 def test_every_option_of_these_commands_is_in_the_skill_reference(command, heading, until):
     """An agent reads the reference to learn what the CLI can do; an option missing from it is one it
@@ -225,7 +225,7 @@ def test_every_option_of_these_commands_is_in_the_skill_reference(command, headi
 
 def test_the_reference_describes_the_new_behaviour_not_the_old():
     compare = reference_section("## `compare`", "## Editing the repo")
-    specs = reference_section("## `specs`", "## `blueprints`")
+    specs = reference_section("## `specs`", "## `examples`")
 
     assert "never prompts" in compare and "RUN_ID" in compare and "harumi runs download" in compare
     # The old *table* column names. `--json` keeps the API's field names for a script, and says so.

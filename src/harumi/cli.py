@@ -7,9 +7,9 @@
     harumi whats-new [--all]
     harumi profile set
     harumi specs
-    harumi blueprints
+    harumi examples
     harumi start
-    harumi new <NAME> [--blueprint <slug>] [--personal] [--customer-id <id>] [--dir <path>] [--no-clone]
+    harumi new <NAME> [--example <slug>] [--personal] [--customer-id <id>] [--dir <path>] [--no-clone]
     harumi import [path] [--from-git <url>] [--project-name <name>]
     harumi clone <PROJECT_ID> [--dir <path>]
     harumi link --project <id> [--api-url <url>] [--git-url <url>]
@@ -283,7 +283,7 @@ def _removed_message(ctx, args: list[str]):
     for count in range(len(args), 0, -1):
         key = " ".join(["harumi", *parents, *args[:count]])
         if key in _RETIRED:
-            return f"`{key}` was removed in {_REMOVAL_VERSION}. Use: {_RETIRED[key]}"
+            return f"`{key}` was removed in {_removal_version(key)}. Use: {_RETIRED[key]}"
     return None
 
 
@@ -569,6 +569,19 @@ def _fail(message: str) -> None:
 # The release that takes the deprecated names out (the 0.11 changelog promises it, and every warning says it).
 _REMOVAL_VERSION = "0.12.0"
 
+# Names deprecated later than 0.11 go at a later release: a name cannot be deprecated and removed in the same
+# release, since nobody would see the warning first. Only the exceptions are listed; everything else in `_RETIRED`
+# goes at `_REMOVAL_VERSION`.
+_REMOVED_IN: dict[str, str] = {
+    "harumi blueprints": "0.13.0",  # renamed to `examples` in 0.12.0
+    "harumi new --blueprint": "0.13.0",  # renamed to `--example` in 0.12.0
+}
+
+
+def _removal_version(key: str) -> str:
+    """The release that removes `key`."""
+    return _REMOVED_IN.get(key, _REMOVAL_VERSION)
+
 # Every name that is going away -> what to use instead. Filled by `_deprecated`, so the warning a name prints
 # while it works and the answer it gets once it is gone (`_Group.resolve_command`) are the same text and cannot
 # drift apart. When the names are removed, delete their commands and keep these entries: they are what tells a
@@ -580,6 +593,7 @@ _RETIRED: dict[str, str] = {
     "harumi config": "harumi org use <ORG_ID>",
     # Not a command: an option that is still accepted (`run -o`), kept here so it is listed with the rest.
     "harumi run --output-dir": "harumi runs download [RUN_ID] -o DIR",
+    "harumi new --blueprint": "harumi new <NAME> --example <slug>",
 }
 
 
@@ -589,7 +603,7 @@ def _warn_deprecated(old: str, use: str) -> None:
     # soft_wrap: the replacement is a command line someone will copy, so it must
     # not be broken across lines at the terminal width.
     err_console.print(
-        f"[yellow]deprecated:[/yellow] `{escape(old)}` is removed in {_REMOVAL_VERSION}. Use: {escape(use)}",
+        f"[yellow]deprecated:[/yellow] `{escape(old)}` is removed in {_removal_version(old)}. Use: {escape(use)}",
         soft_wrap=True,
     )
 
@@ -2230,27 +2244,31 @@ def specs(
 
 @app.command()
 @_handle_errors
-def blueprints(
+def examples(
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
-    """List project blueprints. Pass a blueprint's slug as `new --blueprint`."""
+    """List example projects: finished Harumi projects you can start a copy of with `new --example`.
+
+    Called blueprints until 0.12.0. The API still does (`GET /blueprints`), so that is what is asked for; only
+    what a person types and reads is renamed here.
+    """
     client = _get_client(api_url=api_url, org=org)
     items = client.list_blueprints()
     if as_json:
         _emit_json([json_out.blueprint(b) for b in items])
         return
     if not items:
-        console.print("No blueprints found. [bold]harumi new <NAME>[/bold] still creates a project, from the default scaffold.")
+        console.print("No examples found. [bold]harumi new <NAME>[/bold] still creates a project, from the default scaffold.")
         return
 
     table = Table("slug", "name", "description")
-    table.columns[0].no_wrap = True  # the slug is what you copy into `new --blueprint`
+    table.columns[0].no_wrap = True  # the slug is what you copy into `new --example`
     for b in items:
         table.add_row(_cell(b.slug), _cell(b.name), _cell(b.description))
     console.print(table)
-    console.print("[dim]Start one with [bold]harumi new <NAME> --blueprint <slug>[/bold].[/dim]")
+    console.print("[dim]Start a copy of one with [bold]harumi new <NAME> --example <slug>[/bold].[/dim]")
 
 
 # ---------------------------------------------------------------------------
@@ -2738,8 +2756,11 @@ def new(
         "--personal",
         help="Create in your personal workspace, ignoring the configured org.",
     ),
+    example: Optional[str] = typer.Option(
+        None, "--example", help="Start from a copy of this example (a slug from `harumi examples`, optional)."
+    ),
     blueprint: Optional[str] = typer.Option(
-        None, "--blueprint", help="Blueprint slug to seed the project from (see `harumi blueprints`, optional)."
+        None, "--blueprint", hidden=True, help="Deprecated: use --example. (Examples were called blueprints.)"
     ),
     no_clone: bool = typer.Option(
         False,
@@ -2754,7 +2775,7 @@ def new(
 
     Use this when you have nothing yet. Creates the project (which
     provisions a Harumi Git repo pre-seeded with a runnable `harumi.toml` +
-    `main.py` + `dashboard.toml`, or a blueprint's files if `--blueprint` is
+    `main.py` + `dashboard.toml`, or a copy of an example if `--example` is
     given), then clones that repo into a local directory and binds it — so
     `harumi run` works immediately, no manual push required.
 
@@ -2762,6 +2783,10 @@ def new(
     Project already exists in Harumi (web app or a teammate made it)? Use
     `harumi clone <PROJECT_ID>`.
     """
+    if example and blueprint:
+        _fail("Use [bold]--example[/bold] only: [bold]--blueprint[/bold] is its old name, and two were given.")
+    if blueprint:
+        _warn_deprecated("harumi new --blueprint", _RETIRED["harumi new --blueprint"])
     if name is None:
         if not interactive.is_interactive():
             _fail("Give the project a name: [bold]harumi new \"My Project\"[/bold].")
@@ -2771,7 +2796,7 @@ def new(
         dir=dir,
         customer_id=customer_id,
         personal=personal,
-        blueprint=blueprint,
+        blueprint=example or blueprint,
         clone=not no_clone,
         api_url=api_url,
         git_url=git_url,
@@ -2814,8 +2839,8 @@ def _require_entitled_workspace(client, customer_id: Optional[str]) -> None:
         )
 
 
-def _checked_blueprint(client, slug: Optional[str]) -> Optional[str]:
-    """The blueprint slug to send, or a refusal that names the nearest real one.
+def _checked_example(client, slug: Optional[str]) -> Optional[str]:
+    """The example's slug to send, or a refusal that names the nearest real one.
 
     harumi-api already checks the slug before it writes anything, so a typo never leaves a project behind; what
     it sends back is `HTTP 400`. This asks first, so the message can say what exists. It is advisory: if the list
@@ -2833,7 +2858,7 @@ def _checked_blueprint(client, slug: Optional[str]) -> Optional[str]:
         return by_lower[slug.lower()]
     close = difflib.get_close_matches(slug.lower(), list(by_lower), n=1, cutoff=0.6)
     hint = f" Did you mean {escape(by_lower[close[0]])}?" if close else ""
-    _fail(f"There is no blueprint called {escape(repr(slug))}.{hint} See them with [bold]harumi blueprints[/bold].")
+    _fail(f"There is no example called {escape(repr(slug))}.{hint} See them with [bold]harumi examples[/bold].")
     return slug
 
 
@@ -2856,7 +2881,7 @@ def _new_impl(
         _fail("--dir only applies when cloning. Drop --no-clone, or drop --dir.")
 
     client = _get_client(api_url=api_url, git_url=git_url, org=org)
-    blueprint = _checked_blueprint(client, blueprint)
+    blueprint = _checked_example(client, blueprint)
     _require_entitled_workspace(client, None if personal else (customer_id or client.config.org_id))
 
     console.print(f"Creating project [bold]{escape(name)}[/bold]...")
@@ -3061,7 +3086,7 @@ def projects_create(
         help="Create in your personal workspace, ignoring the configured org.",
     ),
     blueprint: Optional[str] = typer.Option(
-        None, "--blueprint", help="Blueprint slug to seed the project from (see `harumi blueprints`, optional)."
+        None, "--blueprint", help="Example slug to seed the project from (see `harumi examples`, optional)."
     ),
     api_url: Optional[str] = _API_URL,
     git_url: Optional[str] = _GIT_URL,
@@ -6533,6 +6558,7 @@ def org_rm_member(
 
 app.command("push", hidden=True)(_deprecated("harumi push", "harumi import")(import_project))
 skill_app.command("install")(_deprecated("harumi skill install", "harumi agent-skills install")(agent_skills_install))
+app.command("blueprints", hidden=True)(_deprecated("harumi blueprints", "harumi examples")(examples))
 _hidden_alias(projects_app, "delete", projects_rm, "harumi projects delete", "harumi projects rm")
 _hidden_alias(share_app, "remove", share_rm, "harumi share remove", "harumi share rm")
 _hidden_alias(datasources_app, "remove", datasources_rm, "harumi datasources remove", "harumi datasources rm")
@@ -6545,8 +6571,8 @@ _hidden_alias(org_app, "remove", org_rm_member, "harumi org remove", "harumi org
 # one place; a test fails if a visible command is missing from it, or the table names one that does not
 # exist. Both the panels and the commands within them are listed in the order shown (see `_Group.list_commands`).
 _PANELS: dict[str, list[str]] = {
-    # `blueprints` and `specs` are lists you look things up in before `new` and `run`, so they sit with them.
-    "Get started": ["login", "start", "new", "import", "clone", "link", "blueprints"],
+    # `examples` and `specs` are lists you look things up in before `new` and `run`, so they sit with them.
+    "Get started": ["login", "start", "new", "import", "clone", "link", "examples"],
     "Run and results": ["run", "runs", "compare", "check", "specs", "usage"],
     "Project": ["projects", "files", "dashboard", "share", "datasources", "schedules", "secrets", "memories", "skills"],
     "Account and team": ["whoami", "logout", "profile", "org", "agent-skills"],
@@ -6579,7 +6605,12 @@ _assign_panels()
 # those are always prompted for.
 _EXAMPLES: dict[str, list[tuple[str, str]]] = {
     "login": [("harumi login", ""), ("harumi login --signup", "first time here"), ("harumi login --email ana@example.com", "")],
-    "new": [('harumi new "Route planner"', ""), ('harumi new "Route planner" --dir ~/code/routes', "clone it somewhere else")],
+    "new": [
+        ('harumi new "Route planner"', ""),
+        ('harumi new "Route planner" --dir ~/code/routes', "clone it somewhere else"),
+        ('harumi new "Demo" --example getting-started', "a copy of an example"),
+    ],
+    "examples": [("harumi examples", "finished projects you can copy"), ("harumi examples --json", "for scripts")],
     "import": [("harumi import ./my-solver", "shows what would be uploaded first"), ('harumi import . --project-name "Route planner"', "")],
     "clone": [("harumi clone", "pick from your projects"), ("harumi clone PROJECT_ID --dir ~/code/routes", "")],
     "link": [("harumi link --project PROJECT_ID", "inside a checkout you already have")],
@@ -6656,7 +6687,7 @@ def _retired_help(key: str, text: str) -> str:
 
     The replacement goes through `escape`: help is rich markup, and `[RUN_ID]` would be read as styling and vanish.
     """
-    return f"Deprecated: removed in {_REMOVAL_VERSION}. Use: {escape(_RETIRED[key])}\n\n{text}"
+    return f"Deprecated: removed in {_removal_version(key)}. Use: {escape(_RETIRED[key])}\n\n{text}"
 
 
 def _polish_help() -> None:

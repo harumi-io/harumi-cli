@@ -36,8 +36,19 @@ def quiet(tmp_path, monkeypatch):
     monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "home" / "credentials.json")
 
 
-def hidden_leaves(root=None):
-    """(path, command) for every command that is hidden itself or sits under a hidden group."""
+def version_tuple(text: str):
+    return tuple(int(part) for part in re.findall(r"\d+", text)[:3])
+
+
+def due_by(path, release: str) -> bool:
+    """Is the old name at `path` removed by `release`? Most go at the default removal version; a few, deprecated later
+    (`blueprints`), go at their own, and are still here after the release that renamed them."""
+    return version_tuple(cli._removal_version("harumi " + " ".join(path))) <= version_tuple(release)
+
+
+def hidden_leaves(root=None, by=None):
+    """(path, command) for every command that is hidden itself or sits under a hidden group. With `by`, only the
+    ones the release `by` removes."""
     root = root or get_command(cli.app)
     found = []
 
@@ -46,7 +57,7 @@ def hidden_leaves(root=None):
             here = hidden or sub.hidden
             if hasattr(sub, "commands"):
                 walk(sub, path + (name,), here)
-            elif here and path + (name,) not in NOT_DEPRECATED:
+            elif here and path + (name,) not in NOT_DEPRECATED and (by is None or due_by(path + (name,), by)):
                 found.append((path + (name,), sub))
 
     walk(root, (), False)
@@ -66,7 +77,8 @@ def required_args(command):
     return out
 
 
-OLD_NAMES = [pytest.param(path, id=" ".join(path)) for path, _ in hidden_leaves()]
+OLD_NAMES = [pytest.param(path, id=" ".join(path)) for path, _ in hidden_leaves()]  # every old name, due or not
+REMOVED_IN_THIS_RELEASE = [pytest.param(path, id=" ".join(path)) for path, _ in hidden_leaves(by=cli._REMOVAL_VERSION)]
 
 
 # -- one table ----------------------------------------------------------------------------------------------------
@@ -99,7 +111,7 @@ def test_an_old_name_warns_on_stderr_and_never_on_stdout(path):
     """A script pipes stdout; a warning there would corrupt what it parses."""
     result = runner.invoke(cli.app, [*path, *required_args(dict(hidden_leaves())[path])])
 
-    assert "deprecated:" in result.stderr and cli._REMOVAL_VERSION in result.stderr
+    assert "deprecated:" in result.stderr and cli._removal_version("harumi " + " ".join(path)) in result.stderr
     assert "deprecated" not in result.stdout
 
 
@@ -107,9 +119,10 @@ def test_an_old_name_warns_on_stderr_and_never_on_stdout(path):
 def test_an_old_name_says_in_its_help_that_it_is_going_away(path):
     """25 of 29 said nothing, so `harumi push --help` read as if push were the way to do it."""
     out = " ".join(runner.invoke(cli.app, [*path, "--help"]).stdout.split())
-    use = cli._RETIRED["harumi " + " ".join(path)]
+    key = "harumi " + " ".join(path)
+    use = cli._RETIRED[key]
 
-    assert f"Deprecated: removed in {cli._REMOVAL_VERSION}" in out
+    assert f"Deprecated: removed in {cli._removal_version(key)}" in out
     assert " ".join(use.split()) in out  # all of it, brackets too: `[RUN_ID]` must not be swallowed as styling
 
 
@@ -193,10 +206,11 @@ def test_a_replacement_is_never_itself_retired():
 # -- the day after it is removed -----------------------------------------------------------------------------------------
 
 
-def with_the_old_names_gone():
-    """The command tree as 0.12.0 will have it: every hidden deprecated command taken out."""
+def with_the_old_names_gone(release=None):
+    """The command tree as `release` (default: 0.12.0) will have it: every hidden command that release removes
+    taken out. The ones renamed in 0.12.0 itself (`blueprints`) are still there, warning, until 0.13.0."""
     root = get_command(cli.app)
-    for path, _ in hidden_leaves(root):
+    for path, _ in hidden_leaves(root, by=release or cli._REMOVAL_VERSION):
         parent = root
         for name in path[:-1]:
             parent = parent.commands[name]
@@ -206,8 +220,8 @@ def with_the_old_names_gone():
     return root
 
 
-def what_it_says(args):
-    root = with_the_old_names_gone()
+def what_it_says(args, release=None):
+    root = with_the_old_names_gone(release)
     try:
         root.main(args=list(args), standalone_mode=False)
     except Exception as exc:  # click's UsageError, whichever click typer vendors
@@ -215,12 +229,12 @@ def what_it_says(args):
     raise AssertionError(f"{args} did not fail")
 
 
-@pytest.mark.parametrize("path", OLD_NAMES)
+@pytest.mark.parametrize("path", REMOVED_IN_THIS_RELEASE)
 def test_once_removed_an_old_name_says_what_replaced_it(path):
     key = "harumi " + " ".join(path)
     message = what_it_says(path)
 
-    assert f"`{key}` was removed in {cli._REMOVAL_VERSION}" in message
+    assert f"`{key}` was removed in {cli._removal_version(key)}" in message
     assert cli._RETIRED[key] in message  # the whole hint, not a guess at it
 
 
@@ -282,15 +296,43 @@ def test_a_name_that_is_still_a_real_command_is_untouched():
 # -- the promise is kept --------------------------------------------------------------------------------------------------
 
 
-def version_tuple(text: str):
-    return tuple(int(part) for part in re.findall(r"\d+", text)[:3])
-
-
 def still_here_after(removal_version: str):
     """The old names that should already be gone if `removal_version` has been reached."""
     if version_tuple(__version__) < version_tuple(removal_version):
         return []
-    return [" ".join(path) for path, _ in hidden_leaves()]
+    return [" ".join(path) for path, _ in hidden_leaves(by=removal_version)]
+
+
+def test_a_name_renamed_in_this_release_is_still_there_after_it():
+    """`blueprints` is deprecated in 0.12.0 and removed in 0.13.0. A tree built for 0.12.0 must still have it,
+    working and warning, or its users would meet the removal in the same release as the warning."""
+    root = with_the_old_names_gone()
+
+    assert "blueprints" in root.commands and root.commands["blueprints"].hidden
+    assert cli._removal_version("harumi blueprints") == "0.13.0" != cli._REMOVAL_VERSION
+
+
+def test_once_0_13_removes_blueprints_it_says_0_13_and_what_replaced_it():
+    """The answer a script gets the day after, built for the release that removes it. Tested with the version a
+    name is due at, not the default one, or a tombstone quoting the wrong release would pass."""
+    message = what_it_says(["blueprints"], release="0.13.0")
+
+    assert "`harumi blueprints` was removed in 0.13.0" in message and "harumi examples" in message
+    assert "0.12.0" not in message
+
+
+def test_in_the_0_12_tree_blueprints_still_works_rather_than_being_a_tombstone():
+    root = with_the_old_names_gone()
+
+    assert "blueprints" in root.commands
+
+
+def test_every_name_removed_later_is_deprecated_in_an_earlier_release_than_it_is_removed_in():
+    """A name cannot be deprecated and removed by the same release. Anything in `_REMOVED_IN` must be later than the
+    default (those were announced in 0.11), and later than the version now being built (nobody saw a warning)."""
+    for key, version in cli._REMOVED_IN.items():
+        assert version_tuple(version) > version_tuple(cli._REMOVAL_VERSION), key
+        assert key in cli._RETIRED, f"{key} has a removal version but is not in _RETIRED"
 
 
 def test_the_names_promised_gone_in_the_removal_version_are_gone_by_then():
@@ -300,10 +342,12 @@ def test_the_names_promised_gone_in_the_removal_version_are_gone_by_then():
     assert still_here_after(cli._REMOVAL_VERSION) == []
 
 
-def test_the_tripwire_does_fire_when_the_version_is_reached():
-    """Today it passes only because 0.11 is before 0.12. This is the same check with the removal version set to
-    the one we are on, to show it would catch the names being left behind."""
-    assert len(still_here_after(__version__)) >= 28
+def test_the_tripwire_does_fire_when_the_version_is_reached(monkeypatch):
+    """Today it passes only because 0.11 is before 0.12. The same check, run as if this were the release that
+    removes them (the installed version set to the removal version), must report every name left behind."""
+    monkeypatch.setattr(sys.modules[__name__], "__version__", cli._REMOVAL_VERSION)
+
+    assert len(still_here_after(cli._REMOVAL_VERSION)) >= 28
 
 
 def release_notes(version: str):
@@ -521,7 +565,8 @@ def test_the_changelog_lists_every_old_name_it_promised_to_remove():
     quoted = set(re.findall(r"`([^`]+)`", block))
     group_lines = {"repo", "skill", "config"}  # `harumi repo ...` covers all twelve
     unlisted = []
-    for path, _ in hidden_leaves():
+    # The names that release promised to remove, not the ones renamed since (those are announced in their own).
+    for path, _ in hidden_leaves(by=cli._REMOVAL_VERSION):
         full = " ".join(path)
         listed = full in quoted or path[-1] in quoted or (path[0] in group_lines and f"harumi {path[0]} ..." in quoted)
         if not listed:

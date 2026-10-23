@@ -77,7 +77,7 @@ def parse_with_click(line: str) -> None:
 
 
 EVERYDAY = [
-    "login", "new", "import", "clone", "link", "run", "runs list", "runs get", "runs cancel", "runs download",
+    "login", "new", "import", "clone", "link", "examples", "run", "runs list", "runs get", "runs cancel", "runs download",
     "compare", "check", "files put", "files get", "files ls", "files rm", "datasources add", "datasources query",
     "schedules add", "secrets set", "memories add", "org invite", "org role", "org use", "usage",
     "dashboard validate", "skills add", "agent-skills install", "profile set", "projects rm",

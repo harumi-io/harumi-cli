@@ -61,7 +61,7 @@ harumi dashboard validate --latest
 - `harumi dashboard` — look up the `dashboard.toml` widget reference (`widgets`) and validate a project's dashboard, including its `output.json` dot-paths, before pushing (`validate`).
 - `harumi share` — manage the project's public, unauthenticated dashboard links (several per project): add, enable/disable, rotate, and password-protect them.
 - `harumi whats-new` — release notes for the installed version (`--all` for the history). harumi also tells you, at most once a day and only in an interactive terminal, when a newer version is on PyPI.
-- `harumi blueprints` — list project blueprints to pass as `harumi new --blueprint`.
+- `harumi examples` — list example projects to pass as `harumi new --example`.
 - `harumi datasources` — CRUD project database connections, test them, and run read-only SQL queries against them.
 - `harumi schedules` — CRUD cron schedules that trigger git-ref runs.
 - `harumi secrets` — CRUD project-scoped environment variables.
