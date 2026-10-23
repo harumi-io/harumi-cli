@@ -94,24 +94,22 @@ class ApiClient:
         # Injectable for tests (httpx.MockTransport); None uses the real network.
         self.transport = transport
 
-    @staticmethod
-    def _refresh_token_in_use() -> Optional[str]:
-        """The refresh token of the session a request is about to be sent with.
+    def _signed(self) -> tuple[dict[str, str], Optional[str]]:
+        """(the request headers, the refresh token of the session they were signed with).
 
-        Recorded once the request is signed and before it is sent. If the server then says
-        401, renewal is judged against this, not against whatever the file holds by then:
-        another process may already have renewed, and its fresh token must be adopted, not
-        spent as if it were stale. Recorded *after* the headers are built because building
-        them can itself renew the session, and the request carries the renewed one.
+        If the server then says 401, renewal is judged against that refresh token, not against whatever the file
+        holds by then: another process or thread may already have renewed, and its fresh token must be adopted,
+        not spent as if it were stale. The two come from one read of the credentials (`auth.signing_session`):
+        read apart, a renewal in between paired the old access token with the new refresh token.
         """
-        return (auth.current_credentials() or {}).get("refresh_token") or None
-
-    def _headers(self) -> dict[str, str]:
-        token = auth.get_valid_access_token(self.config, allow_refresh=True, transport=self.transport)
+        token, refresh = auth.signing_session(self.config, transport=self.transport)
         headers = {"Authorization": f"Bearer {token}"}
         if self.config.org_id:
             headers["X-Organization"] = self.config.org_id
-        return headers
+        return headers, refresh
+
+    def _headers(self) -> dict[str, str]:
+        return self._signed()[0]
 
     def request(
         self,
@@ -141,10 +139,7 @@ class ApiClient:
         **kwargs: Any,
     ) -> httpx.Response:
         url = f"{self.config.api_url}{path}"
-        headers = self._headers()
-        # After the headers: building them can renew an expired session (rotating the
-        # refresh token), and what matters is the session this request was signed with.
-        sent_with = self._refresh_token_in_use()
+        headers, sent_with = self._signed()
         headers.update(kwargs.pop("headers", {}) or {})
 
         with transport_errors_as_api_error(), httpx.Client(
@@ -195,8 +190,7 @@ class ApiClient:
         url = f"{self.config.api_url}{path}"
         # Scoped for the credential work only. The caller's `with` body is theirs and must not run inside it.
         with environment_scope(self.config.environment):
-            headers = self._headers()
-            sent_with = self._refresh_token_in_use()  # after the headers: see `request`
+            headers, sent_with = self._signed()
 
         with httpx.Client(timeout=timeout or self.timeout, transport=self.transport) as client, ExitStack() as stack:
             # Only *opening* the stream means "could not reach harumi-api". A failure while the
@@ -214,7 +208,7 @@ class ApiClient:
                     raise NotAuthenticatedError(expired=True, environment=self.config.environment)
                 with environment_scope(self.config.environment):
                     auth.renew_session(self.config, sent_with, transport=self.transport)
-                    headers = self._headers()
+                    headers, _ = self._signed()
                 with transport_errors_as_api_error():
                     response = stack.enter_context(
                         client.stream(method, url, json=json, params=params, headers=headers)

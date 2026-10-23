@@ -336,7 +336,11 @@ def test_the_scope_is_live_during_the_call_and_gone_after_it():
 
 def test_many_threads_sharing_one_client_refresh_an_expired_login_once():
     """The docs promise a Client works on any thread. Six threads that all find the access token expired must spend
-    the single-use refresh token once between them (the credentials lock), not race and log each other out."""
+    the single-use refresh token once between them (the credentials lock), not race and log each other out.
+
+    This is a smoke test of the shape, not proof of the property: it failed about 1 run in 15 on Python 3.9 because
+    of a race it could not reliably trigger (see `tests/test_refresh_race.py`, which makes the interleaving
+    deterministic and is the real check)."""
     log_in("production", "OLD")
     used, guard, errors = [], threading.Lock(), []
 
