@@ -998,14 +998,14 @@ def git_ops(monkeypatch):
     """
     calls: dict[str, list[dict]] = {"clone": [], "ensure_remote": [], "push_folder": []}
 
-    def fake_clone_repo(*, clone_url, username, token, dest, remote="harumi"):
+    def fake_clone_repo(*, clone_url, dest, remote="harumi"):
         calls["clone"].append({"clone_url": clone_url, "dest": dest})
         Path(dest).mkdir(parents=True, exist_ok=True)
 
-    def fake_ensure_remote(*, clone_url, username, token, cwd):
+    def fake_ensure_remote(*, clone_url, cwd=None):
         calls["ensure_remote"].append({"clone_url": clone_url, "cwd": cwd})
 
-    def fake_push_folder(folder, *, clone_url, username, token, branch, message, exclude=()):
+    def fake_push_folder(folder, *, clone_url, branch, message, exclude=()):
         calls["push_folder"].append(
             {"folder": folder, "clone_url": clone_url, "branch": branch, "exclude": list(exclude)}
         )
@@ -2550,7 +2550,7 @@ def git(monkeypatch):
     monkeypatch.setattr(cli, "has_unpushed_commits", lambda: state["unpushed"])
     monkeypatch.setattr(cli, "current_branch", lambda: state["branch"])
     monkeypatch.setattr(
-        cli, "push_scratch", lambda username, token: ("harumi-scratch-abc", "sha123")
+        cli, "push_scratch", lambda username: ("harumi-scratch-abc", "sha123")
     )
     monkeypatch.setattr(
         cli, "delete_remote_scratch", lambda name: state["deleted"].append(name)

@@ -306,7 +306,7 @@ harumi compare [RUN_ID...] [--json] [--project ID] [--api-url URL] [--org ORG]
 
 ## Editing the repo (git)
 
-There is no `harumi repo`. A project's repo is a plain git repo; `harumi clone` leaves a remote named `harumi` with the token embedded in its URL, so `git fetch harumi` / `git push harumi <branch>` work with no further setup. Before 0.11 each of these was a `harumi repo` subcommand; those still run (hidden, with a warning) until 0.12.0.
+There is no `harumi repo`. A project's repo is a plain git repo; `harumi clone` leaves a remote named `harumi` with a plain URL, and git asks `harumi git-credential` for the password when it needs it (set for this repository and for Harumi's host only), so `git fetch harumi` / `git push harumi <branch>` work with no further setup and no token in `.git/config`. Before 0.11 each of these was a `harumi repo` subcommand; those still run (hidden, with a warning) until 0.12.0.
 
 | Task | Command in the clone |
 |---|---|
@@ -323,7 +323,7 @@ There is no `harumi repo`. A project's repo is a plain git repo; `harumi clone` 
 | Tag a version (movable label such as `prod`) | `harumi tags set NAME [--to BRANCH_OR_SHA]` (see [tags](#tags)); `git fetch harumi --tags --force` brings tags into the clone |
 | Promote into live | `git fetch harumi && git switch main && git merge --ff-only harumi/main && git merge --no-ff harumi/NAME && git push harumi main` |
 
-The remote's URL embeds your Gitea token (kept in `.git/config`, printed by `git remote -v`): never paste either into chat, logs or issues.
+The remote's URL has no token. The token stays in `~/.harumi/environments/<env>/credentials.json` (mode 0600), which `harumi git-credential` reads: never paste that file into chat, logs or issues. A clone made before 1.0 had the token in the URL; the first `harumi` command run inside it takes it out. `git-credential` is run by git, not by people, and answers only for Harumi's own git host over https.
 
 Commit once per change and push once; the old file-by-file commands made one server commit per file and never updated the local clone.
 

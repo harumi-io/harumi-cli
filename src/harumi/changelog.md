@@ -27,6 +27,7 @@ A friendlier first session, readable output everywhere, and the same rules for e
 - `org rm` asks you to type the organization's name; `share update --no-password` asks first. A permanent delete by id needs the exact name or 8 or more characters of the id.
 - **`files rm` of a file that is not there exits 1** (harumi-api says "deleted" for any path). Pass `--missing-ok` for the old idempotent behaviour.
 - `harumi check` exits 1 when the project cannot run.
+- The `harumi` remote has a plain URL with no user or token in it. A script that read the token from `git remote get-url harumi` or `.git/config` no longer finds one; git authenticates through `harumi git-credential`, which needs `harumi` on your PATH (a pip or pipx install puts it there).
 - `compare --json` prints named fields (`columns`, `kpis`, `winner_run_id`, `no_winner_reason`, `warnings`, `fairness`) instead of the API's response as it came, so a field the server adds later does not reach your script. Today's output has the same fields; a column's `source` is `null` when the API sent none, instead of missing.
 - `runs list`, `schedules list`, `memories list`, `share list` and `org members` print the first 8 characters of an id, and the commands that take one accept the start of it (`projects list` still prints whole ids). Their columns changed: `runs list` shows `started` and `took`, `schedules list` no longer shows the kernel, and `share list` no longer prints tokens.
 - Errors say what failed, whose problem it is and what to do: your network, a company TLS proxy (`SSL_CERT_FILE`), a refused connection and a cut-off reply each read differently, and when a change may have gone through before the connection dropped, it says so, so you can check before you repeat it. `HARUMI_DEBUG=1` shows the full trace.
@@ -36,6 +37,7 @@ A friendlier first session, readable output everywhere, and the same rules for e
 
 ### Fixed
 
+- **The git token is no longer written into the project's `.git/config`.** `harumi clone`, `new`, `link` and `import` used to set the `harumi` remote to `https://user:token@host/...`, so `git remote -v`, an IDE or a screen share showed a token with access to your repositories. The remote is now the plain URL, and git asks `harumi git-credential` for the password when it needs it, for that repository and Harumi's git host only. A clone made before this release is cleaned the first time you run any `harumi` command inside it, and a plain `git push harumi <branch>` keeps working. The token itself is unchanged by this release: if you ever shared `git remote -v` output or a project's `.git/config` from an older clone, treat that token as exposed and ask Harumi to rotate it (signing in again does not).
 - `Client` (the Python library) uses its own environment's login. With clients for two environments, the first one used to send the second one's token.
 - `dashboard validate` knows the current widgets: `filter`, `detail` and `kpi-rail` are gone (`metric` replaces `kpi-rail`).
 

@@ -10,7 +10,7 @@ is not met.
 
 The scratch-branch flow (used by `harumi run` on an un-pushed/dirty tree):
 
-1. `push_scratch(git_url, token, username)` creates a throwaway branch off
+1. `push_scratch(username)` creates a throwaway branch off
    the current HEAD, stages the *entire* working tree (tracked + untracked,
    obeying .gitignore) into a temporary index without touching the user's
    real index or branch, commits it, pushes to the `harumi` remote, then
@@ -82,7 +82,9 @@ def _run(
     encoded form.
     """
     full_args = ["git"] + args
-    merged_env = {**os.environ, **(env or {})}
+    # Never ask on the terminal: our credential helper is the only source of a password, and a git that cannot get one
+    # should fail with its own message, not sit waiting for a password nobody will type into a pipe.
+    merged_env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", **(env or {})}
     try:
         return subprocess.run(
             full_args,
@@ -167,89 +169,85 @@ def head_sha(cwd: Optional[Path] = None) -> str:
 # Remote management
 # ---------------------------------------------------------------------------
 
-def _authenticated_url(clone_url: str, username: str, token: str) -> str:
-    """Embed basic-auth credentials into a https:// clone URL.
-
-    Gitea expects `https://<user>:<token>@<host>/...` for git-over-HTTPS
-    with token auth.  We never embed credentials in the stored clone_url —
-    only in the ephemeral URL passed to individual git operations.
-
-    Both `username` and `token` are percent-encoded: an unescaped `@`, `:`,
-    or `/` in either would re-split the URL's authority section (e.g. an
-    email-like username `user@harumi.io` yields
-    `https://user@harumi.io:token@host/...`, whose authority becomes
-    `harumi.io:token@host` — `:token` is then parsed as a bogus port,
-    producing "Port number was not a decimal number").
-    """
-    if not clone_url.startswith("https://"):
-        return clone_url
-    host_and_path = clone_url[len("https://"):]
-    # Strip any existing credentials to avoid doubling them.
-    host_and_path = re.sub(r"^[^@]+@", "", host_and_path)
-    safe_username = quote(username, safe="")
-    safe_token = quote(token, safe="")
-    return f"https://{safe_username}:{safe_token}@{host_and_path}"
+# What git runs to ask for a password: `harumi git-credential get`. The "!" makes git run it through the shell, so the
+# name is looked up on PATH the way any command is (a folder that is copied elsewhere keeps working).
+CREDENTIAL_HELPER = "!harumi git-credential"
 
 
-def ensure_remote(
-    clone_url: str,
-    username: str,
-    token: str,
-    name: str = "harumi",
-    cwd: Optional[Path] = None,
-) -> None:
-    """Add or update the `harumi` remote to use an authenticated HTTPS URL.
+def _credential_scope(clone_url: str) -> Optional[str]:
+    """`https://git.harumi.io` for `https://git.harumi.io/owner/repo.git`: the part git's `credential.<url>.*` keys match.
 
-    The URL with embedded credentials is set only for the local repo config;
-    it is never stored in the binding file so the token doesn't leak into
-    committed config.
-    """
-    authed_url = _authenticated_url(clone_url, username, token)
+    Scoped to the host so the helper answers for Harumi's git server and nothing else, and the reset below does not
+    touch what the user has set up for GitHub or anywhere else."""
+    match = re.match(r"^(https://)(?:[^@/]+@)?([^/]+)", clone_url)
+    return f"{match.group(1)}{match.group(2)}" if match else None
 
+
+def credential_config(clone_url: str) -> list[str]:
+    """The `-c key=value` pairs that make git ask `harumi` for this host's password, as a list of arguments.
+
+    The first entry is empty on purpose: it clears the helpers the user already has for this host (a macOS Keychain or
+    git-credential-manager entry would answer first, with an old token, and would also be handed a copy of ours)."""
+    scope = _credential_scope(clone_url)
+    if scope is None:
+        return []
+    return ["-c", f"credential.{scope}.helper=", "-c", f"credential.{scope}.helper={CREDENTIAL_HELPER}"]
+
+
+def _strip_credentials(url: str) -> str:
+    """`https://user:token@host/x.git` -> `https://host/x.git`. Anything else comes back as it was."""
+    return re.sub(r"^(https://)[^@/]+@", r"\1", url)
+
+
+def ensure_remote(clone_url: str, name: str = "harumi", cwd: Optional[Path] = None) -> None:
+    """Add or update the `harumi` remote so it holds no credentials.
+
+    The remote is the plain clone URL, which is what `git remote -v`, an IDE and a screen share show. The password
+    comes from `harumi git-credential` when git needs it, set for this repository only and for Harumi's host only, so
+    a plain `git push harumi` works outside the CLI without the token being written anywhere git config can be read."""
+    plain = _strip_credentials(clone_url)
     result = _run(["remote", "get-url", name], cwd=cwd, check=False)
-    if result.returncode == 0:
-        _run(["remote", "set-url", name, authed_url], cwd=cwd, redact=token)
-    else:
-        _run(["remote", "add", name, authed_url], cwd=cwd, redact=token)
+    _run(["remote", "set-url" if result.returncode == 0 else "add", name, plain], cwd=cwd)
+    scope = _credential_scope(plain)
+    if scope is None:
+        return
+    key = f"credential.{scope}.helper"
+    _run(["config", "--local", "--unset-all", key], cwd=cwd, check=False)  # idempotent: no duplicate entries
+    _run(["config", "--local", "--add", key, ""], cwd=cwd)
+    _run(["config", "--local", "--add", key, CREDENTIAL_HELPER], cwd=cwd)
 
 
-def refresh_remote_token(
-    clone_url: str,
-    username: str,
-    token: str,
-    name: str = "harumi",
-    cwd: Optional[Path] = None,
-) -> None:
-    """Re-embed a fresh token into an existing remote URL (e.g. after token rotation)."""
-    ensure_remote(clone_url, username, token, name=name, cwd=cwd)
+def remote_has_credentials(name: str = "harumi", cwd: Optional[Path] = None) -> bool:
+    """True when the remote's URL still has a user or password in it: a clone made before the token left the URL."""
+    result = _run(["remote", "get-url", name], cwd=cwd, check=False)
+    return result.returncode == 0 and _strip_credentials(result.stdout.strip()) != result.stdout.strip()
+
+
+def scrub_remote(name: str = "harumi", cwd: Optional[Path] = None) -> bool:
+    """Take a token out of an existing clone's remote and give it the credential helper instead. Quiet when there is
+    nothing to do, so it can run on every command. Returns whether it changed anything."""
+    if not remote_has_credentials(name, cwd=cwd):
+        return False
+    url = _run(["remote", "get-url", name], cwd=cwd).stdout.strip()
+    ensure_remote(url, name=name, cwd=cwd)
+    return True
 
 
 # ---------------------------------------------------------------------------
 # Clone: fetch an existing project's repo into a fresh local directory
 # ---------------------------------------------------------------------------
 
-def clone_repo(
-    clone_url: str,
-    username: str,
-    token: str,
-    dest: Path,
-    remote: str = "harumi",
-) -> None:
-    """Clone `clone_url` into `dest` (must not already exist), authenticated
-    with `username`/`token`, and name the resulting remote `harumi`.
+def clone_repo(clone_url: str, dest: Path, remote: str = "harumi") -> None:
+    """Clone `clone_url` into `dest` (must not already exist) and name the resulting remote `harumi`.
 
-    Used by `harumi clone`/`harumi new` to fetch a project's existing repo
-    (which always has at least a scaffold commit — see `harumi-api`'s
-    `provision_from_blueprint`/`_seed_repo_files`) rather than trying to push
-    into it, which would fail as a non-fast-forward push against history the
-    caller doesn't have.
-    """
-    authed_url = _authenticated_url(clone_url, username, token)
-    _run(
-        ["clone", "--origin", remote, authed_url, str(dest)],
-        redact=token,
-    )
+    Used by `harumi clone`/`harumi new` to fetch a project's existing repo (which always has at least a scaffold
+    commit — see `harumi-api`'s `provision_from_blueprint`/`_seed_repo_files`) rather than trying to push into it,
+    which would fail as a non-fast-forward push against history the caller doesn't have.
 
+    `git clone -c` writes the credential settings into the new repository's config before the first fetch, so the
+    clone is authenticated by the helper and ends up with a remote that holds no token."""
+    plain = _strip_credentials(clone_url)
+    _run([*credential_config(plain), "clone", "--origin", remote, plain, str(dest)])
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +256,6 @@ def clone_repo(
 
 def push_scratch(
     username: str,
-    token: str,
     remote: str = "harumi",
     message: Optional[str] = None,
     cwd: Optional[Path] = None,
@@ -277,6 +274,7 @@ def push_scratch(
     root = repo_root(cwd=cwd)
     if root is None:
         raise NotAHarumiRepoError()
+    scrub_remote(remote, cwd=root)  # a clone made before 1.0 still has the token in its remote URL
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     safe_user = re.sub(r"[^a-zA-Z0-9._-]", "-", username)
@@ -537,8 +535,6 @@ def _write_local_excludes(folder: Path, patterns: Sequence[str]) -> None:
 def push_folder(
     folder: Path,
     clone_url: str,
-    username: str,
-    token: str,
     branch: str = "main",
     remote: str = "harumi",
     message: str = "Import project",
@@ -564,7 +560,7 @@ def push_folder(
     if not _is_repo_root(folder):
         _run(["init"], cwd=folder)
 
-    ensure_remote(clone_url, username, token, name=remote, cwd=folder)
+    ensure_remote(clone_url, name=remote, cwd=folder)
 
     if exclude:
         _write_local_excludes(folder, exclude)
@@ -576,5 +572,5 @@ def push_folder(
         cwd=folder,
     )
     sha = head_sha(cwd=folder)
-    _run(["push", "--force", remote, f"HEAD:refs/heads/{branch}"], cwd=folder, redact=token)
+    _run(["push", "--force", remote, f"HEAD:refs/heads/{branch}"], cwd=folder)
     return sha

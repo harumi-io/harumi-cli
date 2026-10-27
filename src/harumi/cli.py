@@ -66,8 +66,8 @@ Requires a working directory produced by `harumi new`/`harumi import`/
 Repo files
 ----------
 There is no `harumi repo` any more: a project's repo is an ordinary git repo,
-and `harumi clone` sets up a remote named `harumi` with the token already in
-its URL. Read it with `ls`/`cat`/`git show`, change it by editing files and
+and `harumi clone` sets up a remote named `harumi` that git signs in to through
+`harumi git-credential`, with no token in the URL. Read it with `ls`/`cat`/`git show`, change it by editing files and
 `git commit && git push harumi <branch>`. `harumi check` (server-side
 readiness) and `harumi skills add` (library presets) are the repo-adjacent
 commands that do something git can't.
@@ -480,6 +480,18 @@ def help_command(ctx: typer.Context) -> None:
     _run_cli([*ctx.args, "--help"])
 
 
+@app.command(
+    "git-credential",
+    hidden=True,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def git_credential(action: str = typer.Argument(..., help="get, store or erase (git's credential-helper protocol).")) -> None:
+    """Git's credential helper for Harumi's git server. Run by git, not by people (see harumi/git_credential.py)."""
+    from harumi import git_credential as helper
+
+    helper.respond(action, sys.stdin, sys.stdout)
+
+
 def _run_cli(argv: list[str]) -> None:
     """Run another harumi command as if the user had typed it, then exit.
 
@@ -589,7 +601,7 @@ def _removal_version(key: str) -> str:
 # script's author, the day after, where each one went.
 _RETIRED: dict[str, str] = {
     # Whole groups: a bare `harumi repo` gets one answer, not twelve.
-    "harumi repo": "git in your clone (`harumi clone` sets up a `harumi` git remote with your token)",
+    "harumi repo": "git in your clone (`harumi clone` sets up a `harumi` git remote that signs in for you)",
     "harumi skill": "harumi agent-skills install",
     "harumi config": "harumi org use <ORG_ID>",
     # Not a command: an option that is still accepted (`run -o`), kept here so it is listed with the rest.
@@ -1373,11 +1385,7 @@ def _provision_git_token(config: Config) -> None:
 
     binding = ProjectBinding.load()
     if binding is not None and repo_root() is not None:
-        ensure_remote(
-            clone_url=binding.repo.clone_url,
-            username=creds.username,
-            token=creds.token,
-        )
+        ensure_remote(clone_url=binding.repo.clone_url)
 
 
 @app.command()
@@ -2320,28 +2328,14 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
         )
         return False
 
-    git_token = load_git_token()
-    if not git_token:
+    if not load_git_token():
         console.print(
             "[yellow]No Gitea token found — skipping remote setup.[/yellow]\n"
             "Run [bold]harumi login[/bold] to provision one."
         )
         return False
 
-    username = load_git_username()
-    if not username:
-        console.print(
-            "[yellow]No Gitea username on file — skipping remote setup.[/yellow]\n"
-            "Run [bold]harumi login[/bold] again to re-provision your Gitea credentials."
-        )
-        return False
-
-    ensure_remote(
-        clone_url=repo.clone_url,
-        username=username,
-        token=git_token,
-        cwd=target,
-    )
+    ensure_remote(clone_url=repo.clone_url, cwd=target)
     console.print("[bold green]Remote `harumi` configured.[/bold green]")
     return True
 
@@ -2725,8 +2719,6 @@ def _push_impl(
     push_folder(
         folder,
         clone_url=repo.clone_url,
-        username=username,
-        token=git_token,
         branch=repo.default_branch,
         message="Push local project",
         exclude=import_excludes(),
@@ -2949,12 +2941,7 @@ def _clone_and_bind(project_id: str, repo, dest: Path) -> None:
         return
 
     console.print(f"Cloning into [bold]{dest}[/bold]...", soft_wrap=True)
-    clone_repo(
-        clone_url=repo.clone_url,
-        username=username,
-        token=git_token,
-        dest=dest,
-    )
+    clone_repo(clone_url=repo.clone_url, dest=dest)
 
     if _bind_and_configure_remote(project_id, repo, cwd=dest):
         _next_steps(dest)
@@ -3383,7 +3370,7 @@ def run(
                 "[dim](sent on a temporary branch; your branches are not touched)[/dim]"
             )
 
-            scratch_branch, _ = push_scratch(username=username, token=git_token)  # type: ignore[arg-type]
+            scratch_branch, _ = push_scratch(username=username)
             run_branch = scratch_branch
             run_commit = None
 
@@ -6890,10 +6877,32 @@ def _report_crash(exc: BaseException) -> NoReturn:
     raise SystemExit(1) from None
 
 
+def _scrub_old_remote() -> None:
+    """A clone made before 1.0 has the git token in its `harumi` remote URL. Take it out the first time any harumi
+    command runs inside it, so nobody has to know the problem existed. Never raises and never prints: it must not
+    change what a command shows, or fail one that has nothing to do with git."""
+    try:
+        if sys.argv[1:2] in (["--version"], ["--help"], ["-h"], ["-v"]):
+            return
+        from harumi import git as hgit
+
+        root = hgit.repo_root()
+        if root is not None and (root / ".harumi" / "config.json").exists():
+            hgit.scrub_remote(cwd=root)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main() -> None:
     from harumi.update import UpdateCheck
 
+    if sys.argv[1:2] == ["git-credential"]:
+        # git's credential helper, started by git for every push and pull: nothing may be printed that is not its
+        # answer, and it should not wait for the update check or the banner.
+        app()
+        return
     _print_banner_if_bare_entrypoint()
+    _scrub_old_remote()
     check = UpdateCheck(sys.argv[1:])
     check.start()
     try:

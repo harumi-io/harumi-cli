@@ -175,8 +175,8 @@ def test_an_uppercase_secret_is_not_in_the_commit_that_is_pushed(tmp_path, name,
     sh_real = hgit.ensure_remote
 
     try:
-        hgit.ensure_remote = lambda clone_url, username, token, name="harumi", cwd=None: sh("remote", "add", name, clone_url, cwd=cwd)
-        hgit.push_folder(f, clone_url=remote.as_posix(), username="u", token="t", branch="main", exclude=hgit.import_excludes())
+        hgit.ensure_remote = lambda clone_url, name="harumi", cwd=None: sh("remote", "add", name, clone_url, cwd=cwd)
+        hgit.push_folder(f, clone_url=remote.as_posix(), branch="main", exclude=hgit.import_excludes())
     finally:
         hgit.ensure_remote = sh_real
     pushed = subprocess.run(

@@ -100,7 +100,7 @@ def test_a_dirty_tree_is_one_plain_sentence_not_scratch_branch_jargon(backend, m
     backend([{"status": "queued"}])
     monkeypatch.setattr(cli, "is_dirty", lambda: True)
     deleted = []
-    monkeypatch.setattr(cli, "push_scratch", lambda username, token: ("harumi-scratch-xyz", "sha"))
+    monkeypatch.setattr(cli, "push_scratch", lambda username: ("harumi-scratch-xyz", "sha"))
     monkeypatch.setattr(cli, "delete_remote_scratch", deleted.append)
 
     result = _run()
@@ -265,7 +265,7 @@ def test_the_temporary_branch_is_still_cleaned_up_after_ctrl_c(backend, monkeypa
     backend([{"status": "running"}])
     monkeypatch.setattr(cli, "is_dirty", lambda: True)
     deleted = []
-    monkeypatch.setattr(cli, "push_scratch", lambda username, token: ("harumi-scratch-xyz", "sha"))
+    monkeypatch.setattr(cli, "push_scratch", lambda username: ("harumi-scratch-xyz", "sha"))
     monkeypatch.setattr(cli, "delete_remote_scratch", deleted.append)
     monkeypatch.setattr(execution, "wait_for_run", lambda *a, **k: (_ for _ in ()).throw(KeyboardInterrupt()))
 

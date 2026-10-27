@@ -143,7 +143,7 @@ def push_to_bare_remote(folder: Path, tmp: Path, **kw) -> list[str]:
     remote = tmp / "remote.git"
     remote.mkdir()
     subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True, capture_output=True)
-    push_folder(folder, clone_url=remote.as_posix(), username="u", token="t", branch="main", **kw)
+    push_folder(folder, clone_url=remote.as_posix(), branch="main", **kw)
     out = subprocess.run(
         ["git", "--git-dir", str(remote), "ls-tree", "-r", "--name-only", "main"], capture_output=True, text=True, check=True
     )
@@ -151,7 +151,7 @@ def push_to_bare_remote(folder: Path, tmp: Path, **kw) -> list[str]:
 
 
 def test_the_pushed_commit_contains_no_secrets_or_junk(tmp_path, monkeypatch):
-    monkeypatch.setattr(hgit, "ensure_remote", lambda clone_url, username, token, name="harumi", cwd=None: sh("remote", "add", name, clone_url, cwd=cwd))
+    monkeypatch.setattr(hgit, "ensure_remote", lambda clone_url, name="harumi", cwd=None: sh("remote", "add", name, clone_url, cwd=cwd))
     folder = messy_folder(tmp_path)
 
     pushed = push_to_bare_remote(folder, tmp_path, exclude=import_excludes())
@@ -160,7 +160,7 @@ def test_the_pushed_commit_contains_no_secrets_or_junk(tmp_path, monkeypatch):
 
 
 def test_the_exclusions_are_written_locally_and_never_touch_the_users_gitignore(tmp_path, monkeypatch):
-    monkeypatch.setattr(hgit, "ensure_remote", lambda clone_url, username, token, name="harumi", cwd=None: sh("remote", "add", name, clone_url, cwd=cwd))
+    monkeypatch.setattr(hgit, "ensure_remote", lambda clone_url, name="harumi", cwd=None: sh("remote", "add", name, clone_url, cwd=cwd))
     folder = messy_folder(tmp_path)
     (folder / ".gitignore").write_text("build/\n")
 
@@ -183,7 +183,7 @@ def test_importing_twice_does_not_duplicate_the_local_exclude_block(tmp_path):
 
 
 def test_without_exclusions_push_folder_behaves_as_it_always_did(tmp_path, monkeypatch):
-    monkeypatch.setattr(hgit, "ensure_remote", lambda clone_url, username, token, name="harumi", cwd=None: sh("remote", "add", name, clone_url, cwd=cwd))
+    monkeypatch.setattr(hgit, "ensure_remote", lambda clone_url, name="harumi", cwd=None: sh("remote", "add", name, clone_url, cwd=cwd))
     folder = messy_folder(tmp_path)
 
     pushed = push_to_bare_remote(folder, tmp_path)
@@ -362,7 +362,7 @@ def test_the_summary_counts_exactly_what_ends_up_in_the_pushed_commit(tmp_path, 
     once said 3 files while 4 arrived, because the harumi.toml written afterwards
     was not counted. What is promised must be what is sent."""
     monkeypatch.setattr(
-        hgit, "ensure_remote", lambda clone_url, username, token, name="harumi", cwd=None: sh("remote", "add", name, clone_url, cwd=cwd)
+        hgit, "ensure_remote", lambda clone_url, name="harumi", cwd=None: sh("remote", "add", name, clone_url, cwd=cwd)
     )
     remote = tmp_path / "remote.git"
     remote.mkdir()
