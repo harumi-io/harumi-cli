@@ -114,7 +114,7 @@ def test_the_list_of_commands_does_not_offer_names_that_were_removed():
     code, out = said(["projects", "frobnicate"])
 
     listed = out.split("Commands:")[1]
-    assert "rm" in listed and "delete" not in listed and "create" not in listed  # both were removed in 0.12.0
+    assert "rm" in listed and "delete" not in listed and "create" not in listed  # both were removed in 1.0.0
 
 
 @pytest.mark.parametrize(
@@ -129,12 +129,12 @@ def test_a_removed_verb_is_answered_not_guessed_at(args, answer):
     """`delete` is close to nothing real, so a spelling guess would be wrong; the removal answer names the verb."""
     code, out = said(args)
 
-    assert code == 2 and "was removed in 0.12.0" in out and answer in out
+    assert code == 2 and "was removed in 1.0.0" in out and answer in out
     assert "Did you mean" not in out
 
 
 def test_blueprints_is_the_one_old_name_that_still_works():
-    """Deprecated in 0.12.0, so it keeps working, with a warning, until 0.13.0."""
+    """Deprecated in 1.0.0, so it keeps working, with a warning, until 1.1.0."""
     code, _ = said(["blueprints", "--help"])
 
     assert code == 0

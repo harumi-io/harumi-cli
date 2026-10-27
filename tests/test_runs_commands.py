@@ -321,14 +321,14 @@ def test_not_ready_with_no_failing_check_does_not_claim_zero_problems(server):
 
 
 def test_repo_readiness_is_removed_and_check_is_the_one_that_exits_1_when_blocked(server):
-    """`harumi repo readiness` always exited 0, so scripts that ignored the code kept working. It was removed in 0.12.0;
+    """`harumi repo readiness` always exited 0, so scripts that ignored the code kept working. It was removed in 1.0.0;
     `harumi check` is what is left, and it exits 1 when the project cannot run."""
     server(readiness=readiness(False, [{"id": "manifest_valid", "ok": False, "detail": "missing entrypoint"}]))
 
     old = runner.invoke(cli.app, ["repo", "readiness", "--project", P])
     new = runner.invoke(cli.app, ["check", "--project", P])
 
-    assert old.exit_code == 2 and "removed in 0.12.0" in old.output and "harumi check" in old.output
+    assert old.exit_code == 2 and "removed in 1.0.0" in old.output and "harumi check" in old.output
     assert new.exit_code == 1
     assert "missing entrypoint" in new.output
 

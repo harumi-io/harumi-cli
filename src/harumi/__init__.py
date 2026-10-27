@@ -31,7 +31,7 @@ from harumi.models import (
     SkillLibrarySummary,
 )
 
-__version__ = "0.12.0"
+__version__ = "1.0.0"
 
 __all__ = [
     "Client",

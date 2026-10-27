@@ -30,10 +30,10 @@
     harumi memories list|add|edit|rm [--project <id>]
     harumi org list|create|rename|use|rm|members|invite|role|rm-member
 
-Names removed in 0.12.0 (`push`, `repo`, `outputs`, `projects create`, `config
+Names removed in 1.0.0 (`push`, `repo`, `outputs`, `projects create`, `config
 set-org`, `skill`, `profile show`, `... remove`/`delete`,
 `share set-password`/`rm-password`, `run --output-dir`) answer with what to use
-instead. `blueprints` and `new --blueprint` still work, and warn, until 0.13.0.
+instead. `blueprints` and `new --blueprint` still work, and warn, until 1.1.0.
 
 Onboarding — three journeys, three commands
 ---------------------------------------------
@@ -273,7 +273,7 @@ def _no_such_command_message(group, word: str, message: str) -> str:
 
 
 def _removed_message(ctx, args: list[str]):
-    """"`harumi push` was removed in 0.12.0. Use: harumi import" for a name in `_RETIRED`, else None.
+    """"`harumi push` was removed in 1.0.0. Use: harumi import" for a name in `_RETIRED`, else None.
 
     The longest match wins (`repo ls` before `repo`, `projects create Demo` is looked up as `projects create`).
     """
@@ -567,15 +567,16 @@ def _fail(message: str) -> None:
     raise typer.Exit(code=1)
 
 
-# The release that takes the deprecated names out (the 0.11 changelog promises it, and every warning says it).
-_REMOVAL_VERSION = "0.12.0"
+# The release that takes the deprecated names out. The 0.11 changelog promised 0.12.0 and every 0.11 warning says so; it
+# shipped as 1.0.0, which is later than promised, never earlier.
+_REMOVAL_VERSION = "1.0.0"
 
 # Names deprecated later than 0.11 go at a later release: a name cannot be deprecated and removed in the same
 # release, since nobody would see the warning first. Only the exceptions are listed; everything else in `_RETIRED`
 # goes at `_REMOVAL_VERSION`.
 _REMOVED_IN: dict[str, str] = {
-    "harumi blueprints": "0.13.0",  # renamed to `examples` in 0.12.0
-    "harumi new --blueprint": "0.13.0",  # renamed to `--example` in 0.12.0
+    "harumi blueprints": "1.1.0",  # renamed to `examples` in 1.0.0
+    "harumi new --blueprint": "1.1.0",  # renamed to `--example` in 1.0.0
 }
 
 
@@ -586,13 +587,13 @@ def _removal_version(key: str) -> str:
 # Every name that has gone, or is going away -> what to use instead. A removed command is deleted, and its entry stays
 # here: `_Group.resolve_command` answers a script that still calls it with "was removed in X. Use: ...". A name that
 # still works is registered with `_deprecated`, which adds its entry and prints the same text as a warning.
-# When 0.13.0 removes `blueprints`, delete its command and keep the entry.
+# When 1.1.0 removes `blueprints`, delete its command and keep the entry.
 _RETIRED: dict[str, str] = {
     # Whole groups: a bare `harumi repo` gets one answer, not twelve.
     "harumi repo": "git in your clone (`harumi clone` sets up a `harumi` git remote with your token)",
     "harumi skill": "harumi agent-skills install",
     "harumi config": "harumi org use <ORG_ID>",
-    # An option, not a command: removed in 0.12.0, it now fails and says what to use (see `run`).
+    # An option, not a command: removed in 1.0.0, it now fails and says what to use (see `run`).
     "harumi run --output-dir": "harumi runs download [RUN_ID] -o DIR",
     # Top level.
     "harumi push": "harumi import",
@@ -627,7 +628,7 @@ _RETIRED: dict[str, str] = {
     "harumi schedules remove": "harumi schedules rm",
     "harumi org delete": "harumi org rm",
     "harumi org remove": "harumi org rm-member",
-    # Deprecated in 0.12.0, removed in 0.13.0 (see `_REMOVED_IN`). `blueprints` is added by `_deprecated` where it is registered.
+    # Deprecated in 1.0.0, removed in 1.1.0 (see `_REMOVED_IN`). `blueprints` is added by `_deprecated` where it is registered.
     "harumi new --blueprint": "harumi new <NAME> --example <slug>",
 }
 
@@ -2245,7 +2246,7 @@ def examples(
 ) -> None:
     """List example projects: finished Harumi projects you can start a copy of with `new --example`.
 
-    Called blueprints until 0.12.0. The API still does (`GET /blueprints`), so that is what is asked for; only
+    Called blueprints until 1.0.0. The API still does (`GET /blueprints`), so that is what is asked for; only
     what a person types and reads is renamed here.
     """
     client = _get_client(api_url=api_url, org=org)
@@ -3252,7 +3253,7 @@ def run(
         "--output-dir",
         "-o",
         hidden=True,
-        help="Removed in 0.12.0: use `harumi runs download`.",
+        help="Removed in 1.0.0: use `harumi runs download`.",
     ),
     api_url: Optional[str] = _API_URL,
     git_url: Optional[str] = _GIT_URL,
@@ -6219,7 +6220,7 @@ def org_rm_member(
 
 
 # ---------------------------------------------------------------------------
-# Deprecated names — hidden, warn on stderr, removed in 0.12.0
+# Deprecated names — hidden, warn on stderr, removed in 1.0.0
 # ---------------------------------------------------------------------------
 # Renamed in 0.11. Each runs the new command's code unchanged. (Aliases whose
 # behaviour differs are declared next to the command they replace.)

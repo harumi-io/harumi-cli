@@ -201,10 +201,10 @@ def test_organization_deletion_still_says_it_is_permanent(monkeypatch):
 
 
 def test_repo_rm_is_removed_and_deletes_nothing(api):
-    """It used to ask first and say a removal is a commit that can be reverted. Gone since 0.12.0: git does it now."""
+    """It used to ask first and say a removal is a commit that can be reverted. Gone since 1.0.0: git does it now."""
     result = runner.invoke(cli.app, ["repo", "rm", "old.py", "--project", "proj-1"])
 
-    assert result.exit_code == 2 and "removed in 0.12.0" in result.output and "git rm" in " ".join(result.output.split())
+    assert result.exit_code == 2 and "removed in 1.0.0" in result.output and "git rm" in " ".join(result.output.split())
     assert api.deleted == []
 
 

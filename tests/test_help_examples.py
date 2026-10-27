@@ -382,7 +382,7 @@ def test_every_command_and_flag_the_docs_show_exists(doc):
 def test_the_drift_check_catches_a_renamed_flag_and_a_missing_command():
     assert why_not_real("harumi runs get --jsno")
     assert why_not_real("harumi pushh")  # a typo is not a removed name
-    assert why_not_real("harumi push") is None and why_not_real("harumi repo ls") is None  # removed in 0.12.0, in the table
+    assert why_not_real("harumi push") is None and why_not_real("harumi repo ls") is None  # removed in 1.0.0, in the table
     assert why_not_real("harumi runs frobnicate")
     assert why_not_real("harumi share update ID --no-password") is None  # a secondary spelling of --password
     assert why_not_real("harumi run --watch --json | jq -e .succeeded") is None  # `-e` is jq's

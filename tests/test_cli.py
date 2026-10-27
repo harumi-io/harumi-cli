@@ -3105,9 +3105,9 @@ def test_the_removed_names_are_gone_from_the_command_tree_and_the_surface():
     # colourised differently on CI.
     top = get_command(cli.app).commands
     for gone in ("push", "repo", "outputs", "config", "skill"):
-        assert gone not in top, f"{gone} was removed in 0.12.0"
+        assert gone not in top, f"{gone} was removed in 1.0.0"
     assert not top["import"].hidden
-    assert top["blueprints"].hidden  # deprecated in 0.12.0, removed in 0.13.0: still here, still warning
+    assert top["blueprints"].hidden  # deprecated in 1.0.0, removed in 1.1.0: still here, still warning
 
     paths = {command["path"] for command in build_surface()["commands"]}
     assert "push" not in paths and "outputs" not in paths and "blueprints" not in paths
@@ -3134,7 +3134,7 @@ def test_a_removed_name_answers_with_its_replacement_and_sends_nothing(api, argv
 
     assert result.exit_code == 2, result.output
     assert " ".join(use.split()) in " ".join(result.output.split())
-    assert "removed in 0.12.0" in result.output
+    assert "removed in 1.0.0" in result.output
     assert api.requests == [], "a removed name must not reach the API"
 
 
@@ -3172,7 +3172,7 @@ def test_config_set_org_is_removed_and_does_not_change_the_workspace(api):
     before = Config.load().org_id
     old = runner.invoke(cli.app, ["config", "set-org", "org-10"])
 
-    assert old.exit_code == 2 and "removed in 0.12.0" in old.output and "harumi org use" in old.output
+    assert old.exit_code == 2 and "removed in 1.0.0" in old.output and "harumi org use" in old.output
     assert Config.load().org_id == before
 
 

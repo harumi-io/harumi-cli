@@ -1,9 +1,9 @@
 """The way out for deprecated names: warn while they work, say so in their help, and explain once they are gone.
 
 0.11 deprecated 28 names (`push`, `repo ...`, `outputs`, the `remove`/`delete` verbs, ...) and promised their
-removal in 0.12.0, which removed them. A script that still calls `harumi push` is told it was removed and what to
+removal in 1.0.0, which removed them. A script that still calls `harumi push` is told it was removed and what to
 use, from the same table (`_RETIRED`) that drove the warnings, instead of a bare "No such command". `harumi env`
-was the model. `blueprints` and `new --blueprint` were deprecated in 0.12.0 and are removed in 0.13.0: until then
+was the model. `blueprints` and `new --blueprint` were deprecated in 1.0.0 and are removed in 1.1.0: until then
 they run and warn, which is what the "while it still works" tests below check.
 """
 
@@ -107,7 +107,7 @@ REMOVED_IN_THIS_RELEASE = [pytest.param(path, id=" ".join(path)) for path in rem
 
 def test_the_audit_found_the_old_names():
     assert len(REMOVED_IN_THIS_RELEASE) >= 28, "the table lost names, so every test below would prove little"
-    assert [p.id for p in OLD_NAMES] == ["blueprints"], "the one deprecated name left; it goes in 0.13.0"
+    assert [p.id for p in OLD_NAMES] == ["blueprints"], "the one deprecated name left; it goes in 1.1.0"
 
 
 def test_every_hidden_old_name_is_in_the_retired_table_and_the_removed_ones_are_really_gone():
@@ -116,7 +116,7 @@ def test_every_hidden_old_name_is_in_the_retired_table_and_the_removed_ones_are_
     removed = {"harumi " + " ".join(path) for path in removed_names()}
 
     assert sorted(leaves - commands_in_table) == [], "hidden but nothing says where it went"
-    assert leaves.isdisjoint(removed), "removed in 0.12.0 but still registered as a command"
+    assert leaves.isdisjoint(removed), "removed in 1.0.0 but still registered as a command"
     still_registered = [key for key in removed if exists_in_tree(tuple(key.split()[1:]))]
     assert still_registered == [], "in the table as removed, but the command (or group) is still there"
 
@@ -229,8 +229,8 @@ def test_a_replacement_is_never_itself_retired():
 
 
 def with_the_old_names_gone(release=None):
-    """The command tree as `release` (default: 0.12.0) will have it: every hidden command that release removes
-    taken out. The ones renamed in 0.12.0 itself (`blueprints`) are still there, warning, until 0.13.0."""
+    """The command tree as `release` (default: 1.0.0) will have it: every hidden command that release removes
+    taken out. The ones renamed in 1.0.0 itself (`blueprints`) are still there, warning, until 1.1.0."""
     root = get_command(cli.app)
     for path, _ in hidden_leaves(root, by=release or cli._REMOVAL_VERSION):
         parent = root
@@ -326,21 +326,21 @@ def still_here_after(removal_version: str):
 
 
 def test_a_name_renamed_in_this_release_is_still_there_after_it():
-    """`blueprints` is deprecated in 0.12.0 and removed in 0.13.0. A tree built for 0.12.0 must still have it,
+    """`blueprints` is deprecated in 1.0.0 and removed in 1.1.0. A tree built for 1.0.0 must still have it,
     working and warning, or its users would meet the removal in the same release as the warning."""
     root = with_the_old_names_gone()
 
     assert "blueprints" in root.commands and root.commands["blueprints"].hidden
-    assert cli._removal_version("harumi blueprints") == "0.13.0" != cli._REMOVAL_VERSION
+    assert cli._removal_version("harumi blueprints") == "1.1.0" != cli._REMOVAL_VERSION
 
 
 def test_once_0_13_removes_blueprints_it_says_0_13_and_what_replaced_it():
     """The answer a script gets the day after, built for the release that removes it. Tested with the version a
     name is due at, not the default one, or a tombstone quoting the wrong release would pass."""
-    message = what_it_says(["blueprints"], release="0.13.0")
+    message = what_it_says(["blueprints"], release="1.1.0")
 
-    assert "`harumi blueprints` was removed in 0.13.0" in message and "harumi examples" in message
-    assert "0.12.0" not in message
+    assert "`harumi blueprints` was removed in 1.1.0" in message and "harumi examples" in message
+    assert "1.0.0" not in message
 
 
 def test_in_the_0_12_tree_blueprints_still_works_rather_than_being_a_tombstone():
@@ -358,18 +358,18 @@ def test_every_name_removed_later_is_deprecated_in_an_earlier_release_than_it_is
 
 
 def test_the_names_promised_gone_in_the_removal_version_are_gone_by_then():
-    """The warning says "removed in 0.12.0". Bumping to that version with them still here would make it a lie.
+    """The warning says "removed in 1.0.0". Bumping to that version with them still here would make it a lie.
     When this fails: delete the hidden commands and the `@_deprecated` wrappers, keep their `_RETIRED` entries
     (they are what answers a user afterwards), and drop the `hidden=True` groups."""
     assert still_here_after(cli._REMOVAL_VERSION) == []
 
 
 def test_the_tripwire_does_fire_when_the_version_is_reached(monkeypatch):
-    """Today it passes only because 0.12 is before 0.13. The same check, run as if this were the release that
-    removes `blueprints` (the installed version set to 0.13.0), must report it left behind."""
-    monkeypatch.setattr(sys.modules[__name__], "__version__", "0.13.0")
+    """Today it passes only because 1.0 is before 1.1. The same check, run as if this were the release that
+    removes `blueprints` (the installed version set to 1.1.0), must report it left behind."""
+    monkeypatch.setattr(sys.modules[__name__], "__version__", "1.1.0")
 
-    assert still_here_after("0.13.0") == ["blueprints"]
+    assert still_here_after("1.1.0") == ["blueprints"]
 
 
 def release_notes(version: str):
@@ -382,7 +382,7 @@ def release_notes(version: str):
 def release_gaps(removal_version: str, current_version: str):
     """What the release notes still lack once `current_version` has reached `removal_version`.
 
-    The 0.12.0 notes are drafted ahead of the release without a date and without the removed names (they are
+    The 1.0.0 notes are drafted ahead of the release without a date and without the removed names (they are
     still here, deprecated, until the release commit deletes them). Bumping the version is the moment both
     must be filled in; an empty list before that, so the draft can sit in `dev` meanwhile.
     """
@@ -413,7 +413,7 @@ def normalised_name(text: str) -> str:
 
 
 def test_the_release_notes_are_complete_by_the_time_the_version_is_bumped():
-    """When this fails: give the 0.12.0 heading its date, and list every name in `_RETIRED` under its `### Removed`
+    """When this fails: give the 1.0.0 heading its date, and list every name in `_RETIRED` under its `### Removed`
     (write `harumi repo ...` once for the group)."""
     assert release_gaps(cli._REMOVAL_VERSION, __version__) == []
 
@@ -583,10 +583,12 @@ def deprecating_release() -> str:
     raise AssertionError("no changelog entry announces the removal of the old names")
 
 
-def test_the_removal_version_in_the_warning_is_the_one_the_changelog_promised():
+def test_the_names_are_removed_no_earlier_than_the_changelog_promised():
+    """0.11 promised "removed in 0.12.0" and that text cannot be edited now. Removing later (it shipped as 1.0.0) keeps
+    the promise; removing earlier would break it, so the check is "not before", not "equal"."""
     heading = re.search(r"### Removed \(still works in [\d.]+x with a warning, removed in ([\d.]+)\)", deprecating_release())
 
-    assert heading and heading.group(1) == cli._REMOVAL_VERSION
+    assert heading and version_tuple(cli._REMOVAL_VERSION) >= version_tuple(heading.group(1))
 
 
 def test_the_changelog_lists_every_old_name_it_promised_to_remove():
