@@ -26,8 +26,9 @@ except TypeError:
 
 CHANGELOG = (pathlib.Path(cli.__file__).parent / "changelog.md").read_text()
 
-# Hidden on purpose and not deprecated: `help` is `--help` spelt as a word; `env` already is a tombstone.
-NOT_DEPRECATED = {("help",), ("env",)}
+# Hidden on purpose and not deprecated: `help` is `--help` spelt as a word; `env` already is a tombstone; `git-credential`
+# is the helper git runs for the project's remote.
+NOT_DEPRECATED = {("help",), ("env",), ("git-credential",)}  # git-credential is run by git, not by people
 
 
 @pytest.fixture(autouse=True)

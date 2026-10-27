@@ -102,7 +102,7 @@ harumi check [--ref REF]                  # server-side readiness: repo exists, 
 
 ## Editing the project
 
-A project's repo is an ordinary git repo, and `harumi clone` leaves a remote named **`harumi`** with the token already in its URL. There is no `harumi repo` command: use the shell and git.
+A project's repo is an ordinary git repo, and `harumi clone` leaves a remote named **`harumi`** that git signs in to by itself (git runs `harumi git-credential`; there is no token in the URL). There is no `harumi repo` command: use the shell and git.
 
 ```bash
 ls skills/ ; cat harumi.toml                          # read
@@ -121,7 +121,7 @@ git archive --format=zip -o repo.zip harumi/main      # zip the repo
 - To iterate you often don't need to commit at all: `harumi run` pushes uncommitted work to a scratch branch.
 - Run `harumi check` to see what blocks the project from running.
 - Never run `harumi import` on an existing project (it creates a new one).
-- The `harumi` remote's URL embeds the user's Gitea token (stored in `.git/config`, printed by `git remote -v`). Never paste `git remote -v` output or `.git/config` into chat, logs, issues or commits.
+- The `harumi` remote's URL has no token in it; git gets the password from `harumi git-credential` (a hidden command git runs, from the credentials file `harumi login` wrote). Never paste `~/.harumi/` files into chat, logs, issues or commits. A clone made before 1.0 had the token in its URL; any `harumi` command run inside it removes it.
 
 ## Dashboards & widgets
 

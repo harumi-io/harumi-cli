@@ -132,6 +132,9 @@ def enabled(argv: list[str], environ: Mapping[str, str], stream: TextIO) -> bool
     # `whats-new` is the thing the notice points at; don't nag inside it.
     if command == "whats-new":
         return False
+    # git runs this one and reads its output: anything extra on a stream would be taken for part of the answer.
+    if command == "git-credential":
+        return False
     try:
         return stream.isatty()
     except (AttributeError, ValueError):
