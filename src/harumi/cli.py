@@ -30,10 +30,10 @@
     harumi memories list|add|edit|rm [--project <id>]
     harumi org list|create|rename|use|rm|members|invite|role|rm-member
 
-Deprecated names (`push`, `repo`, `outputs`, `projects create`, `config
+Names removed in 1.0.0 (`push`, `repo`, `outputs`, `projects create`, `config
 set-org`, `skill`, `profile show`, `... remove`/`delete`,
-`share set-password`/`rm-password`, `run --output-dir`) still work in 0.11.x
-as hidden commands that print what to use instead, and are removed in 0.12.0.
+`share set-password`/`rm-password`, `run --output-dir`) answer with what to use
+instead. `blueprints` and `new --blueprint` still work, and warn, until 1.1.0.
 
 Onboarding — three journeys, three commands
 ---------------------------------------------
@@ -273,7 +273,7 @@ def _no_such_command_message(group, word: str, message: str) -> str:
 
 
 def _removed_message(ctx, args: list[str]):
-    """"`harumi push` was removed in 0.12.0. Use: harumi import" for a name in `_RETIRED`, else None.
+    """"`harumi push` was removed in 1.0.0. Use: harumi import" for a name in `_RETIRED`, else None.
 
     The longest match wins (`repo ls` before `repo`, `projects create Demo` is looked up as `projects create`).
     """
@@ -579,15 +579,16 @@ def _fail(message: str) -> None:
     raise typer.Exit(code=1)
 
 
-# The release that takes the deprecated names out (the 0.11 changelog promises it, and every warning says it).
-_REMOVAL_VERSION = "0.12.0"
+# The release that takes the deprecated names out. The 0.11 changelog promised 0.12.0 and every 0.11 warning says so; it
+# shipped as 1.0.0, which is later than promised, never earlier.
+_REMOVAL_VERSION = "1.0.0"
 
 # Names deprecated later than 0.11 go at a later release: a name cannot be deprecated and removed in the same
 # release, since nobody would see the warning first. Only the exceptions are listed; everything else in `_RETIRED`
 # goes at `_REMOVAL_VERSION`.
 _REMOVED_IN: dict[str, str] = {
-    "harumi blueprints": "0.13.0",  # renamed to `examples` in 0.12.0
-    "harumi new --blueprint": "0.13.0",  # renamed to `--example` in 0.12.0
+    "harumi blueprints": "1.1.0",  # renamed to `examples` in 1.0.0
+    "harumi new --blueprint": "1.1.0",  # renamed to `--example` in 1.0.0
 }
 
 
@@ -595,17 +596,51 @@ def _removal_version(key: str) -> str:
     """The release that removes `key`."""
     return _REMOVED_IN.get(key, _REMOVAL_VERSION)
 
-# Every name that is going away -> what to use instead. Filled by `_deprecated`, so the warning a name prints
-# while it works and the answer it gets once it is gone (`_Group.resolve_command`) are the same text and cannot
-# drift apart. When the names are removed, delete their commands and keep these entries: they are what tells a
-# script's author, the day after, where each one went.
+# Every name that has gone, or is going away -> what to use instead. A removed command is deleted, and its entry stays
+# here: `_Group.resolve_command` answers a script that still calls it with "was removed in X. Use: ...". A name that
+# still works is registered with `_deprecated`, which adds its entry and prints the same text as a warning.
+# When 1.1.0 removes `blueprints`, delete its command and keep the entry.
 _RETIRED: dict[str, str] = {
     # Whole groups: a bare `harumi repo` gets one answer, not twelve.
     "harumi repo": "git in your clone (`harumi clone` sets up a `harumi` git remote that signs in for you)",
     "harumi skill": "harumi agent-skills install",
     "harumi config": "harumi org use <ORG_ID>",
-    # Not a command: an option that is still accepted (`run -o`), kept here so it is listed with the rest.
+    # An option, not a command: removed in 1.0.0, it now fails and says what to use (see `run`).
     "harumi run --output-dir": "harumi runs download [RUN_ID] -o DIR",
+    # Top level.
+    "harumi push": "harumi import",
+    "harumi outputs": "harumi runs list / harumi runs download [RUN_ID] -o DIR",
+    # `projects`, `profile`, `config`, `skill`.
+    "harumi projects create": "harumi new <NAME> --no-clone",
+    "harumi projects delete": "harumi projects rm",
+    "harumi profile show": "harumi whoami",
+    "harumi config set-org": "harumi org use <ORG_ID>",
+    "harumi skill path": "harumi agent-skills install --dry-run",
+    "harumi skill install": "harumi agent-skills install",
+    # `repo`: git does these now.
+    "harumi repo ls": "git ls-files (another branch: git fetch harumi && git ls-tree -r --name-only harumi/<ref>)",
+    "harumi repo cat": "cat <path> (another branch: git fetch harumi && git show harumi/<ref>:<path>)",
+    "harumi repo put": "copy the file into your clone, then git add <path> && git commit -m <msg> && git push harumi <branch>",
+    "harumi repo rm": "git rm -r <path> && git commit -m <msg> && git push harumi <branch>",
+    "harumi repo mv": "git mv <from> <to> && git commit -m <msg> && git push harumi <branch>",
+    "harumi repo download": "git archive --format=zip -o repo.zip harumi/<ref> [<path>]",
+    "harumi repo branches": "git fetch harumi && git branch -r",
+    "harumi repo branch-create": "git fetch harumi && git switch -c <name> harumi/main && git push -u harumi <name>",
+    "harumi repo branch-rm": "git push harumi --delete <name> (check `harumi schedules list` first: schedules can pin a branch)",
+    "harumi repo promote": "git fetch harumi && git switch main && git merge --ff-only harumi/main && git merge --no-ff harumi/<name> && git push harumi main",
+    "harumi repo dir": "ls <path>",
+    "harumi repo commits": "git log --oneline [-- <path>]",
+    "harumi repo readiness": "harumi check",
+    # `share`.
+    "harumi share set-password": "harumi share update <LINK_ID> --password",
+    "harumi share rm-password": "harumi share update <LINK_ID> --no-password",
+    "harumi share remove": "harumi share rm",
+    # The `remove`/`delete` verbs that became `rm`.
+    "harumi datasources remove": "harumi datasources rm",
+    "harumi schedules remove": "harumi schedules rm",
+    "harumi org delete": "harumi org rm",
+    "harumi org remove": "harumi org rm-member",
+    # Deprecated in 1.0.0, removed in 1.1.0 (see `_REMOVED_IN`). `blueprints` is added by `_deprecated` where it is registered.
     "harumi new --blueprint": "harumi new <NAME> --example <slug>",
 }
 
@@ -636,12 +671,6 @@ def _deprecated(old: str, use: str):
         return wrapper
 
     return decorator
-
-
-def _hidden_alias(group: typer.Typer, old_name: str, fn, old: str, use: str) -> None:
-    """Register `fn` under the retired `old_name` as a hidden command that
-    warns first. The command is left out of --help and cli-surface.json."""
-    group.command(old_name, hidden=True)(_deprecated(old, use)(fn))
 
 
 # What is taken out of a name someone else chose (the pattern is raw: `re` reads the \x and \u escapes,
@@ -1858,22 +1887,6 @@ profile_app = _typer(help="View and update your account profile.")
 app.add_typer(profile_app, name="profile")
 
 
-@profile_app.command("show", hidden=True)
-@_deprecated("harumi profile show", "harumi whoami")
-@_handle_errors
-def profile_show(
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Show your account profile."""
-    client = _get_client(api_url=api_url, org=org)
-    p = client.get_profile()
-    table = Table("field", "value")
-    for field in ("id", "email", "first_name", "last_name", "bio"):
-        table.add_row(field, _cell(getattr(p, field, "") or ""))
-    console.print(table)
-
-
 @profile_app.command("set")
 @_handle_errors
 def profile_set(
@@ -1901,14 +1914,6 @@ def profile_set(
     client = _get_client(api_url=api_url, org=org)
     p = client.update_profile(body)
     console.print(f"[bold green]Updated[/bold green] profile for [bold]{escape(str(p.email))}[/bold].")
-
-
-# ---------------------------------------------------------------------------
-# Config sub-commands
-# ---------------------------------------------------------------------------
-
-config_app = _typer(help="Deprecated: use `harumi org use`.")
-app.add_typer(config_app, name="config", hidden=True)
 
 
 @_handle_errors
@@ -1969,9 +1974,6 @@ def org_use(
 
     config.save_org_id(org_id)
     console.print(f"Workspace set to organization [bold]{escape(_printable(label))}[/bold].")
-
-
-config_app.command("set-org")(_deprecated("harumi config set-org", "harumi org use <ORG_ID>")(org_use))
 
 
 # ---------------------------------------------------------------------------
@@ -2067,19 +2069,6 @@ def agent_skills_install(
     for label, folder in skills_mod.destinations(written, project=project):
         names = ", ".join(sorted(p.name for p in written if p.parent == folder))
         console.print(f"[bold green]Installed[/bold green] for {escape(label)}: {escape(names)} in {escape(_under_home(folder))}", soft_wrap=True)
-
-
-# Retired in 0.11: `harumi skill` (singular) collided with `harumi skills`.
-skill_app = _typer(help="Deprecated: use `harumi agent-skills`.")
-app.add_typer(skill_app, name="skill", hidden=True)
-
-
-@skill_app.command("path")
-@_deprecated("harumi skill path", "harumi agent-skills install --dry-run")
-def skill_path() -> None:
-    """Print the local directory containing the bundled skills."""
-    for skill_dir in skills_mod.bundled_skill_dirs():
-        console.print(str(skill_dir))
 
 
 # ---------------------------------------------------------------------------
@@ -2265,7 +2254,7 @@ def examples(
 ) -> None:
     """List example projects: finished Harumi projects you can start a copy of with `new --example`.
 
-    Called blueprints until 0.12.0. The API still does (`GET /blueprints`), so that is what is asked for; only
+    Called blueprints until 1.0.0. The API still does (`GET /blueprints`), so that is what is asked for; only
     what a person types and reads is renamed here.
     """
     client = _get_client(api_url=api_url, org=org)
@@ -3063,42 +3052,6 @@ projects_app = _typer(help="List and manage Harumi projects (create one with `ha
 app.add_typer(projects_app, name="projects")
 
 
-@projects_app.command("create", hidden=True)
-@_deprecated("harumi projects create", "harumi new <NAME> --no-clone")
-@_handle_errors
-def projects_create(
-    name: str = typer.Argument(..., help="Project name."),
-    customer_id: Optional[str] = typer.Option(
-        None,
-        "--customer-id",
-        help="Organization id to create the project under. Defaults to the configured org.",
-    ),
-    personal: bool = typer.Option(
-        False,
-        "--personal",
-        help="Create in your personal workspace, ignoring the configured org.",
-    ),
-    blueprint: Optional[str] = typer.Option(
-        None, "--blueprint", help="Example slug to seed the project from (see `harumi examples`, optional)."
-    ),
-    api_url: Optional[str] = _API_URL,
-    git_url: Optional[str] = _GIT_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Create a new Harumi project. Doesn't touch the local directory or git."""
-    _new_impl(
-        name=name,
-        dir=None,
-        customer_id=customer_id,
-        personal=personal,
-        blueprint=blueprint,
-        clone=False,
-        api_url=api_url,
-        git_url=git_url,
-        org=org,
-    )
-
-
 @projects_app.command("list")
 @_handle_errors
 def projects_list(
@@ -3287,7 +3240,7 @@ def run(
         "--output-dir",
         "-o",
         hidden=True,
-        help="Deprecated: use `harumi runs download`.",
+        help="Removed in 1.0.0: use `harumi runs download`.",
     ),
     api_url: Optional[str] = _API_URL,
     git_url: Optional[str] = _GIT_URL,
@@ -3305,7 +3258,9 @@ def run(
     `harumi clone` (or `harumi link`, if the checkout already exists).
     """
     if output_dir:
-        _warn_deprecated("harumi run --output-dir", _RETIRED["harumi run --output-dir"])
+        # Still parsed, so a script that passes it gets the answer instead of click's "No such option", and nothing
+        # runs first: a run it would then not download is worse than an error.
+        _fail(f"`harumi run --output-dir` was removed in {_removal_version('harumi run --output-dir')}. Use: {escape(_RETIRED['harumi run --output-dir'])}")
     if tag and (branch or commit):
         _fail("--tag cannot be combined with --branch or --commit: run a tag, a branch or a commit.")
     binding = ProjectBinding.load()
@@ -3430,18 +3385,9 @@ def run(
             console.print(
                 f"[bold green]Run {result.status}[/bold green]" + (f" in {took}." if took else ".")
             )
-            if output_dir:
-                from harumi.execution import download_run_output
-
-                try:
-                    zip_path = download_run_output(client.api, project_id, result, output_dir)
-                    console.print(f"Downloaded output to {zip_path}", soft_wrap=True)
-                except HarumiError as exc:
-                    console.print(f"[yellow]{exc}[/yellow]")
-            else:
-                console.print(
-                    f"[dim]Download its output with [bold]harumi runs download {result.id}[/bold].[/dim]"
-                )
+            console.print(
+                f"[dim]Download its output with [bold]harumi runs download {result.id}[/bold].[/dim]"
+            )
         else:
             _print_failed_run(result)
             raise typer.Exit(code=1)
@@ -4064,381 +4010,6 @@ def compare(
 # harumi outputs (deprecated alias of `runs list` / `runs download`)
 # ---------------------------------------------------------------------------
 
-@app.command(hidden=True)
-@_deprecated("harumi outputs", "harumi runs list / harumi runs download [RUN_ID] -o DIR")
-@_handle_errors
-def outputs(
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id (uses .harumi binding if omitted)."),
-    latest: bool = typer.Option(False, "--latest", help="Show only the most recent run."),
-    download: Optional[str] = typer.Option(None, "--download", help="Download this run id's committed output."),
-    output_dir: Path = typer.Option(Path("."), "--output-dir", "-o", help="Directory to download into. Default: current directory."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """List or download run outputs for a project.
-
-    Deprecated alias for `harumi runs list`/`harumi runs download`; kept for
-    backwards compatibility.
-    """
-    resolved_project = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-
-    if download:
-        from harumi.execution import download_run_output
-
-        run = client.get_run(resolved_project, download)
-        zip_path = download_run_output(client.api, resolved_project, run, output_dir)
-        console.print(f"Downloaded to {zip_path}", soft_wrap=True)
-        return
-
-    if latest:
-        run = client.get_latest_run(resolved_project)
-        results = [run] if run else []
-    else:
-        results = client.list_runs(resolved_project)
-
-    if not results:
-        console.print("No runs found.")
-        return
-
-    table = Table("id", "status", "started", "ended", "git_branch")
-    for r in results:
-        table.add_row(
-            r.id,
-            r.status or "",
-            str(r.started or ""),
-            str(r.ended or ""),
-            _ref_label(r.git_branch, r.git_tag),
-        )
-    console.print(table)
-
-
-# ---------------------------------------------------------------------------
-# harumi repo
-# ---------------------------------------------------------------------------
-
-repo_app = _typer(
-    help="Deprecated: the project's repo is a plain git repo. Use git in your clone (`harumi clone`)."
-)
-app.add_typer(repo_app, name="repo", hidden=True)
-
-
-@repo_app.command("ls")
-@_deprecated("harumi repo ls", 'git ls-files (another branch: git fetch harumi && git ls-tree -r --name-only harumi/<ref>)')
-@_handle_errors
-def repo_ls(
-    ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to list (defaults to the default branch)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """List all files in the repo (flat, recursive)."""
-    project_id = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-
-    files = client.list_repo_files(project_id, ref=ref)
-    if not files:
-        console.print("No files found.")
-        return
-
-    table = Table("path", "size")
-    for f in sorted(files, key=lambda f: f.path):
-        table.add_row(f.path, str(f.size or ""))
-    console.print(table)
-
-
-@repo_app.command("cat")
-@_deprecated("harumi repo cat", 'cat <path> (another branch: git fetch harumi && git show harumi/<ref>:<path>)')
-@_handle_errors
-def repo_cat(
-    path: str = typer.Argument(..., help="File path within the repo."),
-    ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to read from."),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write to this local path instead of stdout."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Print (or save) a file's content."""
-    project_id = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-
-    file_content = client.get_repo_file(project_id, path, ref=ref)
-    raw = base64.b64decode(file_content.content) if file_content.content else b""
-
-    if output:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(raw)
-        console.print(f"Wrote {len(raw)} bytes to {output}")
-        return
-
-    try:
-        console.print(raw.decode("utf-8"))
-    except UnicodeDecodeError:
-        _fail(f"{path!r} is not valid UTF-8 text. Use --output to save it as a binary file instead.")
-
-
-@repo_app.command("put")
-@_deprecated("harumi repo put", 'copy the file into your clone, then git add <path> && git commit -m <msg> && git push harumi <branch>')
-@_handle_errors
-def repo_put(
-    local_path: Path = typer.Argument(..., help="Local file to upload."),
-    repo_path: str = typer.Argument(..., help="Destination path within the repo."),
-    message: Optional[str] = typer.Option(None, "--message", "-m", help="Commit message."),
-    branch: Optional[str] = typer.Option(None, "--branch", help="Target branch (defaults to the default branch)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Create or update a file in the repo (create if absent, else update) as one commit."""
-    project_id = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-
-    if not local_path.is_file():
-        _fail(f"{local_path} is not a file.")
-
-    content_b64 = base64.b64encode(local_path.read_bytes()).decode("ascii")
-
-    # Determine create vs update by checking whether the file already exists.
-    action = "update"
-    try:
-        client.get_repo_file(project_id, repo_path, ref=branch)
-    except ApiError as exc:
-        if exc.status_code == 404:
-            action = "create"
-        else:
-            raise
-
-    result = client.apply_repo_changes(
-        project_id,
-        operations=[{"action": action, "path": repo_path, "content": content_b64}],
-        message=message,
-        branch=branch,
-    )
-    console.print(
-        f"[bold green]{'Created' if action == 'create' else 'Updated'}[/bold green] "
-        f"{repo_path} (commit {result.commit_sha or '?'})."
-    )
-
-
-@repo_app.command("rm")
-@_deprecated("harumi repo rm", 'git rm -r <path> && git commit -m <msg> && git push harumi <branch>')
-@_handle_errors
-def repo_rm(
-    path: str = typer.Argument(..., help="File or folder path within the repo."),
-    message: Optional[str] = typer.Option(None, "--message", "-m", help="Commit message."),
-    branch: Optional[str] = typer.Option(None, "--branch", help="Target branch (defaults to the default branch)."),
-    yes: bool = _YES,
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Delete a file, or every file under a folder, as one commit."""
-    project_id = _resolve_project(project)
-
-    if not yes and not typer.confirm(
-        f"Delete '{path}' from the repo? It is a new commit, so `git revert` brings it back."
-    ):
-        console.print("Aborted.")
-        return
-
-    client = _get_client(api_url=api_url, org=org)
-    result = client.apply_repo_changes(
-        project_id,
-        operations=[{"action": "delete", "path": path}],
-        message=message,
-        branch=branch,
-    )
-    console.print(f"[bold red]Deleted[/bold red] {result.changed} file(s) (commit {result.commit_sha or '?'}).")
-
-
-@repo_app.command("mv")
-@_deprecated("harumi repo mv", 'git mv <from> <to> && git commit -m <msg> && git push harumi <branch>')
-@_handle_errors
-def repo_mv(
-    from_path: str = typer.Argument(..., help="Source path (file or folder) within the repo."),
-    to_path: str = typer.Argument(..., help="Destination path within the repo."),
-    message: Optional[str] = typer.Option(None, "--message", "-m", help="Commit message."),
-    branch: Optional[str] = typer.Option(None, "--branch", help="Target branch (defaults to the default branch)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Rename/move a file, or every file under a folder, as one commit."""
-    project_id = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-
-    result = client.apply_repo_changes(
-        project_id,
-        operations=[{"action": "move", "from_path": from_path, "path": to_path}],
-        message=message,
-        branch=branch,
-    )
-    console.print(
-        f"[bold green]Moved[/bold green] {from_path} -> {to_path} "
-        f"({result.changed} file(s), commit {result.commit_sha or '?'})."
-    )
-
-
-@repo_app.command("download")
-@_deprecated("harumi repo download", 'git archive --format=zip -o repo.zip harumi/<ref> [<path>]')
-@_handle_errors
-def repo_download(
-    output: Path = typer.Option(..., "--output", "-o", help="Local zip path to write."),
-    path: str = typer.Option("", "--path", help="Folder within the repo to download (default: whole repo)."),
-    ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to download from."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Download the repo (or a folder within it) as a zip."""
-    project_id = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-
-    zip_path = client.download_repo_archive(project_id, output, path=path, ref=ref)
-    console.print(f"Downloaded to {zip_path}", soft_wrap=True)
-
-
-@repo_app.command("branches")
-@_deprecated("harumi repo branches", 'git fetch harumi && git branch -r')
-@_handle_errors
-def repo_branches(
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """List versions (git branches). The live branch is flagged."""
-    project_id = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-
-    branches = client.list_repo_branches(project_id)
-    if not branches:
-        console.print("No branches found.")
-        return
-
-    table = Table("name", "commit_sha", "is_live")
-    for b in branches:
-        table.add_row(b.name, (b.commit_sha or "")[:8], "yes" if b.is_live else "")
-    console.print(table)
-
-
-@repo_app.command("branch-create")
-@_deprecated("harumi repo branch-create", 'git fetch harumi && git switch -c <name> harumi/main && git push -u harumi <name>')
-@_handle_errors
-def repo_branch_create(
-    name: str = typer.Argument(..., help="New branch (version) name."),
-    from_branch: Optional[str] = typer.Option(None, "--from", help="Base branch (defaults to the live branch)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Create a new version (git branch)."""
-    project_id = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-
-    branch = client.create_repo_branch(project_id, name, from_branch=from_branch)
-    console.print(f"[bold green]Created[/bold green] branch [bold]{branch.name}[/bold].")
-
-
-@repo_app.command("branch-rm")
-@_deprecated("harumi repo branch-rm", 'git push harumi --delete <name> (check `harumi schedules list` first: schedules can pin a branch)')
-@_handle_errors
-def repo_branch_rm(
-    name: str = typer.Argument(..., help="Branch (version) name."),
-    yes: bool = _YES,
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Delete a version (git branch). Never the live branch."""
-    project_id = _resolve_project(project)
-
-    if not yes and not typer.confirm(f"Delete branch '{name}'? This cannot be undone."):
-        console.print("Aborted.")
-        return
-
-    client = _get_client(api_url=api_url, org=org)
-    client.delete_repo_branch(project_id, name)
-    console.print(f"[bold red]Deleted[/bold red] branch [bold]{name}[/bold].")
-
-
-@repo_app.command("promote")
-@_deprecated("harumi repo promote", 'git fetch harumi && git switch main && git merge --ff-only harumi/main && git merge --no-ff harumi/<name> && git push harumi main')
-@_handle_errors
-def repo_promote(
-    name: str = typer.Argument(..., help="Version (branch) to promote into live."),
-    title: Optional[str] = typer.Option(None, "--title", help="PR/merge title."),
-    delete_after: bool = typer.Option(False, "--delete-after", help="Delete the version branch after a successful promote."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Promote a version into the live branch via a merge commit."""
-    project_id = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-
-    result = client.promote_repo_branch(project_id, name, title=title, delete_after=delete_after)
-    if result.conflict:
-        _fail(result.message or f"Version {name!r} could not be merged (conflicts).")
-    console.print(f"[bold green]Promoted[/bold green] [bold]{name}[/bold] into live.")
-
-
-@repo_app.command("dir")
-@_deprecated("harumi repo dir", 'ls <path>')
-@_handle_errors
-def repo_dir(
-    path: str = typer.Argument("", help="Folder within the repo (default: repo root)."),
-    ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to browse (defaults to the default branch)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """One folder level of the repo (GitHub-style browser). Use `repo ls` for a flat, whole-repo listing."""
-    project_id = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-
-    listing = client.list_repo_dir(project_id, path=path, ref=ref)
-    if not listing.entries:
-        console.print(f"No entries at {path or '/'!r} on {listing.ref!r}.")
-        return
-
-    table = Table("name", "type", "size", "last_commit")
-    for e in sorted(listing.entries, key=lambda e: (e.type != "dir", e.name)):
-        last = e.last_commit.message[:60] if e.last_commit else ""
-        table.add_row(e.name, e.type, str(e.size or ""), last)
-    console.print(table)
-
-
-@repo_app.command("commits")
-@_deprecated("harumi repo commits", 'git log --oneline [-- <path>]')
-@_handle_errors
-def repo_commits(
-    path: Optional[str] = typer.Argument(None, help="File or folder to filter history to (default: the whole branch)."),
-    ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to read history on (defaults to the default branch)."),
-    page: int = typer.Option(1, "--page", help="Page number, 1-indexed."),
-    per_page: int = typer.Option(30, "--per-page", help="Commits per page (max 100)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Show recent commit history. Pass a file or folder to see just its history."""
-    project_id = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-
-    result = client.list_repo_commits(project_id, ref=ref, path=path, page=page, per_page=per_page)
-    if not result.commits:
-        console.print(f"No commits on {result.ref!r}.")
-        return
-
-    table = Table("sha", "message", "author", "date")
-    for c in result.commits:
-        table.add_row(
-            c.sha[:8],
-            c.message.splitlines()[0] if c.message else "",
-            c.author_name or c.author_login or "",
-            str(c.committed_at) if c.committed_at else "",
-        )
-    console.print(table)
-
 
 @app.command("check")
 @_handle_errors
@@ -4502,18 +4073,6 @@ _CHECK_LABELS = {
     "manifest_valid": "harumi.toml is valid",
     "kernel": "Kernel is allowed",
 }
-
-
-@repo_app.command("readiness")
-@_deprecated("harumi repo readiness", "harumi check")
-def _repo_readiness(
-    ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to check (defaults to the default branch)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Deprecated: use `harumi check`. Unlike `check`, this always exits 0."""
-    _check(ref=ref, project=project, api_url=api_url, org=org, exit_when_blocked=False)
 
 
 # ---------------------------------------------------------------------------
@@ -5372,39 +4931,6 @@ def share_rotate(
         raise
     console.print("[bold green]Rotated[/bold green] share link. Anyone using the old URL now needs the new one.")
     _print_share_link(link)
-
-
-@share_app.command("set-password", hidden=True)
-@_deprecated("harumi share set-password", "harumi share update <LINK_ID> --password")
-@_handle_errors
-def share_set_password(
-    link_id: str = typer.Argument(..., help="Share link id."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Set or change a share link's password (min 8 characters, prompted, hidden input)."""
-    project_id = _resolve_project(project)
-    password = _prompt_hidden("Enter share link password (hidden, min 8 characters)")
-    client = _get_client(api_url=api_url, org=org)
-    client.set_share_link_password(project_id, link_id, password)
-    console.print("[bold green]Set[/bold green] the share link password. Previously unlocked viewers must re-enter it.")
-
-
-@share_app.command("rm-password", hidden=True)
-@_deprecated("harumi share rm-password", "harumi share update <LINK_ID> --no-password")
-@_handle_errors
-def share_rm_password(
-    link_id: str = typer.Argument(..., help="Share link id."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
-    api_url: Optional[str] = _API_URL,
-    org: Optional[str] = _ORG,
-) -> None:
-    """Remove a share link's password. It becomes freely viewable."""
-    project_id = _resolve_project(project)
-    client = _get_client(api_url=api_url, org=org)
-    client.remove_share_link_password(project_id, link_id)
-    console.print("[bold red]Removed[/bold red] the share link password.")
 
 
 # ---------------------------------------------------------------------------
@@ -6681,20 +6207,12 @@ def org_rm_member(
 
 
 # ---------------------------------------------------------------------------
-# Deprecated names — hidden, warn on stderr, removed in 0.12.0
+# Deprecated names — hidden, warn on stderr, removed in 1.0.0
 # ---------------------------------------------------------------------------
 # Renamed in 0.11. Each runs the new command's code unchanged. (Aliases whose
 # behaviour differs are declared next to the command they replace.)
 
-app.command("push", hidden=True)(_deprecated("harumi push", "harumi import")(import_project))
-skill_app.command("install")(_deprecated("harumi skill install", "harumi agent-skills install")(agent_skills_install))
 app.command("blueprints", hidden=True)(_deprecated("harumi blueprints", "harumi examples")(examples))
-_hidden_alias(projects_app, "delete", projects_rm, "harumi projects delete", "harumi projects rm")
-_hidden_alias(share_app, "remove", share_rm, "harumi share remove", "harumi share rm")
-_hidden_alias(datasources_app, "remove", datasources_rm, "harumi datasources remove", "harumi datasources rm")
-_hidden_alias(schedules_app, "remove", schedules_rm, "harumi schedules remove", "harumi schedules rm")
-_hidden_alias(org_app, "delete", org_rm, "harumi org delete", "harumi org rm")
-_hidden_alias(org_app, "remove", org_rm_member, "harumi org remove", "harumi org rm-member")
 
 
 # Which help panel each command is listed under. One table so the grouping can be read, and argued with, in

@@ -44,7 +44,8 @@ jobs:
   # release that the package did not declare it (0.11.0 did not start on 3.9). A user installs exactly the wheel.
   wheel:
     name: wheel (${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    # 3.9 has no build on ubuntu-latest (Ubuntu 26.04), and is the lowest Python we support.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     strategy:
@@ -70,7 +71,8 @@ jobs:
   # branch protection as required (only `test` is) — see the note above.
   compat:
     name: compat (${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    # 3.9 has no build on ubuntu-latest (Ubuntu 26.04), and is the lowest Python we support.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     strategy:

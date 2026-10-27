@@ -185,7 +185,7 @@ def test_the_old_command_still_lists_the_same_things_and_warns_on_stderr(server)
     new = runner.invoke(cli.app, ["examples", "--json"])
 
     assert old.exit_code == 0 and json.loads(old.stdout) == json.loads(new.stdout)
-    assert "deprecated" in old.stderr and "harumi examples" in old.stderr and "0.13.0" in old.stderr
+    assert "deprecated" in old.stderr and "harumi examples" in old.stderr and "1.1.0" in old.stderr
     assert "deprecated" not in old.stdout and new.stderr == ""
 
 
@@ -196,7 +196,7 @@ def test_the_old_option_still_creates_the_project_and_warns_on_stderr(server, tm
 
     assert result.exit_code == 0, result.stderr
     assert server["created"][0]["blueprint"] == "vehicle-routing"
-    assert "deprecated" in result.stderr and "--example" in result.stderr and "0.13.0" in result.stderr
+    assert "deprecated" in result.stderr and "--example" in result.stderr and "1.1.0" in result.stderr
     assert "deprecated" not in result.stdout
 
 

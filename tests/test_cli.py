@@ -220,7 +220,6 @@ def test_cli_surface_normalizes_click_builtin_type_names():
         assert type_of(shared) == shared
 
 
-
 @pytest.fixture(autouse=True)
 def isolated_harumi_home(tmp_path, monkeypatch):
     """Redirect ~/.harumi to a temp dir and pre-store a session, so commands
@@ -1210,244 +1209,6 @@ def test_start_dispatches_to_new_when_the_user_has_nothing_yet(api, git_ops, tmp
 # ---------------------------------------------------------------------------
 
 FILE_CONTENT_B64 = "cHJpbnQoJ2hpJyk="  # print('hi')
-
-
-def test_repo_ls_lists_files_and_forwards_ref(api):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/files",
-        [{"name": "main.py", "path": "main.py", "type": "file", "size": 10}],
-    )
-
-    result = runner.invoke(cli.app, ["repo", "ls", "--project", "proj-1", "--ref", "dev"])
-
-    assert result.exit_code == 0, result.output
-    assert "main.py" in result.output
-    assert api.params_for("GET", "/api/projects/proj-1/repo/files")["ref"] == "dev"
-
-
-def test_repo_cat_decodes_base64_to_stdout(api):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/file-content",
-        {"path": "main.py", "sha": "abc", "encoding": "base64", "content": FILE_CONTENT_B64},
-    )
-
-    result = runner.invoke(cli.app, ["repo", "cat", "main.py", "--project", "proj-1"])
-
-    assert result.exit_code == 0, result.output
-    assert "print('hi')" in result.output
-
-
-def test_repo_cat_output_flag_writes_bytes_to_disk(api, tmp_path):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/file-content",
-        {"path": "main.py", "sha": "abc", "encoding": "base64", "content": FILE_CONTENT_B64},
-    )
-    dest = tmp_path / "nested" / "main.py"
-
-    result = runner.invoke(
-        cli.app, ["repo", "cat", "main.py", "--project", "proj-1", "-o", str(dest)]
-    )
-
-    assert result.exit_code == 0, result.output
-    # Also proves the command creates missing parent dirs.
-    assert dest.read_bytes() == b"print('hi')"
-
-
-def test_repo_cat_rejects_non_utf8_without_output(api):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/file-content",
-        {"path": "a.bin", "sha": "abc", "encoding": "base64", "content": "/w=="},  # 0xFF
-    )
-
-    result = runner.invoke(cli.app, ["repo", "cat", "a.bin", "--project", "proj-1"])
-
-    assert result.exit_code == 1
-    assert "--output" in result.output
-
-
-def test_repo_put_sends_create_when_file_is_absent(api, tmp_path):
-    local = tmp_path / "new.py"
-    local.write_text("x = 1")
-    api.route("GET", "/api/projects/proj-1/repo/file-content", {"detail": "nope"}, status=404)
-    api.route("POST", "/api/projects/proj-1/repo/changes", {"commit_sha": "cafe", "changed": 1})
-
-    result = runner.invoke(
-        cli.app, ["repo", "put", str(local), "new.py", "--project", "proj-1"]
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "Created" in result.output
-    ops = api.body_for("POST", "/api/projects/proj-1/repo/changes")["operations"]
-    assert ops[0]["action"] == "create"
-
-
-def test_repo_put_sends_update_when_file_exists(api, tmp_path):
-    local = tmp_path / "main.py"
-    local.write_text("x = 2")
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/file-content",
-        {"path": "main.py", "sha": "abc", "encoding": "base64", "content": FILE_CONTENT_B64},
-    )
-    api.route("POST", "/api/projects/proj-1/repo/changes", {"commit_sha": "cafe", "changed": 1})
-
-    result = runner.invoke(
-        cli.app, ["repo", "put", str(local), "main.py", "--project", "proj-1"]
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "Updated" in result.output
-    ops = api.body_for("POST", "/api/projects/proj-1/repo/changes")["operations"]
-    assert ops[0]["action"] == "update"
-
-
-def test_repo_put_rejects_a_missing_local_file(api, tmp_path):
-    result = runner.invoke(
-        cli.app, ["repo", "put", str(tmp_path / "ghost.py"), "x.py", "--project", "proj-1"]
-    )
-
-    assert result.exit_code != 0
-    assert api.requests == []
-
-
-def test_repo_rm_aborts_without_confirmation(api):
-    api.route("POST", "/api/projects/proj-1/repo/changes", {"commit_sha": "cafe", "changed": 1})
-
-    result = runner.invoke(cli.app, ["repo", "rm", "main.py", "--project", "proj-1"], input="n\n")
-
-    assert result.exit_code == 0, result.output
-    assert "Aborted." in result.output
-    # The safety property that matters: a declined prompt sends nothing.
-    assert api.requests == []
-
-
-def test_repo_rm_deletes_when_confirmed(api):
-    api.route("POST", "/api/projects/proj-1/repo/changes", {"commit_sha": "cafe", "changed": 1})
-
-    result = runner.invoke(cli.app, ["repo", "rm", "main.py", "--project", "proj-1"], input="y\n")
-
-    assert result.exit_code == 0, result.output
-    ops = api.body_for("POST", "/api/projects/proj-1/repo/changes")["operations"]
-    assert ops == [{"action": "delete", "path": "main.py"}]
-
-
-def test_repo_rm_yes_flag_skips_the_prompt(api):
-    api.route("POST", "/api/projects/proj-1/repo/changes", {"commit_sha": "cafe", "changed": 2})
-
-    result = runner.invoke(cli.app, ["repo", "rm", "out/", "--project", "proj-1", "--yes"])
-
-    assert result.exit_code == 0, result.output
-    assert "Deleted" in result.output
-
-
-def test_repo_mv_sends_a_move_operation(api):
-    api.route("POST", "/api/projects/proj-1/repo/changes", {"commit_sha": "cafe", "changed": 1})
-
-    result = runner.invoke(
-        cli.app, ["repo", "mv", "old.py", "new.py", "--project", "proj-1", "-m", "rename"]
-    )
-
-    assert result.exit_code == 0, result.output
-    body = api.body_for("POST", "/api/projects/proj-1/repo/changes")
-    assert body["operations"] == [
-        {"action": "move", "from_path": "old.py", "path": "new.py"}
-    ]
-    assert body["message"] == "rename"
-
-
-def test_repo_branches_flags_the_live_branch(api):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/branches",
-        [
-            {"name": "main", "commit_sha": "abcdef1234", "is_live": True},
-            {"name": "feature-x", "commit_sha": "deadbeef99", "is_live": False},
-        ],
-    )
-
-    result = runner.invoke(cli.app, ["repo", "branches", "--project", "proj-1"])
-
-    assert result.exit_code == 0, result.output
-    assert "main" in result.output
-    assert "feature-x" in result.output
-    # Commit shas are truncated to 8 chars for display.
-    assert "abcdef12" in result.output
-    assert "abcdef1234" not in result.output
-
-
-def test_repo_branch_rm_aborts_without_confirmation(api):
-    result = runner.invoke(
-        cli.app, ["repo", "branch-rm", "feature-x", "--project", "proj-1"], input="n\n"
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "Aborted." in result.output
-    assert api.requests == []
-
-
-def test_repo_commits_lists_history_and_forwards_params(api):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/commits",
-        {
-            "ref": "dev",
-            "path": "main.py",
-            "page": 2,
-            "per_page": 10,
-            "total": 1,
-            "commits": [
-                {
-                    "sha": "abcdef1234",
-                    "message": "Fix the thing\n\nlonger body",
-                    "author_name": "Ada",
-                    "committed_at": "2026-01-01T00:00:00Z",
-                }
-            ],
-        },
-    )
-
-    result = runner.invoke(
-        cli.app,
-        [
-            "repo",
-            "commits",
-            "main.py",
-            "--ref",
-            "dev",
-            "--page",
-            "2",
-            "--per-page",
-            "10",
-            "--project",
-            "proj-1",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    # Sha truncated to 8 chars; only the message's first line is shown.
-    assert "abcdef12" in result.output
-    assert "abcdef1234" not in result.output
-    assert "Fix the thing" in result.output
-    assert "longer body" not in result.output
-    params = api.params_for("GET", "/api/projects/proj-1/repo/commits")
-    assert params == {"page": "2", "per_page": "10", "ref": "dev", "path": "main.py"}
-
-
-def test_repo_commits_reports_empty_history(api):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/commits",
-        {"ref": "main", "page": 1, "per_page": 30, "commits": []},
-    )
-
-    result = runner.invoke(cli.app, ["repo", "commits", "--project", "proj-1"])
-
-    assert result.exit_code == 0, result.output
-    assert "No commits on 'main'." in result.output
 
 
 def test_check_reports_ready(api):
@@ -2766,11 +2527,6 @@ def test_dashboard_validate_explicit_path_checks_only_that_file(api, tmp_path, m
     assert "dropped" not in result.output
 
 
-
-
-
-
-
 COMPARISON = {
     "columns": [
         {"run_id": "7f3a91c2-0000-4000-8000-000000000001", "branch": "main", "commit": "aaaaaaa1", "status": "completed", "runtime_s": 90.0},
@@ -3340,7 +3096,7 @@ def test_memories_add_accepts_content_at_the_limit(api):
 # ---------------------------------------------------------------------------
 
 
-def test_deprecated_names_are_hidden_from_help_and_the_surface():
+def test_the_removed_names_are_gone_from_the_command_tree_and_the_surface():
     from typer.main import get_command
 
     from scripts.emit_cli_surface import build_surface
@@ -3348,39 +3104,38 @@ def test_deprecated_names_are_hidden_from_help_and_the_surface():
     # Ask the command tree rather than scraping --help: the rendered help is
     # colourised differently on CI.
     top = get_command(cli.app).commands
-    for old in ("push", "repo", "outputs", "config", "skill"):
-        assert top[old].hidden, f"{old} should be hidden"
+    for gone in ("push", "repo", "outputs", "config", "skill"):
+        assert gone not in top, f"{gone} was removed in 1.0.0"
     assert not top["import"].hidden
+    assert top["blueprints"].hidden  # deprecated in 1.0.0, removed in 1.1.0: still here, still warning
 
     paths = {command["path"] for command in build_surface()["commands"]}
-    assert "push" not in paths and "outputs" not in paths
+    assert "push" not in paths and "outputs" not in paths and "blueprints" not in paths
     assert not any(path.startswith(("repo ", "config ", "skill ")) for path in paths)
     assert not any(path.endswith((" remove", " delete", " set-password", " rm-password", " current")) for path in paths)
 
 
 @pytest.mark.parametrize(
-    "argv, method, route, use",
+    "argv, use",
     [
-        (["projects", "delete", "p1", "--yes"], "DELETE", "/api/projects/p1", "harumi projects rm"),
-        (["share", "remove", "0a1b2c3d-1111-4222-8333-444455556666", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", "harumi share rm"),
-        (["schedules", "remove", "5c4e1b2a-0000-4000-8000-000000000001", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/schedules/5c4e1b2a-0000-4000-8000-000000000001", "harumi schedules rm"),
-        (["datasources", "remove", "sales_db", "--yes", "-p", "proj-1"], "DELETE", "/api/datasources/proj-1/sales_db", "harumi datasources rm"),
-        (["org", "delete", "6d1c0aa5-0000-4000-8000-0000000000a1", "--yes"], "DELETE", "/api/users/organizations/6d1c0aa5-0000-4000-8000-0000000000a1", "harumi org rm"),
-        (["share", "rm-password", "0a1b2c3d-1111-4222-8333-444455556666", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", "share update <LINK_ID> --no-password"),
-        (["repo", "ls", "-p", "proj-1"], "GET", "/api/projects/proj-1/repo/files", "git ls-files"),
+        (["projects", "delete", "p1", "--yes"], "harumi projects rm"),
+        (["share", "remove", "0a1b2c3d-1111-4222-8333-444455556666", "--yes", "-p", "proj-1"], "harumi share rm"),
+        (["schedules", "remove", "5c4e1b2a-0000-4000-8000-000000000001", "--yes", "-p", "proj-1"], "harumi schedules rm"),
+        (["datasources", "remove", "sales_db", "--yes", "-p", "proj-1"], "harumi datasources rm"),
+        (["org", "delete", "6d1c0aa5-0000-4000-8000-0000000000a1", "--yes"], "harumi org rm"),
+        (["share", "rm-password", "0a1b2c3d-1111-4222-8333-444455556666", "-p", "proj-1"], "share update <LINK_ID> --no-password"),
+        (["repo", "ls", "-p", "proj-1"], "git ls-files"),
     ],
 )
-def test_a_deprecated_name_still_runs_and_names_its_replacement(api, argv, method, route, use):
-    api.route(method, route, [] if argv[0] == "repo" else {**SHARE_LINK, "id": "x", "name": "x"})
-    api.route("GET", "/api/users/organizations", [{"id": "6d1c0aa5-0000-4000-8000-0000000000a1", "business_name": "Acme", "role": "owner"}])  # `org rm` names what it deletes
-
+def test_a_removed_name_answers_with_its_replacement_and_sends_nothing(api, argv, use):
+    """The destructive ones above used to delete. Gone now, they must not: a script that still calls `projects delete`
+    has to be told, not run (and not have the real thing happen under a name that is supposed to be gone)."""
     result = runner.invoke(cli.app, argv)
 
-    assert "deprecated" in result.output
-    assert use in result.output
-    assert "removed in 0.12.0" in result.output
-    # It really ran: the request the new name makes was sent.
-    assert api.requests and api.requests[-1].url.path == route
+    assert result.exit_code == 2, result.output
+    assert " ".join(use.split()) in " ".join(result.output.split())
+    assert "removed in 1.0.0" in result.output
+    assert api.requests == [], "a removed name must not reach the API"
 
 
 def test_org_remove_is_now_org_rm_member_and_org_delete_is_org_rm(api):
@@ -3398,7 +3153,7 @@ def test_org_remove_is_now_org_rm_member_and_org_delete_is_org_rm(api):
     assert api.paths() == ["/api/users/organizations", "/api/users/organizations/6d1c0aa5-0000-4000-8000-0000000000a1"]
 
 
-def test_org_use_persists_the_org_and_the_old_config_name_still_works(api):
+def test_org_use_persists_the_org(api):
     from harumi.config import Config
 
     # The id is checked against your organizations before it is saved, so they have to exist.
@@ -3410,19 +3165,24 @@ def test_org_use_persists_the_org_and_the_old_config_name_still_works(api):
     assert new.exit_code == 0, new.output
     assert Config.load().org_id == "org-9"
 
+
+def test_config_set_org_is_removed_and_does_not_change_the_workspace(api):
+    from harumi.config import Config
+
+    before = Config.load().org_id
     old = runner.invoke(cli.app, ["config", "set-org", "org-10"])
-    assert old.exit_code == 0, old.output
-    assert "harumi org use" in old.output
-    assert Config.load().org_id == "org-10"
+
+    assert old.exit_code == 2 and "removed in 1.0.0" in old.output and "harumi org use" in old.output
+    assert Config.load().org_id == before
 
 
-def test_skill_path_and_profile_show_are_deprecated_not_gone(api):
-    api.route("GET", "/api/users/profile", {"id": "u1", "email": "dev@harumi.test"})
-
-    assert "agent-skills install --dry-run" in runner.invoke(cli.app, ["skill", "path"]).output
+def test_skill_path_and_profile_show_are_removed_and_say_what_replaced_them(api):
+    skill = runner.invoke(cli.app, ["skill", "path"])
     shown = runner.invoke(cli.app, ["profile", "show"])
-    assert "harumi whoami" in shown.output
-    assert "dev@harumi.test" in shown.output
+
+    assert skill.exit_code == 2 and "agent-skills install --dry-run" in " ".join(skill.output.split())
+    assert shown.exit_code == 2 and "harumi whoami" in shown.output
+    assert api.requests == []
 
 
 def test_whoami_shows_the_profile_and_org_but_not_the_environment_to_a_production_user(api):
@@ -3455,37 +3215,25 @@ def test_new_no_clone_creates_only_and_points_at_clone(api, git_ops, tmp_path, m
     assert "--dir" in with_dir.output
 
 
-def test_projects_create_is_a_deprecated_new_no_clone(api, git_ops, tmp_path, monkeypatch):
+def test_projects_create_is_removed_and_creates_nothing(api, git_ops, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    api.route("POST", "/api/projects", {"id": "proj-9", "name": "Widget", "notebook_ids": []})
-    _route_project_repo(api, "proj-9", "widget")
 
     result = runner.invoke(cli.app, ["projects", "create", "Widget"])
 
-    assert result.exit_code == 0, result.output
-    assert "harumi new <NAME> --no-clone" in result.output
-    assert "harumi clone proj-9" in result.output
-    assert git_ops["clone"] == []
+    assert result.exit_code == 2, result.output
+    assert "harumi new <NAME> --no-clone" in " ".join(result.output.split())
+    assert api.requests == [] and git_ops["clone"] == []
 
 
-def test_push_is_a_deprecated_import(api, git_ops, tmp_path):
-    from harumi.config import save_git_token
-
-    save_git_token("gitea-token", username="dev@harumi.test")
+def test_push_is_removed_and_uploads_nothing(api, git_ops, tmp_path):
     folder = tmp_path / "solver"
     folder.mkdir()
     (folder / "main.py").write_text("print(1)\n")
-    api.route(
-        "POST",
-        "/api/projects",
-        {"id": "proj-1", "name": "solver", "notebook_ids": [], "repo": {"owner": "a", "name": "s", "clone_url": "https://git.harumi.test/a/s.git", "default_branch": "main"}},
-    )
-    _route_project_repo(api, "proj-1", "solver")
 
     result = runner.invoke(cli.app, ["push", str(folder)])
 
-    assert "harumi import" in result.output
-    assert git_ops["push_folder"], result.output
+    assert result.exit_code == 2 and "harumi import" in result.output
+    assert api.requests == [] and not git_ops["push_folder"], result.output
 
 
 def test_runs_download_defaults_to_the_latest_run(api, tmp_path, monkeypatch):
