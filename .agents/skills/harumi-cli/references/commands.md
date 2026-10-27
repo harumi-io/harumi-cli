@@ -128,7 +128,7 @@ harumi specs [--json] [--api-url URL] [--org ORG]
 harumi examples [--json] [--api-url URL] [--org ORG]
 ```
 
-`--json` is an array of those three fields. Lists example projects (`slug`, `name`, `description`): finished Harumi projects you can start a copy of. Pass an example's `slug` as `new --example`. They were called blueprints until 0.12.0 and the API still calls them that (`GET /blueprints`), so that is what is asked for. `harumi blueprints` and `new --blueprint` still work, hidden, with a `deprecated:` line on stderr, and are removed in 0.13.0.
+`--json` is an array of those three fields. Lists example projects (`slug`, `name`, `description`): finished Harumi projects you can start a copy of. Pass an example's `slug` as `new --example`. They were called blueprints until 1.0.0 and the API still calls them that (`GET /blueprints`), so that is what is asked for. `harumi blueprints` and `new --blueprint` still work, hidden, with a `deprecated:` line on stderr, and are removed in 1.1.0.
 
 ## `projects`
 
@@ -306,7 +306,7 @@ harumi compare [RUN_ID...] [--json] [--project ID] [--api-url URL] [--org ORG]
 
 ## Editing the repo (git)
 
-There is no `harumi repo`. A project's repo is a plain git repo; `harumi clone` leaves a remote named `harumi` with the token embedded in its URL, so `git fetch harumi` / `git push harumi <branch>` work with no further setup. Before 0.11 each of these was a `harumi repo` subcommand; those still run (hidden, with a warning) until 0.12.0.
+There is no `harumi repo`. A project's repo is a plain git repo; `harumi clone` leaves a remote named `harumi` with the token embedded in its URL, so `git fetch harumi` / `git push harumi <branch>` work with no further setup. Each of these was a `harumi repo` subcommand until 1.0.0 removed them; running one now exits 2 and prints the git command to use.
 
 | Task | Command in the clone |
 |---|---|
@@ -593,7 +593,7 @@ Every command that deletes or removes something follows one rule, from `projects
 | At a terminal, no `--yes` | Asks `[y/N]`. Enter is **No**. Declining prints `Aborted.` and **exits 1**, so `harumi org rm X && deploy` stops. |
 | No terminal (a script, CI, an agent, a pipe), no `--yes` | **Refuses at once**: `Cannot ask here: no interactive terminal. Run it again with --yes to go ahead.` and exits 1. It never prints a prompt into a log and waits, and a `y` piped to stdin is **not** consent (it was not given to this question). |
 
-The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `tags rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 0.12.0.
+The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `tags rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 1.0.0.
 
 - **The permanent ones that take other things with them ask you to type the name** instead of `y`: `projects rm` (the project name) and `org rm` (the organization name, exactly: case and spaces count; Enter is a no). An agent passes `--yes` and still must name the project or organization (`--yes` with no name is refused).
 - **The question says which one**, not a UUID: a schedule by its cron, branch and command, a memory by its text, a file by its name and size, a share link by its label.
@@ -606,7 +606,7 @@ The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share upda
 - **Asking for help:** `-h` and `--help` work on every command and group (`harumi projects rm -h`); `harumi help [COMMAND]` is the same. `-v` is `--version`.
 - **The verbs** repeat across groups: `list`, `get`, `add`, `update`, `rm`. Four groups are irregular and are not renamed, because a rename needs a deprecation window: `files` uses `ls`, `put`, `get`, `rm`; `org` uses `create`; `memories` uses `edit`; `secrets` and `profile` use `set`.
 - **A wrong verb is answered, never guessed:** `harumi secrets create` exits 2 with `No such command 'create'. Did you mean 'set'? Commands: list, set, rm.`; `org add` names both `create` (a new organization) and `invite` (a person); `harumi version` points at `--version`. It is a hint, not an alias, so nothing runs. A misspelling (`harumi shar`) gets `Did you mean 'share'?` on every supported Typer version. Hidden deprecated names (`projects delete`, ...) keep working and are not listed.
-- **Retired names:** the 28 names deprecated in 0.11 (`push`, `repo ...`, `outputs`, the `remove`/`delete` verbs, ...) warn on stderr while they work, and their own `--help` starts with `Deprecated: removed in 0.12.0. Use: ...`. Once 0.12.0 removes them, running one exits 2 with the same hint (`` `harumi push` was removed in 0.12.0. Use: harumi import ``) instead of a bare "No such command"; a name that never existed gets no such history.
+- **Removed names:** the 28 names deprecated in 0.11 (`push`, `repo ...`, `outputs`, the `remove`/`delete` verbs, ...) were removed in 1.0.0. Running one exits 2 with the hint (`` `harumi push` was removed in 1.0.0. Use: harumi import ``) instead of a bare "No such command", and sends nothing to the API; a name that never existed gets no such history. `run --output-dir` exits 1 with the same kind of hint, before anything runs. Still working, with a `deprecated:` line on stderr and removed in 1.1.0: `harumi blueprints` and `harumi new --blueprint` (use `examples` and `--example`).
 - **The help is grouped** into *Get started*, *Run and results*, *Project*, *Account and team* and *Help and updates*. `--api-url`, `--git-url` and `--org` (which point a command at another server or organization) are listed under an **Advanced** heading in every command's help; they are all still there, and still in the contract, only apart. (`usage --org` is the exception: it is what the command is about.)
 - **Examples:** the commands people reach for first (about 30 of them, from `login` to `projects rm`) end their `--help` with an `Examples:` block. Each line is parsed against the real command in the test suite, so none can name a flag that does not exist. Words in capitals (`PROJECT_ID`, `SLUG`) are for you to fill in. A secret is never in an example: those are prompted for.
 - **Completion** (`harumi --install-completion`, once per shell): commands, subcommands, flags, and the fixed-list values `--type` (`postgresql`, `mysql`, `sqlserver`, `oracle`), `--role` and `--mode`. Ids and names are not completed: that would need a login and a request on every TAB.

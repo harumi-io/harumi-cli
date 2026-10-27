@@ -320,17 +320,17 @@ def test_not_ready_with_no_failing_check_does_not_claim_zero_problems(server):
     assert "Not ready" in out and "did not say why" in out
 
 
-def test_the_old_repo_readiness_command_still_exits_zero_for_the_scripts_that_use_it(server):
-    """`harumi check` now exits 1 when blocked. `harumi repo readiness` never did, and
-    scripts that call it and ignore the exit code must not start failing."""
+def test_repo_readiness_is_removed_and_check_is_the_one_that_exits_1_when_blocked(server):
+    """`harumi repo readiness` always exited 0, so scripts that ignored the code kept working. It was removed in 1.0.0;
+    `harumi check` is what is left, and it exits 1 when the project cannot run."""
     server(readiness=readiness(False, [{"id": "manifest_valid", "ok": False, "detail": "missing entrypoint"}]))
 
     old = runner.invoke(cli.app, ["repo", "readiness", "--project", P])
     new = runner.invoke(cli.app, ["check", "--project", P])
 
-    assert old.exit_code == 0, old.output
-    assert "missing entrypoint" in old.output and "Not ready" in " ".join(old.output.split())
+    assert old.exit_code == 2 and "removed in 1.0.0" in old.output and "harumi check" in old.output
     assert new.exit_code == 1
+    assert "missing entrypoint" in new.output
 
 
 def test_a_check_the_cli_has_no_name_for_still_shows_its_id(server):

@@ -110,16 +110,32 @@ def test_the_error_lists_the_commands_that_do_exist():
     assert code == 2 and "Commands:" in out and all(word in out for word in ("list", "set", "rm"))
 
 
-def test_the_list_leaves_out_hidden_aliases():
+def test_the_list_of_commands_does_not_offer_names_that_were_removed():
     code, out = said(["projects", "frobnicate"])
 
     listed = out.split("Commands:")[1]
-    assert "rm" in listed and "delete" not in listed and "create" not in listed  # `delete` and `create` are hidden aliases
+    assert "rm" in listed and "delete" not in listed and "create" not in listed  # both were removed in 1.0.0
 
 
-@pytest.mark.parametrize("args", [["projects", "delete", "--help"], ["org", "delete", "--help"], ["schedules", "remove", "--help"]])
-def test_the_hidden_aliases_still_work_and_are_not_turned_into_errors(args):
-    code, _ = said(args)
+@pytest.mark.parametrize(
+    "args, answer",
+    [
+        (["projects", "delete", "p1"], "harumi projects rm"),
+        (["org", "delete", "o1"], "harumi org rm"),
+        (["schedules", "remove", "s1"], "harumi schedules rm"),
+    ],
+)
+def test_a_removed_verb_is_answered_not_guessed_at(args, answer):
+    """`delete` is close to nothing real, so a spelling guess would be wrong; the removal answer names the verb."""
+    code, out = said(args)
+
+    assert code == 2 and "was removed in 1.0.0" in out and answer in out
+    assert "Did you mean" not in out
+
+
+def test_blueprints_is_the_one_old_name_that_still_works():
+    """Deprecated in 1.0.0, so it keeps working, with a warning, until 1.1.0."""
+    code, _ = said(["blueprints", "--help"])
 
     assert code == 0
 
