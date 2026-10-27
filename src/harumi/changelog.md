@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.12.0 - 2026-10-23
+## 0.12.0 - 2026-10-27
 
 A friendlier first session, readable output everywhere, and the same rules for every command: how it confirms, how it fails, what it prints for a script.
 
