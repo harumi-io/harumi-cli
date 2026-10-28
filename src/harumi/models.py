@@ -121,6 +121,18 @@ class BranchInfo(BaseModel):
     is_live: bool = False
 
 
+class TagInfo(BaseModel):
+    """One entry from GET /projects/{id}/repo/tags: a movable label (like `prod`)
+    on one commit. A run or schedule that names a tag runs the commit it points at."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    commit_sha: Optional[str] = None
+    message: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
 class PromoteResult(BaseModel):
     """Response from POST /projects/{id}/repo/promote."""
 
@@ -306,6 +318,8 @@ class ProjectRun(BaseModel):
     run_type: Optional[str] = None
     source: Optional[str] = None
     git_branch: Optional[str] = None
+    # Set when the run was started from a tag; git_commit is then what it resolved to.
+    git_tag: Optional[str] = None
     git_commit: Optional[str] = None
     command: Optional[str] = None
     kernel_spec: Optional[str] = None
@@ -399,7 +413,9 @@ class Schedule(BaseModel):
     project_id: str
     cron: str
     start_at: Optional[datetime] = None
-    git_branch: str = "main"
+    # A schedule follows a branch or a tag, never both: git_branch is None for a tag.
+    git_branch: Optional[str] = "main"
+    git_tag: Optional[str] = None
     git_commit: Optional[str] = None
     command: Optional[str] = None
     kernel_spec: str = "or_python_small"
@@ -562,6 +578,7 @@ class ProjectShareLink(BaseModel):
     chat_enabled: bool = False
     run_history_enabled: bool = False
     run_control_enabled: bool = False
+    comparisons_enabled: bool = False
     password_set: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -634,21 +651,72 @@ class CreditLedgerEntry(BaseModel):
     created_at: str
 
 
+class MemberUsage(BaseModel):
+    """The caller's own share of an org account, when the org caps them."""
+
+    model_config = ConfigDict(extra="allow")
+
+    weekly_used_pct: Optional[float] = None
+    monthly_used_pct: Optional[float] = None
+
+
 class CreditUsage(BaseModel):
     """Response from `GET /billing/usage` — the caller's (or, with
-    `--org`/`X-Organization`, an org's) current credit allowance. Mirrors
-    harumi-api's `UsageSummary` (`src/api/billing/models.py`); `balance_credits`
-    is what's left of `included_credits` for the current period."""
+    `--org`/`X-Organization`, an org's) current allowance. Mirrors
+    harumi-api's `UsageSummary` (`src/api/billing/models.py`).
+
+    Users are shown the `*_used_pct` meters and dollar overage; the raw credit
+    fields are kept for `--json`-style scripting and older servers. A `None`
+    percentage means that window has no limit (`unlimited`, or no weekly cap).
+    """
 
     model_config = ConfigDict(extra="allow")
 
     billing_account_id: str
     plan_code: str
+    tier: Optional[str] = None
+    unlimited: bool = False
     balance_credits: int
     included_credits: int
     period_start: str
     period_end: str
+    weekly_used_pct: Optional[float] = None
+    monthly_used_pct: Optional[float] = None
+    weekly_resets_at: Optional[str] = None
+    monthly_resets_at: Optional[str] = None
+    overage_allowed: bool = False
     overage_enabled: bool
-    overage_cap_credits: int
+    overage_paused: bool = False
+    overage_cap_cents: int = 0
+    overage_spent_cents: int = 0
+    overage_cap_credits: int = 0
+    subscription_status: Optional[str] = None
+    grace_ends_at: Optional[str] = None
+    member: Optional[MemberUsage] = None
     entries: list[CreditLedgerEntry] = Field(default_factory=list)
 
+
+class WorkspaceEntitlement(BaseModel):
+    """One workspace in `GET /billing/entitlement/me` — personal (no
+    `customer_id`) or an organization — and whether it can be worked in."""
+
+    model_config = ConfigDict(extra="allow")
+
+    customer_id: Optional[str] = None
+    name: Optional[str] = None
+    active: bool
+    tier: str
+    reason: Optional[str] = None
+
+
+class MyEntitlement(BaseModel):
+    """Response from `GET /billing/entitlement/me`. Mirrors harumi-api's
+    `MyEntitlement`."""
+
+    model_config = ConfigDict(extra="allow")
+
+    paywall_enabled: bool = False
+    is_harumi: bool = False
+    personal: WorkspaceEntitlement
+    organizations: list[WorkspaceEntitlement] = Field(default_factory=list)
+    any_active: bool = True

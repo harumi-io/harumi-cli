@@ -161,7 +161,8 @@ jobs:
     name: Smoke test the wheel (${{ matrix.python-version }})
     needs: [resolve, build]
     if: needs.resolve.outputs.publish == 'true'
-    runs-on: ubuntu-latest
+    # 3.9 has no build on ubuntu-latest (Ubuntu 26.04), and is the lowest Python we support.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     strategy:

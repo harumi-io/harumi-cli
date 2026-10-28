@@ -85,11 +85,9 @@ TIERS: dict[str, tuple[str, str]] = {
     "status": (READ, "reads the public status page; needs no session"),
     "whats-new": (LOCAL, "prints the release notes bundled in the package"),
     "profile set": (MANUAL, "would mutate the real signed-in user's name/bio"),
-    "env list": (LOCAL, ""),
-    "env use": (LOCAL, "writes only the throwaway HARUMI_HOME config"),
     # -- discovery ------------------------------------------------------------
     "specs": (READ, "proves real API reachability"),
-    "blueprints": (READ, ""),
+    "examples": (READ, ""),
     # -- organizations --------------------------------------------------------
     "org list": (READ, ""),
     "org members": (READ, ""),
@@ -137,6 +135,10 @@ TIERS: dict[str, tuple[str, str]] = {
         "a run against itself). The request, the table and the checks are covered offline in "
         "tests/test_cli.py",
     ),
+    # -- tags -----------------------------------------------------------------
+    "tags list": (READ, ""),
+    "tags set": (CANARY, ""),
+    "tags rm": (CANARY, ""),
     # -- schedules ------------------------------------------------------------
     "schedules list": (READ, ""),
     "schedules get": (READ, ""),
@@ -201,7 +203,7 @@ class Step:
     # Where to find the id in stdout. Defaults to "the first UUID printed",
     # which is unambiguous on a fresh canary. Set it when a command prints
     # several ids and the first one is the wrong one — `run` prints
-    # execution_log_id before the run_id that `runs get` actually wants.
+    # an internal id before the run id that `runs get` actually wants.
     capture_re: Optional[str] = None
     # True for steps that cost real compute; skipped unless --include-run.
     gated: bool = False
@@ -214,13 +216,12 @@ class Step:
 # needs the canary id.
 PLAN: tuple[Step, ...] = (
     # -- preflight: no project needed ----------------------------------------
-    Step("env list", ("--all",)),
     Step("whoami"),
     Step("usage"),
     Step("status"),
     Step("whats-new"),
     Step("specs"),
-    Step("blueprints"),
+    Step("examples"),
     Step("org list"),
     # Skipped automatically for a personal-workspace session, where {org} is empty.
     Step("org members", ("{org}",)),
@@ -262,6 +263,10 @@ PLAN: tuple[Step, ...] = (
     Step("secrets set", ("LIVECHECK_TOKEN", "--project", "{project}"), stdin="livecheck-value\n"),
     Step("secrets list", ("--project", "{project}")),
     Step("secrets rm", ("LIVECHECK_TOKEN", "--yes", "--project", "{project}")),
+    # -- tags: `link` bound the canary to the seeded repo, so `main` exists on the server --
+    Step("tags set", ("livecheck", "--to", "main", "--project", "{project}")),
+    Step("tags list", ("--project", "{project}")),
+    Step("tags rm", ("livecheck", "--yes", "--project", "{project}")),
     # -- schedules ------------------------------------------------------------
     Step("schedules add", ("--cron", "0 3 * * *", "--project", "{project}"), capture="schedule"),
     Step("schedules list", ("--project", "{project}")),
@@ -287,21 +292,20 @@ PLAN: tuple[Step, ...] = (
     # -- runs -----------------------------------------------------------------
     Step("runs list", ("--project", "{project}")),
     # `run` has no --project: it reads the .harumi binding, which is why the
-    # harness runs from the bound temp directory. It prints execution_log_id
-    # *before* run_id, and `runs get` wants the latter — hence the explicit
-    # pattern instead of "first UUID wins".
+    # harness runs from the bound temp directory. The run id is the UUID on
+    # the "Queued run <id>" line — hence the explicit pattern instead of "first
+    # UUID wins".
     Step(
         "run",
         ("--command", "python main.py"),
         capture="run",
-        capture_re=r"run_id=([0-9a-fA-F-]{36})",
+        capture_re=r"Queued run ([0-9a-fA-F-]{36})",
         gated=True,
     ),
     Step("runs get", ("{run}", "--project", "{project}"), gated=True),
     Step("runs cancel", ("{run}", "--project", "{project}"), gated=True),
     # -- teardown -------------------------------------------------------------
     Step("org use", ("{org}",)),
-    Step("env use", ("{env}",)),
     Step("projects rm", ("{push_project}", "--yes"), teardown=True),
     Step("projects rm", ("{new_project}", "--yes"), teardown=True),
     Step("projects rm", ("{project}", "--yes"), teardown=True),

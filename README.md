@@ -43,7 +43,12 @@ harumi runs list
 harumi runs get <RUN_ID>
 
 # Compare 2-4 runs (the first is the baseline): KPIs, winner, same inputs?
+harumi compare                      # pick the runs from a list
 harumi compare <RUN_ID> <RUN_ID>
+
+# Input files (land in inputs/ for every run; 500 files / 500 MB per project)
+harumi files put data.csv
+harumi files ls
 
 # 6. Check the project's dashboard.toml renders the widgets you expect
 harumi dashboard validate --latest
@@ -52,25 +57,30 @@ harumi dashboard validate --latest
 ## Everything else the CLI can do
 
 - `harumi new` / `harumi import` / `harumi clone` / `harumi link` / `harumi start` — the onboarding verbs; see Quick start above.
-- Editing the project's repo is plain git in your clone (`harumi clone` sets up a `harumi` remote with your token embedded in its URL, so don't share `git remote -v` output or `.git/config`): `git push harumi <branch>`. `harumi check` reports what blocks the project from running; `harumi skills library|add` installs preset skills; `harumi agent-skills install` teaches Cursor/Claude Code/Codex this CLI.
+- Editing the project's repo is plain git in your clone (`harumi clone` sets up a `harumi` remote with no token in its URL: git gets the password from `harumi git-credential` when it needs it, so `git remote -v` and `.git/config` are safe to share): `git push harumi <branch>`. `harumi check` reports what blocks the project from running; `harumi skills library|add` installs preset skills; `harumi agent-skills install` teaches Cursor/Claude Code/Codex this CLI.
 - `harumi dashboard` — look up the `dashboard.toml` widget reference (`widgets`) and validate a project's dashboard, including its `output.json` dot-paths, before pushing (`validate`).
 - `harumi share` — manage the project's public, unauthenticated dashboard links (several per project): add, enable/disable, rotate, and password-protect them.
 - `harumi whats-new` — release notes for the installed version (`--all` for the history). harumi also tells you, at most once a day and only in an interactive terminal, when a newer version is on PyPI.
-- `harumi blueprints` — list project blueprints to pass as `harumi new --blueprint`.
+- `harumi examples` — list example projects to pass as `harumi new --example`.
 - `harumi datasources` — CRUD project database connections, test them, and run read-only SQL queries against them.
+- `harumi tags` — label a version with a movable tag such as `prod`, then `harumi run --tag prod` or `harumi schedules add --git-tag prod`.
 - `harumi schedules` — CRUD cron schedules that trigger git-ref runs.
 - `harumi secrets` — CRUD project-scoped environment variables.
 - `harumi memories` — list/add/edit/remove the project's memories. (Project skills are files in the repo under `skills/<slug>/SKILL.md`; run `harumi skills` for how to edit them.)
-- `harumi org` — CRUD organizations and manage their members.
+- `harumi org` — manage organizations and their members, by name or email.
 - `harumi profile` — view/update your account profile.
 
-Run `harumi --help` or any subcommand with `--help` for the full flag reference, or see the [command reference](.agents/skills/harumi-cli/references/commands.md) for endpoint-level detail.
+In scripts and CI, deletes need `--yes` (with no terminal they refuse and say so, rather than waiting for input), and read commands take `--json` (one JSON document on stdout, nothing else); `harumi run --watch --json` gives the result as data and exits 1 if the run fails. See [Scripts and CI](.agents/skills/harumi-cli/references/commands.md#scripts-and-ci---json).
+
+Ask any command for help with `-h` or `--help` (`harumi projects rm -h`); the common ones end with an `Examples:` block you can copy; `harumi -v` is `--version`. Press TAB to complete commands, flags, and the values that come from a fixed list (`--type`, `--role`, `--mode`): run `harumi --install-completion` once, in your shell, to turn it on. Completion never contacts Harumi, so it works logged out and is instant; names and ids are not completed. A command that does not exist says what you probably meant (`harumi secrets create` → `set`) and lists the ones that do. Run `harumi --help` or any subcommand with `--help` for the full flag reference, or see the [command reference](.agents/skills/harumi-cli/references/commands.md) for endpoint-level detail.
 
 ## Execution model
 
-Every run is git-ref based: code lives in the project's Harumi Git (Gitea) repo. If your working tree is dirty or has unpushed commits when you run `harumi run`, the CLI transparently pushes a throwaway scratch branch so you can iterate without committing manually — your real branches are never touched. Pass `--branch`/`--commit` to run a specific ref instead.
+Every run is git-ref based: code lives in the project's Harumi Git (Gitea) repo. If your working tree is dirty or has unpushed commits when you run `harumi run`, the CLI transparently pushes a throwaway scratch branch so you can iterate without committing manually — your real branches are never touched. Pass `--branch`/`--commit`/`--tag` to run a specific ref instead.
 
 ## Configuration & environments
+
+*Most people can skip this section: `harumi` uses production, and you are never asked to choose. It is for Harumi staff and for developers pointing the CLI at their own API.*
 
 The CLI targets one of two environments (each with its own Supabase, so each has its own login):
 
@@ -79,25 +89,28 @@ The CLI targets one of two environments (each with its own Supabase, so each has
 | `production` (default) | `https://api.harumi.io/api` | `https://git.harumi.io` | public |
 | `staging` | `https://api.dev.harumi.io/api` | `https://git.dev.harumi.io` | internal, VPN-only |
 
+Clients only ever use `production`, and are never asked about it. Harumi staff (a `@harumi.io` address) are asked which environment to use when they run `harumi login`, and that choice becomes their default. Run `harumi login` again and pick the other one to switch: if you are already logged in there with the same email, no new code is sent.
+
 ```bash
-harumi env list          # production only (staging hidden unless --all / HARUMI_INTERNAL=1)
-harumi env use staging   # internal devs; requires VPN + a staging account
-harumi --env staging run # override for a single command
+harumi login               # staff: pick production or staging; remembered
+harumi --env staging run   # run one command against another environment (not saved)
 ```
 
-Selection precedence: `--env` > `HARUMI_ENV` > `harumi env use` (saved default) > `production`. Within an environment you can still override endpoints for local development:
+Selection precedence: `--env` > `HARUMI_ENV` > the choice made at `harumi login` > `production`. Within an environment you can still override endpoints for local development:
 
 | Env var | Purpose |
 |---|---|
 | `HARUMI_API_URL` | Override `harumi-api` base URL (e.g. `http://localhost:8000/api`) |
 | `HARUMI_GIT_URL` | Override the Harumi Git (Gitea) base URL |
 | `HARUMI_ORG` | Organization ID sent as `X-Organization`, and the workspace new projects are created in (`--personal` on `new`/`import` opts out) |
-| `HARUMI_INTERNAL` | Set to `1` to reveal internal environments in `harumi env list` |
 | `HARUMI_PLATFORM_URL` | Override the web-app URL used in printed project links |
+| `HARUMI_NO_INTERACTIVE` | Set to `1` to never show an arrow-key menu (menus are also off under `CI`, with `TERM=dumb`, and whenever stdin or stdout isn't a terminal) |
 | `HARUMI_NO_UPDATE_CHECK` | Set to `1` to turn off the "a newer version is available" notice (it is also off under `CI` and whenever stderr isn't a terminal) |
+| `NO_COLOR` | Honoured as the [standard](https://no-color.org) says: colour is dropped, **bold stays**. Colour is off when output is piped or redirected, and on again only if you set `FORCE_COLOR`. An empty `NO_COLOR` is ignored. `TERM=dumb` turns it all off |
+| `HARUMI_DEBUG` | Set to `1` to get the full traceback for anything that escapes a command, including a closed pipe or a disk error (otherwise a bug prints a short message naming the kind of error and where to report it). Local variables are never printed, as they hold tokens |
 | `HARUMI_STATUS_URL` | Override the status page used by `harumi status` and the unreachable-API hint (the hint is skipped when the API URL is overridden, unless this is set) |
 
-Credentials (JWT + refresh token + Gitea token) are stored per-environment under `~/.harumi/environments/<env>/credentials.json` (mode `0600`) after `harumi login`. An older flat `~/.harumi/credentials.json` is migrated into `production` automatically on first run.
+Credentials (JWT + refresh token + Gitea token) are stored per-environment under `~/.harumi/environments/<env>/credentials.json` (mode `0600`) after `harumi login`. The file is written atomically, and a session refresh keeps everything else in it (the git token included). Several `harumi` commands running at once take turns on a lock (`credentials.json.lock` beside it), so they share one refresh instead of logging each other out. An older flat `~/.harumi/credentials.json` is migrated into `production` automatically on first run.
 
 ## Library usage
 

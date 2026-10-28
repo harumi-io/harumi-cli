@@ -11,6 +11,7 @@ import pytest
 
 from harumi.client import ApiClient, Client
 from harumi.config import Config
+from harumi.models import LoggedUser
 from harumi.errors import ApiError, ApiUnreachableError, HarumiError, NotAuthenticatedError
 
 
@@ -1071,6 +1072,37 @@ def test_client_list_project_files():
     assert result.is_truncated is False
 
 
+def test_client_create_file_upload_url_sends_the_size_only_when_given():
+    _write_credentials()
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"url": "https://s3.test/x", "key": "k", "expires_in": 900})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    client.create_file_upload_url("proj-1", "a.csv", "text/csv", size_bytes=1234)
+    client.create_file_upload_url("proj-1", "a.csv", "text/csv")
+
+    assert bodies[0] == {"path": "a.csv", "content_type": "text/csv", "size_bytes": 1234}
+    assert bodies[1] == {"path": "a.csv", "content_type": "text/csv"}  # an older caller is unchanged
+
+
+def test_client_create_file_upload_url_sends_a_zero_byte_size_too():
+    """An empty file is size 0, which is falsy: it must still be sent."""
+    _write_credentials()
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"url": "https://s3.test/x", "key": "k", "expires_in": 900})
+
+    client = Client(api_url="https://harumi-api.test/api", transport=httpx.MockTransport(handler))
+    client.create_file_upload_url("proj-1", "empty.txt", size_bytes=0)
+
+    assert bodies[0]["size_bytes"] == 0
+
+
 def test_client_upload_file_to_presigned_url_carries_no_auth_header(tmp_path):
     """The presigned URL's query string is the only auth it accepts — adding
     this client's Authorization/X-Organization headers would invalidate the
@@ -1272,7 +1304,9 @@ def test_stream_retries_once_after_a_401_with_the_refreshed_token(monkeypatch):
         return httpx.Response(401 if len(seen) == 1 else 200, content=b"ok")
 
     def fake_refresh(config, refresh_token, transport=None):
-        save_credentials(access_token="fresh", refresh_token=refresh_token)
+        # Rotates like the real thing: the new session has a new refresh token.
+        save_credentials(access_token="fresh", refresh_token="refresh-2")
+        return LoggedUser(access_token="fresh", refresh_token="refresh-2")
 
     api = ApiClient(_config(), transport=httpx.MockTransport(handler))
     monkeypatch.setattr("harumi.auth.refresh_session", fake_refresh)
@@ -1309,7 +1343,8 @@ def test_stream_closes_the_401_response_before_retrying(monkeypatch):
 
     def fake_refresh(config, refresh_token, transport=None):
         events.append("refreshed")
-        save_credentials(access_token="fresh", refresh_token=refresh_token)
+        save_credentials(access_token="fresh", refresh_token="refresh-2")
+        return LoggedUser(access_token="fresh", refresh_token="refresh-2")
 
     api = ApiClient(_config(), transport=httpx.MockTransport(handler))
     monkeypatch.setattr("harumi.auth.refresh_session", fake_refresh)

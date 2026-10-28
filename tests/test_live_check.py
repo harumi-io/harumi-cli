@@ -116,7 +116,9 @@ class TestValidationActuallyCatchesMistakes:
         assert any("unknown flag --not-a-flag" in p for p in problems)
 
     def test_missing_required_positional_is_rejected(self, patched):
-        problems = patched(plan=PLAN + (Step("projects get"),))
+        # Any command that still requires a positional. (This used to be
+        # `projects get`, until it learned to offer a picker.)
+        problems = patched(plan=PLAN + (Step("skills add"),))
         assert any("positional" in p for p in problems)
 
     def test_missing_required_option_is_rejected(self, patched):
@@ -209,15 +211,14 @@ class TestRunnerSubstitution:
         )
         assert captured == "3f8b1c2d-4e5a-6b7c-8d9e-0f1a2b3c4d5e"
 
-    def test_run_captures_the_run_id_not_the_execution_log_id(self, tmp_path):
-        """`harumi run` prints execution_log_id first and run_id second, but
-        `runs get` only accepts the latter. Taking "the first UUID" here would
-        404 on a live backend — a failure that cannot show up offline.
-        """
+    def test_run_captures_the_run_id_from_the_queued_line(self, tmp_path):
+        """`runs get` takes the run id. Taking "the first UUID" in `harumi run`'s
+        output would 404 on a live backend if anything else printed one first,
+        and that cannot show up offline."""
         step = next(s for s in PLAN if s.path == "run")
         stdout = (
-            "Queued (execution_log_id=aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa, "
-            "run_id=bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb). status=queued"
+            "Running project aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa on branch main\n"
+            "Queued run bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb\n"
         )
         assert self._runner(tmp_path)._capture(step, stdout) == "bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb"
 
@@ -378,7 +379,7 @@ class TestTierSanity:
     def test_canary_steps_all_scope_themselves_to_a_project(self):
         """A canary-tier command with no project scope would act on the account
         at large."""
-        exempt = {"import", "new", "clone", "org use", "env use", "run"}
+        exempt = {"import", "new", "clone", "org use", "run"}
         for step in PLAN:
             if TIERS[step.path][0] != CANARY or step.path in exempt:
                 continue

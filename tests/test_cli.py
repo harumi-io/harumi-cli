@@ -93,9 +93,27 @@ def test_banner_shown_for_bare_and_help(argv, monkeypatch, capsys):
     import harumi.skills as skills_mod
 
     monkeypatch.setattr(skills_mod, "agents_missing_skill", lambda: [])
+    monkeypatch.setattr(cli, "_stdout_is_terminal", lambda: True)
     monkeypatch.setattr("sys.argv", ["harumi"] + argv)
     cli._print_banner_if_bare_entrypoint()
     assert capsys.readouterr().out.strip() != ""
+
+
+@pytest.mark.parametrize("argv", [[], ["--help"]])
+def test_banner_and_agent_nudge_hidden_when_output_is_not_a_terminal(argv, monkeypatch, capsys):
+    """Piped or logged output (and a coding agent reading stdout) gets no art
+    and no 'install the skill' nudge: both are decoration for a person."""
+    import harumi.skills as skills_mod
+
+    monkeypatch.setattr(
+        skills_mod,
+        "agents_missing_skill",
+        lambda: [skills_mod.Agent("cursor", "Cursor", Path("/tmp/does-not-matter"))],
+    )
+    monkeypatch.setattr(cli, "_stdout_is_terminal", lambda: False)
+    monkeypatch.setattr("sys.argv", ["harumi"] + argv)
+    cli._print_banner_if_bare_entrypoint()
+    assert capsys.readouterr().out == ""
 
 
 @pytest.mark.parametrize(
@@ -123,6 +141,7 @@ def test_skill_install_hint_shown_when_agent_missing_skill(monkeypatch, capsys):
         "agents_missing_skill",
         lambda: [skills_mod.Agent("cursor", "Cursor", Path("/tmp/does-not-matter"))],
     )
+    monkeypatch.setattr(cli, "_stdout_is_terminal", lambda: True)
     monkeypatch.setattr("sys.argv", ["harumi"])
     cli._print_banner_if_bare_entrypoint()
     out = capsys.readouterr().out
@@ -134,6 +153,7 @@ def test_skill_install_hint_hidden_when_nothing_missing(monkeypatch, capsys):
     import harumi.skills as skills_mod
 
     monkeypatch.setattr(skills_mod, "agents_missing_skill", lambda: [])
+    monkeypatch.setattr(cli, "_stdout_is_terminal", lambda: True)
     monkeypatch.setattr("sys.argv", ["harumi"])
     cli._print_banner_if_bare_entrypoint()
     assert "harumi agent-skills install" not in capsys.readouterr().out
@@ -149,6 +169,7 @@ def test_skill_install_hint_swallows_filesystem_errors(monkeypatch, capsys):
         raise PermissionError("nope")
 
     monkeypatch.setattr(skills_mod, "agents_missing_skill", _boom)
+    monkeypatch.setattr(cli, "_stdout_is_terminal", lambda: True)
     monkeypatch.setattr("sys.argv", ["harumi"])
     cli._print_banner_if_bare_entrypoint()  # must not raise
     out = capsys.readouterr().out
@@ -190,10 +211,13 @@ def test_cli_surface_normalizes_click_builtin_type_names():
     # ...the vendored spellings pass through unchanged (idempotent)...
     assert type_of("str") == "str"
     assert type_of("int") == "int"
+    # ...and so do ranges (`min=1`), which broke 3.9 CI for `--limit`.
+    assert type_of("integer range") == "int range"
+    assert type_of("int range") == "int range"
+    assert type_of("float range") == "float range"
     # ...and labels that agree across both flavours are left alone.
     for shared in ("boolean", "path", "float", "uuid"):
         assert type_of(shared) == shared
-
 
 
 @pytest.fixture(autouse=True)
@@ -255,6 +279,12 @@ class FakeApi:
             return httpx.Response(502, json={"detail": f"unrouted: {request.method} {request.url.path}"})
         status, payload = route
         return httpx.Response(status, json=payload)
+
+
+@pytest.fixture
+def at_a_terminal(monkeypatch):
+    """A person at a keyboard. Confirmations only ask where there is one; elsewhere they refuse and name --yes."""
+    monkeypatch.setattr(cli.interactive, "is_interactive", lambda *a, **k: True)
 
 
 @pytest.fixture
@@ -369,6 +399,88 @@ def test_a_402_from_a_run_points_at_usage_and_the_billing_settings_page(api, bou
     assert "settings?tab=billing" in result.output
 
 
+@pytest.mark.parametrize(
+    ("code", "hint"),
+    [
+        ("no_subscription", "Subscribe at"),
+        ("org_not_subscribed", "harumi.io/contact"),
+        ("weekly_limit_reached", "turn on overage"),
+        ("member_monthly_limit_reached", "Ask your organization admin"),
+        ("kernel_size_not_in_plan", "smaller kernel"),
+        # The 7-day trial and the other plan limits (harumi-api#462).
+        ("concurrent_runs_limit_reached", "Wait for a run to finish"),
+        ("live_kernel_limit_reached", "Stop another kernel"),
+        ("storage_quota_reached", "harumi files rm"),
+        ("project_limit_reached", "Delete a project"),
+        ("app_limit_reached", "Stop another app"),
+        ("app_time_exhausted", "keep your app running"),
+        ("schedule_limit_reached", "harumi schedules rm"),
+        ("schedule_too_frequent", "longer interval"),
+        ("insight_limit_reached", "resets tomorrow"),
+        ("byok_not_in_plan", "bring your own key"),
+    ],
+)
+def test_a_coded_402_gets_the_hint_for_its_reason(api, bound_dir, code, hint):
+    api.route(
+        "POST",
+        "/api/projects/proj-bound/execute",
+        {"detail": "Denied by billing.", "code": code},
+        status=402,
+    )
+
+    result = runner.invoke(cli.app, ["run", "--branch", "main"])
+
+    assert result.exit_code == 1
+    assert "Denied by billing." in result.output
+    assert hint in result.output
+
+
+def test_new_stops_before_creating_when_personal_has_no_plan(api, git_ops, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(personal_active=False))
+    api.route("POST", "/api/projects", {"id": "proj-9", "name": "Widget", "notebook_ids": []})
+
+    result = runner.invoke(cli.app, ["new", "Widget", "--personal", "--no-clone"])
+
+    assert result.exit_code == 1
+    assert "personal workspace doesn't have an active plan" in result.output
+    assert "Subscribe at" in result.output
+    assert not any(r.method == "POST" for r in api.requests)
+
+
+def test_new_stops_when_the_target_org_has_no_plan(api, git_ops, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    org = {"customer_id": "org-1", "name": "Acme", "active": False, "tier": "none", "reason": "org_not_subscribed"}
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(orgs=[org]))
+
+    result = runner.invoke(cli.app, ["new", "Widget", "--customer-id", "org-1", "--no-clone"])
+
+    assert result.exit_code == 1
+    assert "Acme" in result.output
+    assert "harumi.io/contact" in result.output
+
+
+def test_new_proceeds_when_the_paywall_is_off(api, git_ops, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(personal_active=False, paywall=False))
+    api.route("POST", "/api/projects", {"id": "proj-9", "name": "Widget", "notebook_ids": []})
+    _route_project_repo(api, "proj-9", "widget")
+
+    result = runner.invoke(cli.app, ["new", "Widget", "--personal", "--no-clone"])
+
+    assert result.exit_code == 0, result.output
+
+
+def test_start_stops_before_asking_for_a_name_with_no_entitled_workspace(api):
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(personal_active=False))
+
+    result = runner.invoke(cli.app, ["start"], input="1\nWidget\n")
+
+    assert result.exit_code == 1
+    assert "Project name" not in result.output
+    assert "Subscribe at" in result.output
+
+
 def test_a_5xx_points_at_the_status_page(api, bound_dir):
     api.route("POST", "/api/projects/proj-bound/execute", {"detail": "boom"}, status=503)
 
@@ -404,7 +516,7 @@ def test_a_connection_failure_is_an_error_message_not_a_traceback(monkeypatch, b
     result = runner.invoke(cli.app, ["run", "--branch", "main"])
 
     assert result.exit_code == 1
-    assert "Could not reach harumi-api" in result.output
+    assert "Couldn't connect to Harumi" in result.output
     assert "https://status.harumi.io" in result.output
     assert not isinstance(result.exception, httpx.HTTPError)
 
@@ -555,7 +667,7 @@ def test_a_non_string_status_or_api_url_in_config_json_does_not_crash_the_error_
     config = Config.load()
     assert config.api_url == "https://api.harumi.io/api"
     assert config.org_id is None
-    assert active_platform_url() == "https://platform.harumi.io"
+    assert active_platform_url() == "https://app.harumi.io"
 
 
 @pytest.mark.parametrize("value", [["staging"], {"a": 1}, 5, True])
@@ -605,70 +717,191 @@ def test_status_targets_the_staging_page_for_the_staging_env(monkeypatch):
     assert seen == ["https://status.dev.harumi.io/api/v1/endpoints/statuses"]
 
 
-def test_usage_shows_the_balance_and_plan(api):
+def _usage_body(**overrides):
+    body = {
+        "billing_account_id": "acct-1",
+        "plan_code": "pro",
+        "tier": "pro",
+        "balance_credits": 200_000,
+        "included_credits": 396_000,
+        "period_start": "2026-10-01T00:00:00+00:00",
+        "period_end": "2026-11-01T00:00:00+00:00",
+        "weekly_used_pct": 48.2,
+        "monthly_used_pct": 16.0,
+        "weekly_resets_at": "2026-10-20T15:00:00+00:00",
+        "monthly_resets_at": "2026-11-01T00:00:00+00:00",
+        "overage_allowed": True,
+        "overage_enabled": False,
+        "overage_cap_cents": 0,
+        "overage_spent_cents": 0,
+        "overage_cap_credits": 0,
+        "entries": [],
+    }
+    body.update(overrides)
+    return body
+
+
+def _entitlement_body(personal_active=True, orgs=(), paywall=True):
+    return {
+        "paywall_enabled": paywall,
+        "is_harumi": False,
+        "personal": {
+            "customer_id": None,
+            "active": personal_active,
+            "tier": "pro" if personal_active else "free",
+            "reason": None if personal_active else "no_subscription",
+        },
+        "organizations": list(orgs),
+        "any_active": personal_active or any(o["active"] for o in orgs),
+    }
+
+
+def test_usage_shows_the_plan_and_both_meters_as_percentages(api):
+    api.route("GET", "/api/billing/usage", _usage_body())
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body())
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "Pro" in result.output
+    assert "Weekly: 48% used" in result.output
+    assert "Monthly: 16% used" in result.output
+    # Percentages only: no raw credit counts.
+    assert "396,000" not in result.output
+    assert "credits" not in result.output
+    assert "Overage: off" in result.output
+
+
+def test_usage_reports_overage_in_dollars(api):
     api.route(
         "GET",
         "/api/billing/usage",
-        {
-            "billing_account_id": "acct-1",
-            "plan_code": "free",
-            "balance_credits": 1500,
-            "included_credits": 2000,
-            "period_start": "2026-09-01T00:00:00Z",
-            "period_end": "2026-10-01T00:00:00Z",
-            "overage_enabled": False,
-            "overage_cap_credits": 0,
-            "entries": [],
-        },
+        _usage_body(overage_enabled=True, overage_cap_cents=1000, overage_spent_cents=320, weekly_used_pct=104.0),
     )
 
     result = runner.invoke(cli.app, ["usage"])
 
     assert result.exit_code == 0, result.output
-    assert "free" in result.output
-    assert "1,500" in result.output
-    assert "2,000" in result.output
-    assert "2026-10-01" in result.output
-    assert "disabled" in result.output
+    assert "$3.20 of $10.00 used" in result.output
+    # Overage is on, so reaching the weekly limit isn't a stop.
+    assert "reached a limit" not in result.output
 
 
-def test_usage_flags_an_exhausted_balance_with_no_overage(api):
-    api.route(
-        "GET",
-        "/api/billing/usage",
-        {
-            "billing_account_id": "acct-1",
-            "plan_code": "free",
-            "balance_credits": 0,
-            "included_credits": 2000,
-            "period_start": "2026-09-01T00:00:00Z",
-            "period_end": "2026-10-01T00:00:00Z",
-            "overage_enabled": False,
-            "overage_cap_credits": 0,
-            "entries": [],
-        },
-    )
+def test_usage_flags_a_reached_limit_with_no_overage(api):
+    api.route("GET", "/api/billing/usage", _usage_body(weekly_used_pct=100.0))
 
     result = runner.invoke(cli.app, ["usage"])
 
     assert result.exit_code == 0, result.output
-    assert "exhausted" in result.output
+    assert "reached a limit" in result.output
     assert "settings?tab=billing" in result.output
 
 
-def test_usage_reports_the_overage_cap_when_enabled(api):
+def test_usage_says_overage_is_not_available_on_free(api):
+    api.route(
+        "GET", "/api/billing/usage", _usage_body(plan_code="free", tier="free", overage_allowed=False)
+    )
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert "Free" in result.output
+    assert "not available on this plan" in result.output
+
+
+def test_usage_shows_the_harumi_io_tier_as_unlimited(api):
+    api.route(
+        "GET",
+        "/api/billing/usage",
+        _usage_body(plan_code="harumi_io", tier="harumi_io", unlimited=True, weekly_used_pct=None, monthly_used_pct=None),
+    )
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "harumi-io" in result.output
+    assert "unlimited" in result.output
+
+
+def test_import_stops_before_touching_the_folder_when_personal_has_no_plan(api, git_ops, tmp_path):
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(personal_active=False))
+    folder = tmp_path / "code"
+    folder.mkdir()
+    (folder / "solve.py").write_text("print(1)\n")
+
+    result = runner.invoke(cli.app, ["import", str(folder), "--personal"])
+
+    assert result.exit_code == 1
+    assert "personal workspace doesn't have an active plan" in result.output
+    assert not any(r.method == "POST" for r in api.requests)
+    # No harumi.toml scaffolded: the folder is left exactly as it was.
+    assert sorted(p.name for p in folder.iterdir()) == ["solve.py"]
+
+
+def test_start_checks_the_configured_workspace_not_just_any(api, monkeypatch):
+    """An entitled org elsewhere doesn't let `start` past when the project
+    would land in an unentitled Personal; the hint names the org instead."""
+    org = {"customer_id": "org-1", "name": "Acme", "active": True, "tier": "enterprise", "reason": None}
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(personal_active=False, orgs=[org]))
+
+    result = runner.invoke(cli.app, ["start"], input="1\nWidget\n")
+
+    assert result.exit_code == 1
+    assert "Project name" not in result.output
+    assert "harumi org use org-1" in result.output
+
+
+def test_usage_with_no_limits_on_a_new_server_derives_nothing(api):
+    """A new server sends the pct fields as null for a plan with no limits;
+    that is not an older server, so no percentage is made up from credits."""
+    api.route(
+        "GET",
+        "/api/billing/usage",
+        {
+            "billing_account_id": "acct-1",
+            "plan_code": "enterprise",
+            "tier": "enterprise",
+            "balance_credits": 500,
+            "included_credits": 2000,
+            "period_start": "2026-09-01T00:00:00Z",
+            "period_end": "2026-10-01T00:00:00Z",
+            "weekly_used_pct": None,
+            "monthly_used_pct": None,
+            "overage_enabled": False,
+            "overage_cap_credits": 0,
+            "entries": [],
+        },
+    )
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "75%" not in result.output
+    assert "Monthly: no limit" in result.output
+
+
+def test_usage_for_an_unentitled_personal_workspace_points_at_subscribing(api):
+    api.route("GET", "/api/billing/entitlement/me", _entitlement_body(personal_active=False))
+
+    result = runner.invoke(cli.app, ["usage"])
+
+    assert result.exit_code == 0, result.output
+    assert "no active plan" in result.output
+    assert "Subscribe at" in result.output
+
+
+def test_usage_falls_back_to_a_monthly_percentage_on_an_older_server(api):
     api.route(
         "GET",
         "/api/billing/usage",
         {
             "billing_account_id": "acct-1",
             "plan_code": "individual",
-            "balance_credits": -50,
+            "balance_credits": 500,
             "included_credits": 2000,
             "period_start": "2026-09-01T00:00:00Z",
             "period_end": "2026-10-01T00:00:00Z",
-            "overage_enabled": True,
-            "overage_cap_credits": 500,
+            "overage_enabled": False,
+            "overage_cap_credits": 0,
             "entries": [],
         },
     )
@@ -676,13 +909,7 @@ def test_usage_reports_the_overage_cap_when_enabled(api):
     result = runner.invoke(cli.app, ["usage"])
 
     assert result.exit_code == 0, result.output
-    assert "enabled" in result.output
-    assert "500" in result.output
-    # A negative balance renders as 0, not a confusing negative count.
-    assert "0 / 2,000" in result.output
-    # Overage is on, so the exhausted-allowance warning must not fire even
-    # though the balance itself is negative.
-    assert "exhausted" not in result.output
+    assert "Monthly: 75% used" in result.output
 
 
 def test_secrets_list_prints_names_but_never_values(api):
@@ -770,15 +997,17 @@ def git_ops(monkeypatch):
     """
     calls: dict[str, list[dict]] = {"clone": [], "ensure_remote": [], "push_folder": []}
 
-    def fake_clone_repo(*, clone_url, username, token, dest, remote="harumi"):
+    def fake_clone_repo(*, clone_url, dest, remote="harumi"):
         calls["clone"].append({"clone_url": clone_url, "dest": dest})
         Path(dest).mkdir(parents=True, exist_ok=True)
 
-    def fake_ensure_remote(*, clone_url, username, token, cwd):
+    def fake_ensure_remote(*, clone_url, cwd=None):
         calls["ensure_remote"].append({"clone_url": clone_url, "cwd": cwd})
 
-    def fake_push_folder(folder, *, clone_url, username, token, branch, message):
-        calls["push_folder"].append({"folder": folder, "clone_url": clone_url, "branch": branch})
+    def fake_push_folder(folder, *, clone_url, branch, message, exclude=()):
+        calls["push_folder"].append(
+            {"folder": folder, "clone_url": clone_url, "branch": branch, "exclude": list(exclude)}
+        )
 
     monkeypatch.setattr(cli, "clone_repo", fake_clone_repo)
     monkeypatch.setattr(cli, "ensure_remote", fake_ensure_remote)
@@ -872,6 +1101,27 @@ def test_import_never_overwrites_an_existing_manifest(api, git_ops, tmp_path):
     assert "python custom.py" in (folder / "harumi.toml").read_text()
 
 
+def test_import_shows_a_folder_name_with_brackets_as_typed(api, git_ops, tmp_path):
+    """`Creating project route [v2]...` lost its `[v2]`: rich read it as a tag. (A `[/x]` closing tag cannot be in
+    a folder name, since `/` separates path parts; that case is covered where the name is plain text, in
+    `test_examples.py`.)"""
+    from harumi.config import save_git_token
+
+    save_git_token("gitea-token", username="dev@harumi.test")
+    folder = tmp_path / "route [v2] [bold]x[bold]"
+    folder.mkdir()
+    (folder / "main.py").write_text("print(1)\n")
+    api.route("POST", "/api/projects", {"id": "proj-b", "name": "route [v2] [bold]x[bold]", "notebook_ids": []})
+    _route_project_repo(api, "proj-b", "route")
+
+    result = runner.invoke(cli.app, ["import", str(folder), "--yes"])
+
+    assert result.exit_code == 0, result.output
+    flat = result.output.replace("\n", " ")
+    assert "Creating project route [v2] [bold]x[bold]" in flat
+    assert "Created project route [v2] [bold]x[bold]" in flat
+
+
 def test_clone_fetches_an_existing_project_and_binds(api, git_ops, tmp_path, monkeypatch):
     from harumi.config import save_git_token
 
@@ -961,244 +1211,6 @@ def test_start_dispatches_to_new_when_the_user_has_nothing_yet(api, git_ops, tmp
 FILE_CONTENT_B64 = "cHJpbnQoJ2hpJyk="  # print('hi')
 
 
-def test_repo_ls_lists_files_and_forwards_ref(api):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/files",
-        [{"name": "main.py", "path": "main.py", "type": "file", "size": 10}],
-    )
-
-    result = runner.invoke(cli.app, ["repo", "ls", "--project", "proj-1", "--ref", "dev"])
-
-    assert result.exit_code == 0, result.output
-    assert "main.py" in result.output
-    assert api.params_for("GET", "/api/projects/proj-1/repo/files")["ref"] == "dev"
-
-
-def test_repo_cat_decodes_base64_to_stdout(api):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/file-content",
-        {"path": "main.py", "sha": "abc", "encoding": "base64", "content": FILE_CONTENT_B64},
-    )
-
-    result = runner.invoke(cli.app, ["repo", "cat", "main.py", "--project", "proj-1"])
-
-    assert result.exit_code == 0, result.output
-    assert "print('hi')" in result.output
-
-
-def test_repo_cat_output_flag_writes_bytes_to_disk(api, tmp_path):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/file-content",
-        {"path": "main.py", "sha": "abc", "encoding": "base64", "content": FILE_CONTENT_B64},
-    )
-    dest = tmp_path / "nested" / "main.py"
-
-    result = runner.invoke(
-        cli.app, ["repo", "cat", "main.py", "--project", "proj-1", "-o", str(dest)]
-    )
-
-    assert result.exit_code == 0, result.output
-    # Also proves the command creates missing parent dirs.
-    assert dest.read_bytes() == b"print('hi')"
-
-
-def test_repo_cat_rejects_non_utf8_without_output(api):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/file-content",
-        {"path": "a.bin", "sha": "abc", "encoding": "base64", "content": "/w=="},  # 0xFF
-    )
-
-    result = runner.invoke(cli.app, ["repo", "cat", "a.bin", "--project", "proj-1"])
-
-    assert result.exit_code == 1
-    assert "--output" in result.output
-
-
-def test_repo_put_sends_create_when_file_is_absent(api, tmp_path):
-    local = tmp_path / "new.py"
-    local.write_text("x = 1")
-    api.route("GET", "/api/projects/proj-1/repo/file-content", {"detail": "nope"}, status=404)
-    api.route("POST", "/api/projects/proj-1/repo/changes", {"commit_sha": "cafe", "changed": 1})
-
-    result = runner.invoke(
-        cli.app, ["repo", "put", str(local), "new.py", "--project", "proj-1"]
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "Created" in result.output
-    ops = api.body_for("POST", "/api/projects/proj-1/repo/changes")["operations"]
-    assert ops[0]["action"] == "create"
-
-
-def test_repo_put_sends_update_when_file_exists(api, tmp_path):
-    local = tmp_path / "main.py"
-    local.write_text("x = 2")
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/file-content",
-        {"path": "main.py", "sha": "abc", "encoding": "base64", "content": FILE_CONTENT_B64},
-    )
-    api.route("POST", "/api/projects/proj-1/repo/changes", {"commit_sha": "cafe", "changed": 1})
-
-    result = runner.invoke(
-        cli.app, ["repo", "put", str(local), "main.py", "--project", "proj-1"]
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "Updated" in result.output
-    ops = api.body_for("POST", "/api/projects/proj-1/repo/changes")["operations"]
-    assert ops[0]["action"] == "update"
-
-
-def test_repo_put_rejects_a_missing_local_file(api, tmp_path):
-    result = runner.invoke(
-        cli.app, ["repo", "put", str(tmp_path / "ghost.py"), "x.py", "--project", "proj-1"]
-    )
-
-    assert result.exit_code != 0
-    assert api.requests == []
-
-
-def test_repo_rm_aborts_without_confirmation(api):
-    api.route("POST", "/api/projects/proj-1/repo/changes", {"commit_sha": "cafe", "changed": 1})
-
-    result = runner.invoke(cli.app, ["repo", "rm", "main.py", "--project", "proj-1"], input="n\n")
-
-    assert result.exit_code == 0, result.output
-    assert "Aborted." in result.output
-    # The safety property that matters: a declined prompt sends nothing.
-    assert api.requests == []
-
-
-def test_repo_rm_deletes_when_confirmed(api):
-    api.route("POST", "/api/projects/proj-1/repo/changes", {"commit_sha": "cafe", "changed": 1})
-
-    result = runner.invoke(cli.app, ["repo", "rm", "main.py", "--project", "proj-1"], input="y\n")
-
-    assert result.exit_code == 0, result.output
-    ops = api.body_for("POST", "/api/projects/proj-1/repo/changes")["operations"]
-    assert ops == [{"action": "delete", "path": "main.py"}]
-
-
-def test_repo_rm_yes_flag_skips_the_prompt(api):
-    api.route("POST", "/api/projects/proj-1/repo/changes", {"commit_sha": "cafe", "changed": 2})
-
-    result = runner.invoke(cli.app, ["repo", "rm", "out/", "--project", "proj-1", "--yes"])
-
-    assert result.exit_code == 0, result.output
-    assert "Deleted" in result.output
-
-
-def test_repo_mv_sends_a_move_operation(api):
-    api.route("POST", "/api/projects/proj-1/repo/changes", {"commit_sha": "cafe", "changed": 1})
-
-    result = runner.invoke(
-        cli.app, ["repo", "mv", "old.py", "new.py", "--project", "proj-1", "-m", "rename"]
-    )
-
-    assert result.exit_code == 0, result.output
-    body = api.body_for("POST", "/api/projects/proj-1/repo/changes")
-    assert body["operations"] == [
-        {"action": "move", "from_path": "old.py", "path": "new.py"}
-    ]
-    assert body["message"] == "rename"
-
-
-def test_repo_branches_flags_the_live_branch(api):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/branches",
-        [
-            {"name": "main", "commit_sha": "abcdef1234", "is_live": True},
-            {"name": "feature-x", "commit_sha": "deadbeef99", "is_live": False},
-        ],
-    )
-
-    result = runner.invoke(cli.app, ["repo", "branches", "--project", "proj-1"])
-
-    assert result.exit_code == 0, result.output
-    assert "main" in result.output
-    assert "feature-x" in result.output
-    # Commit shas are truncated to 8 chars for display.
-    assert "abcdef12" in result.output
-    assert "abcdef1234" not in result.output
-
-
-def test_repo_branch_rm_aborts_without_confirmation(api):
-    result = runner.invoke(
-        cli.app, ["repo", "branch-rm", "feature-x", "--project", "proj-1"], input="n\n"
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "Aborted." in result.output
-    assert api.requests == []
-
-
-def test_repo_commits_lists_history_and_forwards_params(api):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/commits",
-        {
-            "ref": "dev",
-            "path": "main.py",
-            "page": 2,
-            "per_page": 10,
-            "total": 1,
-            "commits": [
-                {
-                    "sha": "abcdef1234",
-                    "message": "Fix the thing\n\nlonger body",
-                    "author_name": "Ada",
-                    "committed_at": "2026-01-01T00:00:00Z",
-                }
-            ],
-        },
-    )
-
-    result = runner.invoke(
-        cli.app,
-        [
-            "repo",
-            "commits",
-            "main.py",
-            "--ref",
-            "dev",
-            "--page",
-            "2",
-            "--per-page",
-            "10",
-            "--project",
-            "proj-1",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    # Sha truncated to 8 chars; only the message's first line is shown.
-    assert "abcdef12" in result.output
-    assert "abcdef1234" not in result.output
-    assert "Fix the thing" in result.output
-    assert "longer body" not in result.output
-    params = api.params_for("GET", "/api/projects/proj-1/repo/commits")
-    assert params == {"page": "2", "per_page": "10", "ref": "dev", "path": "main.py"}
-
-
-def test_repo_commits_reports_empty_history(api):
-    api.route(
-        "GET",
-        "/api/projects/proj-1/repo/commits",
-        {"ref": "main", "page": 1, "per_page": 30, "commits": []},
-    )
-
-    result = runner.invoke(cli.app, ["repo", "commits", "--project", "proj-1"])
-
-    assert result.exit_code == 0, result.output
-    assert "No commits on 'main'." in result.output
-
-
 def test_check_reports_ready(api):
     api.route(
         "GET",
@@ -1214,8 +1226,8 @@ def test_check_reports_ready(api):
     result = runner.invoke(cli.app, ["check", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "is ready" in result.output
-    assert "repo" in result.output
+    assert "Ready to run" in result.output
+    assert "Repository exists" in result.output  # a readable name, not the check id "repo"
 
 
 def test_check_reports_not_ready_and_forwards_ref(api):
@@ -1236,8 +1248,8 @@ def test_check_reports_not_ready_and_forwards_ref(api):
         cli.app, ["check", "--ref", "dev", "--project", "proj-1"]
     )
 
-    assert result.exit_code == 0, result.output
-    assert "not ready" in result.output
+    assert result.exit_code == 1, result.output  # a script can stop before `harumi run`
+    assert "Not ready" in result.output and "1 problem" in result.output
     assert "missing entrypoint" in result.output
     assert api.params_for("GET", "/api/projects/proj-1/readiness")["ref"] == "dev"
 
@@ -1270,13 +1282,15 @@ def test_files_ls_reports_no_files(api):
     result = runner.invoke(cli.app, ["files", "ls", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "No files uploaded." in result.output
+    assert "No files uploaded yet" in result.output
 
 
 def test_files_put_uploads_and_defaults_remote_path_to_local_name(api, tmp_path, monkeypatch):
     local = tmp_path / "data.csv"
     local.write_text("a,b\n1,2\n")
-    api.route("GET", "/api/projects/proj-1/files", {"files": [], "is_truncated": False})
+    # The project already holds data.csv, so this is a replacement and the listing after the upload shows it:
+    # `put` checks that a file whose key looked final really is in the project.
+    api.route("GET", "/api/projects/proj-1/files", {"files": [{"name": "data.csv", "key": "proj-1/data.csv", "size": 8}], "is_truncated": False})
     api.route("POST", "/api/projects/proj-1/files/upload-url", {"url": "https://s3.test/proj-1/data.csv", "key": "proj-1/data.csv", "expires_in": 900})
 
     put_calls = []
@@ -1293,6 +1307,41 @@ def test_files_put_uploads_and_defaults_remote_path_to_local_name(api, tmp_path,
     assert put_calls == [("https://s3.test/proj-1/data.csv", local, "text/csv")]
     body = api.body_for("POST", "/api/projects/proj-1/files/upload-url")
     assert body["path"] == "data.csv"
+
+
+def test_files_put_sends_the_files_exact_size_so_a_plan_with_a_storage_quota_accepts_it(
+    api, tmp_path, monkeypatch
+):
+    local = tmp_path / "data.csv"
+    local.write_text("a,b\n1,2\n")
+    api.route("GET", "/api/projects/proj-1/files", {"files": [{"name": "data.csv", "key": "k", "size": 8}], "is_truncated": False})
+    api.route("POST", "/api/projects/proj-1/files/upload-url", {"url": "https://s3.test/x", "key": "k", "expires_in": 900})
+    monkeypatch.setattr(Client, "upload_file_to_presigned_url", lambda *a, **k: None)
+
+    result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("POST", "/api/projects/proj-1/files/upload-url")
+    assert body["size_bytes"] == local.stat().st_size
+    assert body["size_bytes"] > 0
+
+
+def test_files_put_on_a_full_project_says_what_to_do(api, tmp_path):
+    local = tmp_path / "big.bin"
+    local.write_bytes(b"x" * 10)
+    api.route("GET", "/api/projects/proj-1/files", {"files": [], "is_truncated": False})
+    api.route(
+        "POST",
+        "/api/projects/proj-1/files/upload-url",
+        {"detail": "This project has used its plan's storage.", "code": "storage_quota_reached"},
+        status=402,
+    )
+
+    result = runner.invoke(cli.app, ["files", "put", str(local), "--project", "proj-1"])
+
+    assert result.exit_code == 1
+    assert "used its plan's storage" in result.output
+    assert "harumi files rm" in result.output
 
 
 def test_files_put_rejects_a_missing_local_file(api, tmp_path):
@@ -1434,15 +1483,18 @@ def test_files_get_reports_an_unwritable_output_path(api, tmp_path, monkeypatch)
     assert "Traceback" not in result.output
 
 
-def test_files_rm_aborts_without_confirmation(api):
+def test_files_rm_aborts_without_confirmation(api, at_a_terminal):
+    api.route("GET", "/api/projects/proj-1/files", {"files": [{"name": "data.csv", "key": "proj-1/data.csv", "size": 10}], "is_truncated": False})
+
     result = runner.invoke(cli.app, ["files", "rm", "data.csv", "--project", "proj-1"], input="n\n")
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output  # declining is not success: `rm && deploy` must stop
     assert "Aborted." in result.output
-    assert api.requests == []
+    assert not any(r.method == "DELETE" for r in api.requests)  # the listing is read; nothing is deleted
 
 
-def test_files_rm_deletes_when_confirmed(api):
+def test_files_rm_deletes_when_confirmed(api, at_a_terminal):
+    api.route("GET", "/api/projects/proj-1/files", {"files": [{"name": "data.csv", "key": "proj-1/data.csv", "size": 10}], "is_truncated": False})
     api.route("DELETE", "/api/projects/proj-1/files", {"deleted": 1})
 
     result = runner.invoke(cli.app, ["files", "rm", "data.csv", "--project", "proj-1"], input="y\n")
@@ -1457,7 +1509,7 @@ def test_files_rm_deletes_when_confirmed(api):
 # ---------------------------------------------------------------------------
 
 SCHEDULE = {
-    "id": "sched-1",
+    "id": "5c4e1b2a-0000-4000-8000-000000000001",
     "project_id": "proj-1",
     "cron": "0 9 * * *",
     "start_at": "2026-01-22T09:00:00Z",
@@ -1475,7 +1527,7 @@ def test_schedules_list_renders_the_cron_and_branch(api):
     result = runner.invoke(cli.app, ["schedules", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "sched-1" in result.output
+    assert "5c4e1b2a" in result.output
     assert "0 9 * * *" in result.output
     assert "main" in result.output
 
@@ -1486,7 +1538,7 @@ def test_schedules_list_reports_empty(api):
     result = runner.invoke(cli.app, ["schedules", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "No schedules found." in result.output
+    assert "No schedules yet" in result.output and "harumi schedules add" in result.output
 
 
 def test_schedules_add_posts_the_cron_and_defaults_branch_to_main(api):
@@ -1527,26 +1579,28 @@ def test_schedules_add_forwards_optional_overrides(api):
     assert body["email_to"] == "everyone"
 
 
-def test_schedules_remove_aborts_without_confirmation(api):
+def test_schedules_remove_aborts_without_confirmation(api, at_a_terminal):
+    api.route("GET", "/api/projects/proj-1/schedules/5c4e1b2a-0000-4000-8000-000000000001", SCHEDULE)  # read to describe it
+
     result = runner.invoke(
-        cli.app, ["schedules", "rm", "sched-1", "--project", "proj-1"], input="n\n"
+        cli.app, ["schedules", "rm", "5c4e1b2a-0000-4000-8000-000000000001", "--project", "proj-1"], input="n\n"
     )
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert "Aborted." in result.output
-    assert api.requests == []
+    assert [r.method for r in api.requests] == ["GET"]  # it looked, and changed nothing
 
 
 def test_schedules_remove_deletes_when_confirmed(api):
-    api.route("DELETE", "/api/projects/proj-1/schedules/sched-1", SCHEDULE)
+    api.route("DELETE", "/api/projects/proj-1/schedules/5c4e1b2a-0000-4000-8000-000000000001", SCHEDULE)
 
     result = runner.invoke(
-        cli.app, ["schedules", "rm", "sched-1", "--project", "proj-1", "--yes"]
+        cli.app, ["schedules", "rm", "5c4e1b2a-0000-4000-8000-000000000001", "--project", "proj-1", "--yes"]
     )
 
     assert result.exit_code == 0, result.output
     assert "Deleted" in result.output
-    assert api.paths() == ["/api/projects/proj-1/schedules/sched-1"]
+    assert api.paths() == ["/api/projects/proj-1/schedules/5c4e1b2a-0000-4000-8000-000000000001"]
 
 
 def test_schedules_get_surfaces_a_404_as_a_clean_error(api):
@@ -1563,7 +1617,7 @@ def test_schedules_get_surfaces_a_404_as_a_clean_error(api):
 # ---------------------------------------------------------------------------
 
 SHARE_LINK = {
-    "id": "link-1",
+    "id": "0a1b2c3d-1111-4222-8333-444455556666",
     "project_id": "proj-1",
     "token": "tok-abc123",
     "label": "Client dashboard",
@@ -1583,8 +1637,9 @@ def test_share_list_renders_the_links_and_their_flags(api):
     result = runner.invoke(cli.app, ["share", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "link-1" in result.output
-    assert "tok-abc123" in result.output
+    assert "0a1b2c3d" in result.output  # the start of the id: every share command accepts it
+    assert "Client dashboard" in result.output
+    assert "tok-abc123" not in result.output  # the token is the secret in the public URL; `share get` shows the URL
 
 
 def test_share_list_reports_empty(api):
@@ -1593,13 +1648,13 @@ def test_share_list_reports_empty(api):
     result = runner.invoke(cli.app, ["share", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "No share links found." in result.output
+    assert "No share links yet" in result.output and "harumi share add" in result.output
 
 
 def test_share_get_shows_the_link_url_and_permissions(api):
     api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})
 
-    result = runner.invoke(cli.app, ["share", "get", "link-1", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["share", "get", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "tok-abc123" in result.output
@@ -1626,6 +1681,7 @@ def test_share_add_defaults_every_flag_to_false(api):
         "app_enabled": False,
         "chat_enabled": False,
         "run_history_enabled": False,
+        "comparisons_enabled": False,
         "run_control_enabled": False,
     }
 
@@ -1641,6 +1697,7 @@ def test_share_add_forwards_label_and_permission_flags(api):
             "--app",
             "--chat",
             "--run-history",
+            "--comparisons",
             "--run-control",
             "--project", "proj-1",
         ],
@@ -1652,19 +1709,85 @@ def test_share_add_forwards_label_and_permission_flags(api):
     assert body["app_enabled"] is True
     assert body["chat_enabled"] is True
     assert body["run_history_enabled"] is True
+    assert body["comparisons_enabled"] is True
     assert body["run_control_enabled"] is True
 
 
-def test_share_update_only_sends_provided_fields(api):
-    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
+def test_share_add_comparisons_needs_run_history(api):
+    result = runner.invoke(
+        cli.app, ["share", "add", "--comparisons", "--project", "proj-1"]
+    )
+
+    assert result.exit_code != 0
+    assert "--run-history" in result.output
+    assert not [r for r in api.requests if r.method == "POST"]
+
+
+LINK_ID = "0a1b2c3d-1111-4222-8333-444455556666"
+LINK_PATH = f"/api/projects/proj-1/share-links/{LINK_ID}"
+
+
+def test_share_update_comparisons_needs_run_history_on_the_link(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})
+    api.route("PATCH", LINK_PATH, SHARE_LINK)
+
+    result = runner.invoke(cli.app, ["share", "update", LINK_ID[:8], "--comparisons", "--project", "proj-1"])
+
+    assert result.exit_code != 0
+    assert "run history" in result.output
+    assert not [r for r in api.requests if r.method == "PATCH"]
+
+
+def test_share_update_comparisons_goes_through_when_the_link_has_run_history(api):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": [{**SHARE_LINK, "run_history_enabled": True}]})
+    api.route("PATCH", LINK_PATH, SHARE_LINK)
+
+    result = runner.invoke(cli.app, ["share", "update", LINK_ID[:8], "--comparisons", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert api.body_for("PATCH", LINK_PATH) == {"comparisons_enabled": True}
+
+
+def test_share_update_comparisons_together_with_run_history_needs_no_lookup(api):
+    api.route("PATCH", LINK_PATH, SHARE_LINK)
 
     result = runner.invoke(
-        cli.app,
-        ["share", "update", "link-1", "--run-control", "--project", "proj-1"],
+        cli.app, ["share", "update", LINK_ID, "--run-history", "--comparisons", "--project", "proj-1"]
     )
 
     assert result.exit_code == 0, result.output
-    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
+    assert api.body_for("PATCH", LINK_PATH) == {"run_history_enabled": True, "comparisons_enabled": True}
+
+
+def test_share_update_turning_run_history_off_turns_comparisons_off(api):
+    api.route("PATCH", LINK_PATH, SHARE_LINK)
+
+    result = runner.invoke(cli.app, ["share", "update", LINK_ID, "--no-run-history", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    assert api.body_for("PATCH", LINK_PATH) == {"run_history_enabled": False, "comparisons_enabled": False}
+
+
+def test_share_update_refuses_comparisons_with_no_run_history(api):
+    result = runner.invoke(
+        cli.app, ["share", "update", LINK_ID, "--comparisons", "--no-run-history", "--project", "proj-1"]
+    )
+
+    assert result.exit_code != 0
+    assert "--no-run-history" in result.output
+    assert not api.requests
+
+
+def test_share_update_only_sends_provided_fields(api):
+    api.route("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", SHARE_LINK)
+
+    result = runner.invoke(
+        cli.app,
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--run-control", "--project", "proj-1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666")
     assert body == {"run_control_enabled": True}
 
 
@@ -1682,13 +1805,13 @@ def test_share_add_still_accepts_the_removed_io_control_flag_with_a_warning(api)
 
 
 def test_share_update_still_accepts_the_removed_io_control_flag_with_a_warning(api):
-    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
+    api.route("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", SHARE_LINK)
 
-    result = runner.invoke(cli.app, ["share", "update", "link-1", "--no-io-control", "--chat", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--no-io-control", "--chat", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "no longer does anything" in result.output
-    assert api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1") == {"chat_enabled": True}
+    assert api.body_for("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666") == {"chat_enabled": True}
 
 
 def test_the_removed_io_control_flag_is_hidden_from_help():
@@ -1697,63 +1820,66 @@ def test_the_removed_io_control_flag_is_hidden_from_help():
 
 
 def test_share_update_forwards_app_flag(api):
-    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
+    api.route("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", SHARE_LINK)
 
     result = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--app", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--app", "--project", "proj-1"],
     )
 
     assert result.exit_code == 0, result.output
-    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
+    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666")
     assert body == {"app_enabled": True}
 
     result = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--no-app", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--no-app", "--project", "proj-1"],
     )
 
     assert result.exit_code == 0, result.output
-    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/link-1")
+    body = api.body_for("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666")
     assert body == {"app_enabled": False}
 
 
 def test_share_update_with_no_flags_fails_without_a_request(api):
-    result = runner.invoke(cli.app, ["share", "update", "link-1", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1"])
 
     assert result.exit_code == 1
     assert "No fields to update" in result.output
     assert api.requests == []
 
 
-def test_share_remove_aborts_without_confirmation(api):
+def test_share_remove_aborts_without_confirmation(api, at_a_terminal):
+    api.route("GET", "/api/projects/proj-1/share-links", {"links": [SHARE_LINK]})  # read to name the link in the question
+
     result = runner.invoke(
-        cli.app, ["share", "rm", "link-1", "--project", "proj-1"], input="n\n"
+        cli.app, ["share", "rm", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1"], input="n\n"
     )
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert "Aborted." in result.output
-    assert api.requests == []
+    assert "Client dashboard" in result.output  # the question names what is being deleted
+    assert not any(r.method == "DELETE" for r in api.requests)  # and nothing was deleted
 
 
 def test_share_remove_deletes_when_confirmed(api):
-    api.route("DELETE", "/api/projects/proj-1/share-links/link-1", None, status=204)
+    api.route("DELETE", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", None, status=204)
 
     result = runner.invoke(
-        cli.app, ["share", "rm", "link-1", "--project", "proj-1", "--yes"]
+        cli.app, ["share", "rm", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1", "--yes"]
     )
 
     assert result.exit_code == 0, result.output
     assert "Deleted" in result.output
-    assert api.paths() == ["/api/projects/proj-1/share-links/link-1"]
+    assert api.paths() == ["/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666"]
 
 
 def test_share_rotate_mints_a_new_token(api):
     rotated = {**SHARE_LINK, "token": "tok-new456"}
-    api.route("POST", "/api/projects/proj-1/share-links/link-1/rotate", rotated)
+    api.route("POST", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/rotate", rotated)
 
     result = runner.invoke(
-        cli.app, ["share", "rotate", "link-1", "--project", "proj-1", "--yes"]
+        cli.app, ["share", "rotate", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1", "--yes"]
     )
 
     assert result.exit_code == 0, result.output
@@ -1762,26 +1888,26 @@ def test_share_rotate_mints_a_new_token(api):
 
 def test_share_update_password_prompts_and_never_echoes_it(api):
     api.route(
-        "PUT", "/api/projects/proj-1/share-links/link-1/password", {**SHARE_LINK, "password_set": True}
+        "PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", {**SHARE_LINK, "password_set": True}
     )
 
     result = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--password", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--password", "--project", "proj-1"],
         input="correcthorse\ncorrecthorse\n",
     )
 
     assert result.exit_code == 0, result.output
     assert "correcthorse" not in result.output
-    body = api.body_for("PUT", "/api/projects/proj-1/share-links/link-1/password")
+    body = api.body_for("PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password")
     assert body == {"password": "correcthorse"}
 
 
 def test_share_update_no_password_removes_it(api):
-    api.route("DELETE", "/api/projects/proj-1/share-links/link-1/password", SHARE_LINK)
+    api.route("DELETE", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", SHARE_LINK)
 
     result = runner.invoke(
-        cli.app, ["share", "update", "link-1", "--no-password", "--project", "proj-1"]
+        cli.app, ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--no-password", "--yes", "--project", "proj-1"]
     )
 
     assert result.exit_code == 0, result.output
@@ -2118,7 +2244,7 @@ def test_datasources_query_surfaces_the_read_only_rejection(api):
 # ---------------------------------------------------------------------------
 
 RUN = {
-    "id": "run-1",
+    "id": "7f3a91c2-0000-4000-8000-000000000001",
     "project_id": "proj-1",
     "status": "completed",
     "created_at": "2026-01-01T00:00:00Z",
@@ -2132,18 +2258,18 @@ def test_runs_list_renders_each_run(api):
     result = runner.invoke(cli.app, ["runs", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "run-1" in result.output
+    assert "7f3a91c2" in result.output  # the first 8 characters, which every `runs` command accepts
     assert "completed" in result.output
 
 
 def test_runs_get_prints_captured_stdout_and_error(api):
     api.route(
         "GET",
-        "/api/projects/proj-1/runs/run-1",
+        "/api/projects/proj-1/runs/7f3a91c2-0000-4000-8000-000000000001",
         {**RUN, "status": "failed", "stdout": "solving...\n", "stderr": "", "error": "infeasible"},
     )
 
-    result = runner.invoke(cli.app, ["runs", "get", "run-1", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["runs", "get", "7f3a91c2-0000-4000-8000-000000000001", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "solving..." in result.output
@@ -2151,13 +2277,13 @@ def test_runs_get_prints_captured_stdout_and_error(api):
 
 
 def test_runs_cancel_posts_to_the_cancel_endpoint(api):
-    api.route("POST", "/api/projects/proj-1/runs/run-1/cancel", {**RUN, "status": "cancelled"})
+    api.route("POST", "/api/projects/proj-1/runs/7f3a91c2-0000-4000-8000-000000000001/cancel", {**RUN, "status": "cancelled"})
 
-    result = runner.invoke(cli.app, ["runs", "cancel", "run-1", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["runs", "cancel", "7f3a91c2-0000-4000-8000-000000000001", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "cancelled" in result.output
-    assert api.paths() == ["/api/projects/proj-1/runs/run-1/cancel"]
+    assert api.paths() == ["/api/projects/proj-1/runs/7f3a91c2-0000-4000-8000-000000000001/cancel"]
 
 
 # ---------------------------------------------------------------------------
@@ -2171,7 +2297,7 @@ QUEUED = {
     "execution_log_id": "log-1",
     "status": "queued",
     "workflow_run_id": "wf-1",
-    "project_run_id": "run-1",
+    "project_run_id": "7f3a91c2-0000-4000-8000-000000000001",
 }
 
 
@@ -2185,7 +2311,7 @@ def git(monkeypatch):
     monkeypatch.setattr(cli, "has_unpushed_commits", lambda: state["unpushed"])
     monkeypatch.setattr(cli, "current_branch", lambda: state["branch"])
     monkeypatch.setattr(
-        cli, "push_scratch", lambda username, token: ("harumi-scratch-abc", "sha123")
+        cli, "push_scratch", lambda username: ("harumi-scratch-abc", "sha123")
     )
     monkeypatch.setattr(
         cli, "delete_remote_scratch", lambda name: state["deleted"].append(name)
@@ -2401,16 +2527,11 @@ def test_dashboard_validate_explicit_path_checks_only_that_file(api, tmp_path, m
     assert "dropped" not in result.output
 
 
-
-
-
-
-
 COMPARISON = {
     "columns": [
-        {"run_id": "run-1", "branch": "main", "commit": "aaaaaaa1", "status": "completed", "runtime_s": 90.0},
-        {"run_id": "run-2", "branch": "v2", "commit": "bbbbbbb2", "status": "completed", "runtime_s": 125.0},
-        {"run_id": "run-3", "branch": "v3", "commit": "ccccccc3", "status": "failed", "runtime_s": None},
+        {"run_id": "7f3a91c2-0000-4000-8000-000000000001", "branch": "main", "commit": "aaaaaaa1", "status": "completed", "runtime_s": 90.0},
+        {"run_id": "7f3a91c2-0000-4000-8000-000000000002", "branch": "v2", "commit": "bbbbbbb2", "status": "completed", "runtime_s": 125.0},
+        {"run_id": "7f3a91c2-0000-4000-8000-000000000003", "branch": "v3", "commit": "ccccccc3", "status": "failed", "runtime_s": None},
     ],
     "kpis": [
         {
@@ -2432,7 +2553,7 @@ COMPARISON = {
             "deltas": [None, None, None],
         },
     ],
-    "winner_run_id": "run-2",
+    "winner_run_id": "7f3a91c2-0000-4000-8000-000000000002",
     "no_winner_reason": None,
     "warnings": ["v3@ccccccc: no usable output (No output.json for this run)."],
     "fairness": {"verdict": "differs", "files": ["inputs/demand.csv"]},
@@ -2443,7 +2564,7 @@ def test_compare_prints_kpis_winner_and_the_inputs_verdict(api):
     api.route("GET", "/api/projects/proj-1/compare", COMPARISON)
 
     result = runner.invoke(
-        cli.app, ["compare", "run-1", "run-2", "run-3", "--project", "proj-1"]
+        cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "7f3a91c2-0000-4000-8000-000000000003", "--project", "proj-1"]
     )
 
     assert result.exit_code == 0, result.output
@@ -2460,27 +2581,32 @@ def test_compare_prints_kpis_winner_and_the_inputs_verdict(api):
 def test_compare_sends_the_runs_in_order_as_one_comma_separated_param(api):
     api.route("GET", "/api/projects/proj-1/compare", COMPARISON)
 
-    runner.invoke(cli.app, ["compare", "run-2", "run-1", "--project", "proj-1"])
+    runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000002", "7f3a91c2-0000-4000-8000-000000000001", "--project", "proj-1"])
 
-    assert api.params_for("GET", "/api/projects/proj-1/compare") == {"runs": "run-2,run-1"}
+    assert api.params_for("GET", "/api/projects/proj-1/compare") == {"runs": "7f3a91c2-0000-4000-8000-000000000002,7f3a91c2-0000-4000-8000-000000000001"}
 
 
-def test_compare_json_prints_exactly_what_the_api_returned(api):
+def test_compare_json_prints_what_the_api_returned_in_the_named_fields(api):
+    """Every value the API sent comes through; the output is built from the fields in json_out, so the only
+    difference from the raw response is a column field the API left out (`source`) shown as null."""
     api.route("GET", "/api/projects/proj-1/compare", COMPARISON)
 
     result = runner.invoke(
-        cli.app, ["compare", "run-1", "run-2", "--project", "proj-1", "--json"]
+        cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "--project", "proj-1", "--json"]
     )
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == COMPARISON
+    expected = json.loads(json.dumps(COMPARISON))
+    for column in expected["columns"]:
+        column.setdefault("source", None)
+    assert json.loads(result.output) == expected
 
 
 def test_compare_says_why_there_is_no_winner(api):
     body = {**COMPARISON, "winner_run_id": None, "no_winner_reason": "No primary KPI is declared."}
     api.route("GET", "/api/projects/proj-1/compare", body)
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "No primary KPI is declared." in result.output
@@ -2490,19 +2616,27 @@ def test_compare_older_api_without_a_verdict_still_prints(api):
     body = {k: v for k, v in COMPARISON.items() if k != "fairness"}
     api.route("GET", "/api/projects/proj-1/compare", body)
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "Total cost" in result.output
 
 
-@pytest.mark.parametrize("ids", [["run-1"], ["a", "b", "c", "d", "e"], ["run-1", "run-1"]])
-def test_compare_needs_two_to_four_distinct_runs_before_calling_the_api(api, ids):
+@pytest.mark.parametrize(
+    "ids, said",
+    [
+        (["7f3a91c2-0000-4000-8000-000000000001"], "needs 2 to 4 runs"),
+        (["a", "b", "c", "d", "e"], "at most 4 runs"),
+        (["7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000001"], "more than once"),
+    ],
+)
+def test_compare_needs_two_to_four_distinct_runs_before_calling_the_api(api, ids, said):
     result = runner.invoke(cli.app, ["compare", *ids, "--project", "proj-1"])
 
     assert result.exit_code != 0
-    assert "Compare 2 to 4 distinct runs" in result.output
-    assert api.paths() == []
+    assert said in " ".join(result.output.split())  # each case says what is wrong with it
+    assert "harumi runs list" in " ".join(result.output.split())  # and where ids come from
+    assert api.paths() == []  # and nothing was sent
 
 
 def test_compare_prints_branch_names_and_paths_that_look_like_rich_markup(api):
@@ -2515,13 +2649,13 @@ def test_compare_prints_branch_names_and_paths_that_look_like_rich_markup(api):
             {**COMPARISON["columns"][1], "branch": "odd/[/nope]"},
         ],
         "kpis": [{**COMPARISON["kpis"][0], "label": "Cost [red]", "values": [1, 2], "deltas": [None, 1]}],
-        "winner_run_id": "run-2",
+        "winner_run_id": "7f3a91c2-0000-4000-8000-000000000002",
         "fairness": {"verdict": "differs", "files": ["inputs/[2024].csv"]},
         "warnings": ["see [/oops]"],
     }
     api.route("GET", "/api/projects/proj-1/compare", body)
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     for text in ("fix/[bold]x", "odd/[/nope]", "Cost [red]", "inputs/[2024].csv", "see [/oops]"):
@@ -2533,12 +2667,12 @@ def test_compare_tolerates_a_response_that_leaves_fields_out(api):
         "GET",
         "/api/projects/proj-1/compare",
         {
-            "columns": [{"run_id": "run-1"}, {"run_id": "run-2", "branch": "v2"}],
+            "columns": [{"run_id": "7f3a91c2-0000-4000-8000-000000000001"}, {"run_id": "7f3a91c2-0000-4000-8000-000000000002", "branch": "v2"}],
             "kpis": [{"key": "objective", "values": [1]}],
         },
     )
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert "objective" in result.output
@@ -2548,7 +2682,7 @@ def test_compare_does_not_misalign_columns_when_a_kpi_has_too_few_values(api):
     body = {**COMPARISON, "kpis": [{**COMPARISON["kpis"][0], "values": [100], "deltas": []}]}
     api.route("GET", "/api/projects/proj-1/compare", body)
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "run-3", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "7f3a91c2-0000-4000-8000-000000000003", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
     assert result.output.count("—") >= 2
@@ -2558,23 +2692,37 @@ def test_compare_names_the_primary_kpi_only_when_there_is_one(api):
     body = {**COMPARISON, "kpis": [{**COMPARISON["kpis"][0], "primary": False}]}
     api.route("GET", "/api/projects/proj-1/compare", body)
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "run-2", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "7f3a91c2-0000-4000-8000-000000000002", "--project", "proj-1"])
 
     assert "Winner" in result.output
     assert "marked *" not in result.output
 
 
 def test_compare_reports_an_unknown_run_as_an_error(api):
+    """A whole id the server does not know: its own words, plus where to find real ones."""
     api.route("GET", "/api/projects/proj-1/compare", {"detail": "Run not found"}, status=404)
 
-    result = runner.invoke(cli.app, ["compare", "run-1", "nope", "--project", "proj-1"])
+    result = runner.invoke(
+        cli.app,
+        ["compare", "7f3a91c2-0000-4000-8000-000000000001", "9e9e9e9e-0000-4000-8000-000000000009", "--project", "proj-1"],
+    )
 
     assert result.exit_code == 1
-    assert "Run not found" in result.output
+    assert "Run not found" in result.output and "harumi runs list" in result.output
+
+
+def test_compare_with_something_that_is_no_run_id_says_so_and_points_at_the_list(api):
+    """Not a whole id and not the start of one: said before asking the server, naming what was typed."""
+    api.route("GET", "/api/projects/proj-1/runs", {"runs": [RUN]})
+
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "nope", "--project", "proj-1"])
+
+    assert result.exit_code == 1
+    assert "nope" in result.output and "harumi runs list" in result.output
 
 
 def test_compare_rejects_a_run_id_containing_a_comma(api):
-    result = runner.invoke(cli.app, ["compare", "run-1", "a,b", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["compare", "7f3a91c2-0000-4000-8000-000000000001", "a,b", "--project", "proj-1"])
 
     assert result.exit_code == 1
     assert api.paths() == []
@@ -2585,7 +2733,7 @@ def test_compare_rejects_a_run_id_containing_a_comma(api):
 # ---------------------------------------------------------------------------
 
 MEMORY = {
-    "id": "mem-1",
+    "id": "3d7a9f10-0000-4000-8000-000000000001",
     "scope": "project",
     "project_id": "proj-1",
     "content": "Use metric units",
@@ -2613,7 +2761,7 @@ def test_memories_list_shows_scope_mode_and_content(api):
     result = runner.invoke(cli.app, ["memories", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "mem-1" in result.output
+    assert "3d7a9f10" in result.output
     assert "Use metric units" in result.output
     assert "organization" in result.output
     assert "always" in result.output
@@ -2625,7 +2773,7 @@ def test_memories_list_reports_empty(api):
     result = runner.invoke(cli.app, ["memories", "list", "--project", "proj-1"])
 
     assert result.exit_code == 0, result.output
-    assert "No memories found." in result.output
+    assert "No memories yet" in result.output and "harumi memories add" in result.output
 
 
 def test_memories_list_forwards_query_and_mode_filters(api):
@@ -2658,7 +2806,7 @@ def test_memories_add_posts_content_with_cli_source(api):
     )
 
     assert result.exit_code == 0, result.output
-    assert "mem-1" in result.output
+    assert "3d7a9f10-0000-4000-8000-000000000001" in result.output
     body = api.body_for("POST", "/api/projects/proj-1/memories")
     assert body["content"] == "Use metric units"
     assert body["source"] == "cli"
@@ -2676,7 +2824,8 @@ def test_memories_add_forwards_mode(api):
     assert api.body_for("POST", "/api/projects/proj-1/memories")["retrieval_mode"] == "always"
 
 
-def test_memories_add_prompts_for_content_when_omitted(api):
+def test_memories_add_prompts_for_content_when_omitted(api, monkeypatch):
+    monkeypatch.setattr(cli.interactive, "is_interactive", lambda *a, **k: True)
     api.route("POST", "/api/projects/proj-1/memories", MEMORY, status=201)
 
     result = runner.invoke(
@@ -2688,7 +2837,7 @@ def test_memories_add_prompts_for_content_when_omitted(api):
 
 
 def test_memories_edit_with_no_flags_fails_without_calling_the_api(api):
-    result = runner.invoke(cli.app, ["memories", "edit", "mem-1", "--project", "proj-1"])
+    result = runner.invoke(cli.app, ["memories", "edit", "3d7a9f10-0000-4000-8000-000000000001", "--project", "proj-1"])
 
     assert result.exit_code == 1
     assert "No fields to update" in result.output
@@ -2696,51 +2845,53 @@ def test_memories_edit_with_no_flags_fails_without_calling_the_api(api):
 
 
 def test_memories_edit_sends_only_the_given_fields(api):
-    api.route("PATCH", "/api/projects/proj-1/memories/mem-1", MEMORY)
+    api.route("PATCH", "/api/projects/proj-1/memories/3d7a9f10-0000-4000-8000-000000000001", MEMORY)
 
     result = runner.invoke(
-        cli.app, ["memories", "edit", "mem-1", "--mode", "always", "--project", "proj-1"]
+        cli.app, ["memories", "edit", "3d7a9f10-0000-4000-8000-000000000001", "--mode", "always", "--project", "proj-1"]
     )
 
     assert result.exit_code == 0, result.output
     assert "Updated" in result.output
-    assert api.body_for("PATCH", "/api/projects/proj-1/memories/mem-1") == {
+    assert api.body_for("PATCH", "/api/projects/proj-1/memories/3d7a9f10-0000-4000-8000-000000000001") == {
         "retrieval_mode": "always"
     }
 
 
 def test_memories_edit_sends_content(api):
-    api.route("PATCH", "/api/projects/proj-1/memories/mem-1", MEMORY)
+    api.route("PATCH", "/api/projects/proj-1/memories/3d7a9f10-0000-4000-8000-000000000001", MEMORY)
 
     result = runner.invoke(
         cli.app,
-        ["memories", "edit", "mem-1", "--content", "New text", "--project", "proj-1"],
+        ["memories", "edit", "3d7a9f10-0000-4000-8000-000000000001", "--content", "New text", "--project", "proj-1"],
     )
 
     assert result.exit_code == 0, result.output
-    assert api.body_for("PATCH", "/api/projects/proj-1/memories/mem-1") == {"content": "New text"}
+    assert api.body_for("PATCH", "/api/projects/proj-1/memories/3d7a9f10-0000-4000-8000-000000000001") == {"content": "New text"}
 
 
-def test_memories_rm_aborts_without_confirmation(api):
+def test_memories_rm_aborts_without_confirmation(api, at_a_terminal):
+    api.route("GET", "/api/projects/proj-1/memories", {"memories": [MEMORY]})  # read to quote it
+
     result = runner.invoke(
-        cli.app, ["memories", "rm", "mem-1", "--project", "proj-1"], input="n\n"
+        cli.app, ["memories", "rm", "3d7a9f10-0000-4000-8000-000000000001", "--project", "proj-1"], input="n\n"
     )
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert "Aborted." in result.output
-    assert api.requests == []
+    assert [r.method for r in api.requests] == ["GET"]  # it looked, and changed nothing
 
 
 def test_memories_rm_deletes_when_confirmed(api):
-    api.route("DELETE", "/api/projects/proj-1/memories/mem-1", MEMORY)
+    api.route("DELETE", "/api/projects/proj-1/memories/3d7a9f10-0000-4000-8000-000000000001", MEMORY)
 
     result = runner.invoke(
-        cli.app, ["memories", "rm", "mem-1", "--project", "proj-1", "--yes"]
+        cli.app, ["memories", "rm", "3d7a9f10-0000-4000-8000-000000000001", "--project", "proj-1", "--yes"]
     )
 
     assert result.exit_code == 0, result.output
     assert "Deleted" in result.output
-    assert api.paths() == ["/api/projects/proj-1/memories/mem-1"]
+    assert api.paths() == ["/api/projects/proj-1/memories/3d7a9f10-0000-4000-8000-000000000001"]
 
 
 def test_memories_rm_surfaces_a_404_as_a_clean_error(api):
@@ -2853,7 +3004,9 @@ def test_skills_add_does_not_clobber_a_users_own_skill_of_the_same_name(api, bou
     result = runner.invoke(cli.app, ["skills", "add", "scheduling-modeling"])
 
     assert result.exit_code == 1
-    assert "not the library" in result.output
+    # The message starts with the file's path, so how it wraps depends on how long the
+    # temp directory is; compare the words, not the line breaks.
+    assert "not the library" in " ".join(result.output.split())
     assert mine.read_text().endswith("my own\n")
     # Refused before asking the API for anything.
     assert api.requests == []
@@ -2893,7 +3046,7 @@ def test_agent_skills_install_dry_run_shows_source_and_destination(tmp_path):
     )
 
     assert result.exit_code == 0, result.output
-    assert "->" in result.output
+    assert "->" in result.output  # the dry run keeps its source -> destination: it is how you check what is copied
     assert "harumi-cli" in result.output
 
 
@@ -2920,7 +3073,7 @@ def test_memories_add_rejects_blank_prompt_answer(api):
 @pytest.mark.parametrize("content", ["", "   ", "x" * 4001])
 def test_memories_edit_rejects_blank_or_oversized_content_without_calling_the_api(api, content):
     result = runner.invoke(
-        cli.app, ["memories", "edit", "mem-1", "--content", content, "--project", "proj-1"]
+        cli.app, ["memories", "edit", "3d7a9f10-0000-4000-8000-000000000001", "--content", content, "--project", "proj-1"]
     )
 
     assert result.exit_code == 1
@@ -2943,7 +3096,7 @@ def test_memories_add_accepts_content_at_the_limit(api):
 # ---------------------------------------------------------------------------
 
 
-def test_deprecated_names_are_hidden_from_help_and_the_surface():
+def test_the_removed_names_are_gone_from_the_command_tree_and_the_surface():
     from typer.main import get_command
 
     from scripts.emit_cli_surface import build_surface
@@ -2951,77 +3104,88 @@ def test_deprecated_names_are_hidden_from_help_and_the_surface():
     # Ask the command tree rather than scraping --help: the rendered help is
     # colourised differently on CI.
     top = get_command(cli.app).commands
-    for old in ("push", "repo", "outputs", "config", "skill"):
-        assert top[old].hidden, f"{old} should be hidden"
+    for gone in ("push", "repo", "outputs", "config", "skill"):
+        assert gone not in top, f"{gone} was removed in 1.0.0"
     assert not top["import"].hidden
+    assert top["blueprints"].hidden  # deprecated in 1.0.0, removed in 1.1.0: still here, still warning
 
     paths = {command["path"] for command in build_surface()["commands"]}
-    assert "push" not in paths and "outputs" not in paths
+    assert "push" not in paths and "outputs" not in paths and "blueprints" not in paths
     assert not any(path.startswith(("repo ", "config ", "skill ")) for path in paths)
     assert not any(path.endswith((" remove", " delete", " set-password", " rm-password", " current")) for path in paths)
 
 
 @pytest.mark.parametrize(
-    "argv, method, route, use",
+    "argv, use",
     [
-        (["projects", "delete", "p1", "--yes"], "DELETE", "/api/projects/p1", "harumi projects rm"),
-        (["share", "remove", "link-1", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/link-1", "harumi share rm"),
-        (["schedules", "remove", "sched-1", "--yes", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/schedules/sched-1", "harumi schedules rm"),
-        (["datasources", "remove", "sales_db", "--yes", "-p", "proj-1"], "DELETE", "/api/datasources/proj-1/sales_db", "harumi datasources rm"),
-        (["org", "delete", "org-1", "--yes"], "DELETE", "/api/users/organizations/org-1", "harumi org rm"),
-        (["share", "rm-password", "link-1", "-p", "proj-1"], "DELETE", "/api/projects/proj-1/share-links/link-1/password", "share update <LINK_ID> --no-password"),
-        (["repo", "ls", "-p", "proj-1"], "GET", "/api/projects/proj-1/repo/files", "git ls-files"),
+        (["projects", "delete", "p1", "--yes"], "harumi projects rm"),
+        (["share", "remove", "0a1b2c3d-1111-4222-8333-444455556666", "--yes", "-p", "proj-1"], "harumi share rm"),
+        (["schedules", "remove", "5c4e1b2a-0000-4000-8000-000000000001", "--yes", "-p", "proj-1"], "harumi schedules rm"),
+        (["datasources", "remove", "sales_db", "--yes", "-p", "proj-1"], "harumi datasources rm"),
+        (["org", "delete", "6d1c0aa5-0000-4000-8000-0000000000a1", "--yes"], "harumi org rm"),
+        (["share", "rm-password", "0a1b2c3d-1111-4222-8333-444455556666", "-p", "proj-1"], "share update <LINK_ID> --no-password"),
+        (["repo", "ls", "-p", "proj-1"], "git ls-files"),
     ],
 )
-def test_a_deprecated_name_still_runs_and_names_its_replacement(api, argv, method, route, use):
-    api.route(method, route, [] if argv[0] == "repo" else {**SHARE_LINK, "id": "x", "name": "x"})
-
+def test_a_removed_name_answers_with_its_replacement_and_sends_nothing(api, argv, use):
+    """The destructive ones above used to delete. Gone now, they must not: a script that still calls `projects delete`
+    has to be told, not run (and not have the real thing happen under a name that is supposed to be gone)."""
     result = runner.invoke(cli.app, argv)
 
-    assert "deprecated" in result.output
-    assert use in result.output
-    assert "removed in 0.12.0" in result.output
-    # It really ran: the request the new name makes was sent.
-    assert api.requests and api.requests[-1].url.path == route
+    assert result.exit_code == 2, result.output
+    assert " ".join(use.split()) in " ".join(result.output.split())
+    assert "removed in 1.0.0" in result.output
+    assert api.requests == [], "a removed name must not reach the API"
 
 
 def test_org_remove_is_now_org_rm_member_and_org_delete_is_org_rm(api):
-    api.route("DELETE", "/api/users/organizations/org-1", None)
+    api.route("GET", "/api/users/organizations", [{"id": "6d1c0aa5-0000-4000-8000-0000000000a1", "business_name": "Acme", "role": "owner"}])
+    api.route("DELETE", "/api/users/organizations/6d1c0aa5-0000-4000-8000-0000000000a1", None)
 
-    removed = runner.invoke(cli.app, ["org", "rm", "org-1", "--yes"])
-    stale = runner.invoke(cli.app, ["org", "rm", "org-1", "user-1", "--yes"])
+    removed = runner.invoke(cli.app, ["org", "rm", "6d1c0aa5-0000-4000-8000-0000000000a1", "--yes"])
+    stale = runner.invoke(cli.app, ["org", "rm", "6d1c0aa5-0000-4000-8000-0000000000a1", "user-1", "--yes"])
 
     assert removed.exit_code == 0, removed.output
     assert "deprecated" not in removed.output
     # `org rm` takes one argument; the old two-argument form is a usage error, not a silent org delete.
     assert stale.exit_code != 0
-    assert api.paths() == ["/api/users/organizations/org-1"]
+    # The organization is looked up first so the question can name it, then deleted: once.
+    assert api.paths() == ["/api/users/organizations", "/api/users/organizations/6d1c0aa5-0000-4000-8000-0000000000a1"]
 
 
-def test_org_use_persists_the_org_and_the_old_config_name_still_works():
+def test_org_use_persists_the_org(api):
     from harumi.config import Config
 
+    # The id is checked against your organizations before it is saved, so they have to exist.
+    api.route("GET", "/api/users/organizations", [
+        {"id": "org-9", "business_name": "Nine", "role": "owner"},
+        {"id": "org-10", "business_name": "Ten", "role": "owner"},
+    ])
     new = runner.invoke(cli.app, ["org", "use", "org-9"])
     assert new.exit_code == 0, new.output
     assert Config.load().org_id == "org-9"
 
+
+def test_config_set_org_is_removed_and_does_not_change_the_workspace(api):
+    from harumi.config import Config
+
+    before = Config.load().org_id
     old = runner.invoke(cli.app, ["config", "set-org", "org-10"])
-    assert old.exit_code == 0, old.output
-    assert "harumi org use" in old.output
-    assert Config.load().org_id == "org-10"
+
+    assert old.exit_code == 2 and "removed in 1.0.0" in old.output and "harumi org use" in old.output
+    assert Config.load().org_id == before
 
 
-def test_env_current_and_skill_path_and_profile_show_are_deprecated_not_gone(api):
-    api.route("GET", "/api/users/profile", {"id": "u1", "email": "dev@harumi.test"})
-
-    assert "harumi env list" in runner.invoke(cli.app, ["env", "current"]).output
-    assert "agent-skills install --dry-run" in runner.invoke(cli.app, ["skill", "path"]).output
+def test_skill_path_and_profile_show_are_removed_and_say_what_replaced_them(api):
+    skill = runner.invoke(cli.app, ["skill", "path"])
     shown = runner.invoke(cli.app, ["profile", "show"])
-    assert "harumi whoami" in shown.output
-    assert "dev@harumi.test" in shown.output
+
+    assert skill.exit_code == 2 and "agent-skills install --dry-run" in " ".join(skill.output.split())
+    assert shown.exit_code == 2 and "harumi whoami" in shown.output
+    assert api.requests == []
 
 
-def test_whoami_shows_the_profile_environment_and_org(api):
+def test_whoami_shows_the_profile_and_org_but_not_the_environment_to_a_production_user(api):
     api.route(
         "GET",
         "/api/users/profile",
@@ -3031,8 +3195,9 @@ def test_whoami_shows_the_profile_environment_and_org(api):
     result = runner.invoke(cli.app, ["whoami", "--org", "org-7"])
 
     assert result.exit_code == 0, result.output
-    for expected in ("dev@harumi.test", "u1", "Ada Lovelace", "Math", "org-7", "env:"):
+    for expected in ("dev@harumi.test", "u1", "Ada Lovelace", "Math", "org-7"):
         assert expected in result.output
+    assert "env:" not in result.output  # production is the only thing most people ever use
 
 
 def test_new_no_clone_creates_only_and_points_at_clone(api, git_ops, tmp_path, monkeypatch):
@@ -3050,37 +3215,25 @@ def test_new_no_clone_creates_only_and_points_at_clone(api, git_ops, tmp_path, m
     assert "--dir" in with_dir.output
 
 
-def test_projects_create_is_a_deprecated_new_no_clone(api, git_ops, tmp_path, monkeypatch):
+def test_projects_create_is_removed_and_creates_nothing(api, git_ops, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    api.route("POST", "/api/projects", {"id": "proj-9", "name": "Widget", "notebook_ids": []})
-    _route_project_repo(api, "proj-9", "widget")
 
     result = runner.invoke(cli.app, ["projects", "create", "Widget"])
 
-    assert result.exit_code == 0, result.output
-    assert "harumi new <NAME> --no-clone" in result.output
-    assert "harumi clone proj-9" in result.output
-    assert git_ops["clone"] == []
+    assert result.exit_code == 2, result.output
+    assert "harumi new <NAME> --no-clone" in " ".join(result.output.split())
+    assert api.requests == [] and git_ops["clone"] == []
 
 
-def test_push_is_a_deprecated_import(api, git_ops, tmp_path):
-    from harumi.config import save_git_token
-
-    save_git_token("gitea-token", username="dev@harumi.test")
+def test_push_is_removed_and_uploads_nothing(api, git_ops, tmp_path):
     folder = tmp_path / "solver"
     folder.mkdir()
     (folder / "main.py").write_text("print(1)\n")
-    api.route(
-        "POST",
-        "/api/projects",
-        {"id": "proj-1", "name": "solver", "notebook_ids": [], "repo": {"owner": "a", "name": "s", "clone_url": "https://git.harumi.test/a/s.git", "default_branch": "main"}},
-    )
-    _route_project_repo(api, "proj-1", "solver")
 
     result = runner.invoke(cli.app, ["push", str(folder)])
 
-    assert "harumi import" in result.output
-    assert git_ops["push_folder"], result.output
+    assert result.exit_code == 2 and "harumi import" in result.output
+    assert api.requests == [] and not git_ops["push_folder"], result.output
 
 
 def test_runs_download_defaults_to_the_latest_run(api, tmp_path, monkeypatch):
@@ -3091,7 +3244,11 @@ def test_runs_download_defaults_to_the_latest_run(api, tmp_path, monkeypatch):
         return dest / f"{run.id}.zip"
 
     monkeypatch.setattr("harumi.execution.download_run_output", fake_download)
-    api.route("GET", "/api/projects/proj-1/runs", {"runs": [{**RUN, "id": "newest"}, {**RUN, "id": "older"}]})
+    api.route(
+        "GET",
+        "/api/projects/proj-1/runs",
+        {"runs": [{**RUN, "id": "newest", "output_url": "s3://x"}, {**RUN, "id": "older", "output_url": "s3://y"}]},
+    )
 
     result = runner.invoke(cli.app, ["runs", "download", "--project", "proj-1", "-o", str(tmp_path)])
 
@@ -3102,12 +3259,12 @@ def test_runs_download_defaults_to_the_latest_run(api, tmp_path, monkeypatch):
 
 def test_runs_download_takes_an_explicit_run_id(api, tmp_path, monkeypatch):
     monkeypatch.setattr("harumi.execution.download_run_output", lambda _a, _p, run, dest: dest / f"{run.id}.zip")
-    api.route("GET", "/api/projects/proj-1/runs/run-1", RUN)
+    api.route("GET", "/api/projects/proj-1/runs/7f3a91c2-0000-4000-8000-000000000001", {**RUN, "output_url": "s3://x"})
 
-    result = runner.invoke(cli.app, ["runs", "download", "run-1", "--project", "proj-1", "-o", str(tmp_path)])
+    result = runner.invoke(cli.app, ["runs", "download", "7f3a91c2-0000-4000-8000-000000000001", "--project", "proj-1", "-o", str(tmp_path)])
 
     assert result.exit_code == 0, result.output
-    assert api.paths() == ["/api/projects/proj-1/runs/run-1"]
+    assert api.paths() == ["/api/projects/proj-1/runs/7f3a91c2-0000-4000-8000-000000000001"]
 
 
 def test_runs_download_with_no_runs_is_a_clean_error(api):
@@ -3120,18 +3277,18 @@ def test_runs_download_with_no_runs_is_a_clean_error(api):
 
 
 def test_share_update_password_can_combine_with_other_flags_and_alone_needs_no_other_field(api):
-    api.route("PUT", "/api/projects/proj-1/share-links/link-1/password", {**SHARE_LINK, "password_set": True})
-    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", {**SHARE_LINK, "label": "renamed"})
+    api.route("PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", {**SHARE_LINK, "password_set": True})
+    api.route("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", {**SHARE_LINK, "label": "renamed"})
 
     alone = runner.invoke(
-        cli.app, ["share", "update", "link-1", "--password", "--project", "proj-1"], input="correcthorse\ncorrecthorse\n"
+        cli.app, ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--password", "--project", "proj-1"], input="correcthorse\ncorrecthorse\n"
     )
     both = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--label", "renamed", "--password", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--label", "renamed", "--password", "--project", "proj-1"],
         input="correcthorse\ncorrecthorse\n",
     )
-    nothing = runner.invoke(cli.app, ["share", "update", "link-1", "--project", "proj-1"])
+    nothing = runner.invoke(cli.app, ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--project", "proj-1"])
 
     assert alone.exit_code == 0, alone.output
     assert both.exit_code == 0, both.output
@@ -3143,7 +3300,7 @@ def test_share_update_password_can_combine_with_other_flags_and_alone_needs_no_o
 
 
 def test_run_output_dir_is_deprecated_but_still_accepted(api, git, bound_dir):
-    api.route("POST", "/api/projects/proj-bound/execute", {"execution_log_id": "e1", "project_run_id": "run-1", "status": "queued"})
+    api.route("POST", "/api/projects/proj-bound/execute", {"execution_log_id": "e1", "project_run_id": "7f3a91c2-0000-4000-8000-000000000001", "status": "queued"})
 
     result = runner.invoke(cli.app, ["run", "--branch", "main", "-o", "out"])
 
@@ -3151,12 +3308,12 @@ def test_run_output_dir_is_deprecated_but_still_accepted(api, git, bound_dir):
 
 
 def test_share_update_does_not_touch_the_password_when_the_other_fields_are_rejected(api):
-    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", {"detail": "bad label"}, status=422)
-    api.route("PUT", "/api/projects/proj-1/share-links/link-1/password", SHARE_LINK)
+    api.route("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", {"detail": "bad label"}, status=422)
+    api.route("PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", SHARE_LINK)
 
     result = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--label", "x", "--password", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--label", "x", "--password", "--project", "proj-1"],
         input="correcthorse\ncorrecthorse\n",
     )
 
@@ -3165,12 +3322,12 @@ def test_share_update_does_not_touch_the_password_when_the_other_fields_are_reje
 
 
 def test_share_update_says_so_when_only_the_password_part_fails(api):
-    api.route("PATCH", "/api/projects/proj-1/share-links/link-1", SHARE_LINK)
-    api.route("PUT", "/api/projects/proj-1/share-links/link-1/password", {"detail": "too short"}, status=422)
+    api.route("PATCH", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666", SHARE_LINK)
+    api.route("PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", {"detail": "too short"}, status=422)
 
     result = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--label", "x", "--password", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--label", "x", "--password", "--project", "proj-1"],
         input="short\nshort\n",
     )
 
@@ -3179,17 +3336,17 @@ def test_share_update_says_so_when_only_the_password_part_fails(api):
 
 
 def test_share_update_password_prompt_must_be_confirmed(api):
-    api.route("PUT", "/api/projects/proj-1/share-links/link-1/password", {**SHARE_LINK, "password_set": True})
+    api.route("PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password", {**SHARE_LINK, "password_set": True})
 
     result = runner.invoke(
         cli.app,
-        ["share", "update", "link-1", "--password", "--project", "proj-1"],
+        ["share", "update", "0a1b2c3d-1111-4222-8333-444455556666", "--password", "--project", "proj-1"],
         input="correcthorse\ntypo-horse\ncorrecthorse\ncorrecthorse\n",
     )
 
     assert result.exit_code == 0, result.output
     # The mismatched pair was rejected and re-asked; only the confirmed value was sent.
-    assert api.body_for("PUT", "/api/projects/proj-1/share-links/link-1/password") == {"password": "correcthorse"}
+    assert api.body_for("PUT", "/api/projects/proj-1/share-links/0a1b2c3d-1111-4222-8333-444455556666/password") == {"password": "correcthorse"}
     assert len([r for r in api.requests if r.method == "PUT"]) == 1
 
 
@@ -3212,3 +3369,92 @@ def test_skills_library_category_filter_ignores_case_on_both_sides(api):
     result = runner.invoke(cli.app, ["skills", "library", "--category", "MODELING"])
 
     assert "a-skill" in result.output
+
+
+# --- project picker: `harumi clone` with no id -------------------------------
+
+_TWO_PROJECTS = {
+    "projects": [
+        {"id": "proj-1", "name": "Solver", "notebook_ids": []},
+        {"id": "proj-2", "name": "Routing [beta]", "notebook_ids": []},
+    ],
+    "total_count": 2,
+}
+
+
+def test_clone_without_an_id_lets_you_pick_the_project(api, git_ops, tmp_path, monkeypatch):
+    from harumi import interactive
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    api.route("GET", "/api/projects", _TWO_PROJECTS)
+    api.route("GET", "/api/projects/proj-2", {"id": "proj-2", "name": "Routing", "notebook_ids": []})
+    _route_project_repo(api, "proj-2", "routing")
+    offered = {}
+
+    def pick(message, options, flag=None):
+        offered["labels"] = [o.label for o in options]
+        offered["flag"] = flag
+        return "proj-2"
+
+    monkeypatch.setattr(interactive, "select", pick)
+
+    result = runner.invoke(cli.app, ["clone"])
+
+    assert result.exit_code == 0, result.output
+    assert offered["labels"] == ["Solver", "Routing [beta]"]
+    assert offered["flag"] == "the PROJECT_ID argument"
+    assert git_ops["clone"][0]["clone_url"] == "https://git.harumi.test/acme/routing.git"
+
+
+def test_clone_without_an_id_and_without_a_terminal_lists_projects_and_never_prompts(
+    api, git_ops, tmp_path, monkeypatch
+):
+    """The agent/CI path: fail fast, naming the projects and the argument to pass."""
+    from harumi import interactive
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(interactive, "is_interactive", lambda *a, **k: False)
+    api.route("GET", "/api/projects", _TWO_PROJECTS)
+
+    result = runner.invoke(cli.app, ["clone"])
+
+    assert result.exit_code == 1
+    assert "Solver" in result.output and "proj-1" in result.output
+    # Server-supplied text with brackets must survive Rich markup intact.
+    assert "Routing [beta]" in result.output
+    assert "PROJECT_ID" in result.output
+    assert git_ops["clone"] == []
+
+
+def test_clone_picker_quit_clones_nothing_and_exits_zero(api, git_ops, tmp_path, monkeypatch):
+    from harumi import interactive
+
+    monkeypatch.chdir(tmp_path)
+    api.route("GET", "/api/projects", _TWO_PROJECTS)
+    monkeypatch.setattr(interactive, "select", lambda *a, **k: None)
+
+    result = runner.invoke(cli.app, ["clone"])
+
+    assert result.exit_code == 0, result.output
+    assert git_ops["clone"] == []
+
+
+def test_clone_with_no_projects_points_at_new(api, git_ops, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    api.route("GET", "/api/projects", {"projects": [], "total_count": 0})
+
+    result = runner.invoke(cli.app, ["clone"])
+
+    assert result.exit_code == 1
+    assert "harumi new" in result.output
+
+
+def test_memories_add_reads_standard_input_when_given_a_dash(api):
+    api.route("POST", "/api/projects/proj-1/memories", MEMORY, status=201)
+
+    result = runner.invoke(cli.app, ["memories", "add", "-", "--project", "proj-1"], input="From a pipe\n")
+
+    assert result.exit_code == 0, result.output
+    assert api.body_for("POST", "/api/projects/proj-1/memories")["content"] == "From a pipe"

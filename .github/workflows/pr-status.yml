@@ -1,0 +1,146 @@
+name: PR status
+
+# Moves the Status of the issues a PR closes: ready for review -> In review, back to draft ->
+# In progress. The board's built-in workflows do the rest (PR linked, merged, issue closed or
+# reopened). Nobody, agents included, sets Status by hand.
+#
+# This repo is public, so it cannot call the shared workflow in the private harumi-io/.github-private
+# (GitHub forbids it). This is a copy of .github/workflows/sync-pr-status.yml there, with its inputs
+# fixed to their defaults. Keep both in sync.
+on:
+  pull_request:
+    types: [opened, ready_for_review, converted_to_draft]
+
+jobs:
+  sync:
+    # A PR opened as a draft needs nothing: the built-in "PR linked" workflow sets In progress.
+    if: ${{ !(github.event.action == 'opened' && github.event.pull_request.draft) }}
+    runs-on: ubuntu-latest
+    # Never touches GITHUB_TOKEN: every API call uses secrets.ORG_PROJECT_PAT.
+    permissions: {}
+    # One run per PR at a time; a newer event supersedes an older one because the status is
+    # recomputed from the PR's current state anyway.
+    concurrency:
+      group: sync-pr-status-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Set linked issues' Status from the PR state
+        env:
+          GH_TOKEN: ${{ secrets.ORG_PROJECT_PAT }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ACTION: ${{ github.event.action }}
+          OWNER: harumi-io
+          NUMBER: 4
+          READY: In review
+          DRAFT: In progress
+        run: |
+          set -euo pipefail
+
+          # A PR opened ready is linked to its issue at the same moment, and the built-in
+          # "PR linked" workflow then writes In progress. Let it land first so ours is last.
+          if [ "$ACTION" = "opened" ]; then sleep 45; fi
+
+          OWNER_NAME="${REPO%%/*}"
+          REPO_NAME="${REPO##*/}"
+
+          # Quoted heredocs: the $vars in the GraphQL are GraphQL variables, not shell ones.
+          read -r -d '' PR_QUERY <<'GRAPHQL' || true
+          query($owner: String!, $name: String!, $pr: Int!) {
+            repository(owner: $owner, name: $name) {
+              pullRequest(number: $pr) {
+                state
+                isDraft
+                closingIssuesReferences(first: 20) {
+                  nodes {
+                    number
+                    projectItems(first: 20) {
+                      nodes {
+                        id
+                        project { id number owner { ... on Organization { login } } }
+                        status: fieldValueByName(name: "Status") {
+                          ... on ProjectV2ItemFieldSingleSelectValue { name }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          GRAPHQL
+
+          read -r -d '' FIELD_QUERY <<'GRAPHQL' || true
+          query($id: ID!) {
+            node(id: $id) {
+              ... on ProjectV2 {
+                field(name: "Status") {
+                  ... on ProjectV2SingleSelectField { id options { id name } }
+                }
+              }
+            }
+          }
+          GRAPHQL
+
+          read -r -d '' MUTATION <<'GRAPHQL' || true
+          mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+            updateProjectV2ItemFieldValue(input: {
+              projectId: $project, itemId: $item, fieldId: $field,
+              value: { singleSelectOptionId: $option }
+            }) { projectV2Item { id } }
+          }
+          GRAPHQL
+
+          pr_json=$(gh api graphql -f owner="$OWNER_NAME" -f name="$REPO_NAME" -F pr="$PR" -f query="$PR_QUERY")
+
+          state=$(jq -r '.data.repository.pullRequest.state' <<<"$pr_json")
+          if [ "$state" != "OPEN" ]; then
+            echo "PR is $state; the board's built-in workflows own that transition."
+            exit 0
+          fi
+
+          if [ "$(jq -r '.data.repository.pullRequest.isDraft' <<<"$pr_json")" = "true" ]; then
+            target="$DRAFT"
+          else
+            target="$READY"
+          fi
+
+          items=$(jq -c --arg owner "$OWNER" --argjson number "$NUMBER" '
+            [ .data.repository.pullRequest.closingIssuesReferences.nodes[]
+              | .number as $issue
+              | .projectItems.nodes[]
+              | select(.project.number == $number and .project.owner.login == $owner)
+              | { issue: $issue, item: .id, project: .project.id, current: (.status.name // "") } ]
+          ' <<<"$pr_json")
+
+          if [ "$(jq 'length' <<<"$items")" = "0" ]; then
+            echo "No closed issue of #$PR is on project $NUMBER; nothing to do."
+            exit 0
+          fi
+
+          project_id=$(jq -r '.[0].project' <<<"$items")
+          field_json=$(gh api graphql -f id="$project_id" -f query="$FIELD_QUERY")
+          field_id=$(jq -r '.data.node.field.id' <<<"$field_json")
+          option_id=$(jq -r --arg t "$target" '.data.node.field.options[] | select(.name == $t) | .id' <<<"$field_json")
+          if [ -z "$option_id" ]; then
+            echo "::error::Status option '$target' not found on the project; was the board reconfigured?"
+            exit 1
+          fi
+
+          jq -c '.[]' <<<"$items" | while read -r row; do
+            issue=$(jq -r '.issue' <<<"$row")
+            current=$(jq -r '.current' <<<"$row")
+            if [ "$current" = "$target" ]; then
+              echo "#$issue already '$target'."
+              continue
+            fi
+            if [ "$current" = "Done" ]; then
+              echo "#$issue is Done; leaving it."
+              continue
+            fi
+            gh api graphql \
+              -f project="$project_id" -f item="$(jq -r '.item' <<<"$row")" \
+              -f field="$field_id" -f option="$option_id" \
+              -f query="$MUTATION" >/dev/null
+            echo "#$issue: '$current' -> '$target'."
+          done

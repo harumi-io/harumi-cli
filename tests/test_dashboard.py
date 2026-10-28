@@ -31,11 +31,16 @@ from harumi.dashboard import (
 # renames a field the CLI validates against fails here instead of quietly
 # validating less than it used to.
 _EXPECTED_WIDGET_CONTRACT = {
-    "metric": ["value_key!*", "delta_key*", "format[number|currency|percent]", "unit"],
-    "kpi-rail": ["items!"],
+    "metric": [
+        "value_key!*",
+        "delta_key*",
+        "good_direction[up|down]",
+        "description",
+        "description_key*",
+        "format[number|currency|percent]",
+        "unit",
+    ],
     "table": ["rows_key!*", "columns!"],
-    "detail": ["items_key!*", "id_key!", "fields"],
-    "filter": ["items_key!*", "id_key!", "label_key"],
     "treemap": ["items_key!*", "value_key!", "name_key!", "color_key", "colors", "capacity_key*"],
     "heatmap": [
         "items_key!*",
@@ -282,12 +287,6 @@ class TestParseWidgetEntry:
     def test_parses_a_minimal_valid_entry_for_every_type(self):
         entries = {
             "metric": {"type": "metric", "id": "m", "title": "M", "value_key": "totals.x"},
-            "kpi-rail": {
-                "type": "kpi-rail",
-                "id": "k",
-                "title": "K",
-                "items": [{"label": "Cost", "value_key": "totals.cost"}],
-            },
             "table": {
                 "type": "table",
                 "id": "t",
@@ -295,8 +294,6 @@ class TestParseWidgetEntry:
                 "rows_key": "rows",
                 "columns": [{"key": "name", "label": "Name"}],
             },
-            "detail": {"type": "detail", "id": "d", "title": "D", "items_key": "jobs", "id_key": "id"},
-            "filter": {"type": "filter", "id": "f", "title": "F", "items_key": "jobs", "id_key": "id"},
             "treemap": {
                 "type": "treemap",
                 "id": "tm",
@@ -411,69 +408,41 @@ class TestParseWidgetEntry:
         assert widget is not None
         assert "colors" not in widget
 
-    def test_kpi_rail_drops_invalid_items_but_keeps_valid_ones(self):
-        entry = {
-            "type": "kpi-rail",
-            "id": "k",
-            "title": "K",
-            "items": [
-                {"label": "Cost", "value_key": "totals.cost", "format": "currency"},
-                {"label": "Bad"},  # missing value_key
-                {"value_key": "totals.x"},  # missing label
-                {"label": "Not a dict"},  # placeholder to keep list realistic
-            ],
-        }
-        widget, issue = parse_widget_entry(entry)
+    def test_metric_keeps_its_description_and_trend_fields(self):
+        widget, issue = parse_widget_entry(
+            {
+                "type": "metric",
+                "id": "d",
+                "title": "Delays",
+                "value_key": "totals.delays",
+                "delta_key": "totals.change",
+                "good_direction": "down",
+                "description": "5 of 65 ops",
+                "description_key": "totals.note",
+            }
+        )
         assert issue is None
         assert widget is not None
-        assert widget["items"] == [{"label": "Cost", "value_key": "totals.cost", "format": "currency"}]
+        assert widget["good_direction"] == "down"
+        assert widget["description"] == "5 of 65 ops"
+        assert widget["description_key"] == "totals.note"
 
-    def test_kpi_rail_with_only_invalid_items_is_dropped(self):
-        entry = {"type": "kpi-rail", "id": "k", "title": "K", "items": [{"label": "Bad"}]}
-        widget, issue = parse_widget_entry(entry)
+    def test_metric_drops_an_unknown_good_direction_but_keeps_the_widget(self):
+        widget, issue = parse_widget_entry(
+            {"type": "metric", "id": "d", "title": "D", "value_key": "x", "good_direction": "sideways"}
+        )
+        assert issue is None
+        assert widget is not None
+        assert "good_direction" not in widget
+
+    def test_kpi_rail_is_an_unknown_type_with_a_pointer_to_metric(self):
+        widget, issue = parse_widget_entry(
+            {"type": "kpi-rail", "id": "k", "title": "K", "items": [{"label": "Cost", "value_key": "totals.cost"}]}
+        )
         assert widget is None
         assert issue is not None and issue.dropped is True
-
-    def test_kpi_rail_item_accepts_rows_key_in_place_of_value_key(self):
-        entry = {
-            "type": "kpi-rail",
-            "id": "k",
-            "title": "K",
-            "items": [
-                {"label": "Utilization", "rows_key": "machines", "progress_key": "utilization_pct", "tone": "warn"},
-                {"label": "Bad"},  # neither value_key nor rows_key
-            ],
-        }
-        widget, issue = parse_widget_entry(entry)
-        assert issue is None
-        assert widget is not None
-        assert widget["items"] == [
-            {"label": "Utilization", "rows_key": "machines", "progress_key": "utilization_pct", "tone": "warn"}
-        ]
-
-    def test_kpi_rail_item_rejects_unknown_tone(self):
-        entry = {
-            "type": "kpi-rail",
-            "id": "k",
-            "title": "K",
-            "items": [{"label": "Utilization", "rows_key": "machines", "tone": "sparkly"}],
-        }
-        widget, issue = parse_widget_entry(entry)
-        assert issue is None
-        assert widget is not None
-        assert "tone" not in widget["items"][0]
-
-    def test_kpi_rail_item_ignores_unknown_format_but_keeps_item(self):
-        entry = {
-            "type": "kpi-rail",
-            "id": "k",
-            "title": "K",
-            "items": [{"label": "Cost", "value_key": "totals.cost", "format": "scientific-notation"}],
-        }
-        widget, issue = parse_widget_entry(entry)
-        assert issue is None
-        assert widget is not None
-        assert widget["items"] == [{"label": "Cost", "value_key": "totals.cost"}]
+        assert 'unknown type "kpi-rail"' in issue.message
+        assert 'write one "metric" widget per number' in issue.message
 
 
 class TestParseDatasetEntry:
@@ -868,52 +837,19 @@ value_key = "totals.objective"
         assert len(issues) == 1 and issues[0].dropped is False
         assert "totals.objective" in issues[0].message
 
-    def test_kpi_rail_item_with_unresolved_value_key_is_reported_but_not_dropped(self):
-        # kpi-rail items get the same value_key/delta_key contract as a
-        # standalone metric — a typo here used to pass validate cleanly and
-        # only show up as a blank tile in the browser.
+    def test_metric_description_key_that_does_not_resolve_is_reported_but_not_dropped(self):
         raw = """
 [[widgets]]
-type = "kpi-rail"
-id = "summary"
-title = "Summary"
-items = [
-  { label = "Cost", value_key = "totals.cost" },
-  { label = "Makespan", value_key = "totals.makespan", delta_key = "deltas.makespan" },
-]
+type = "metric"
+id = "delays"
+title = "Delays"
+value_key = "totals.delays"
+description_key = "totals.nope"
 """
-        widgets, issues = validate_dashboard_toml(raw, output={"totals": {"cost": 1}})
-        assert len(widgets) == 1
-        messages = [issue.message for issue in issues]
-        assert len(issues) == 2
-        assert all(issue.dropped is False for issue in issues)
-        assert any("totals.makespan" in m and "items[2].value_key" in m for m in messages)
-        assert any("deltas.makespan" in m and "items[2].delta_key" in m for m in messages)
-
-    def test_kpi_rail_item_with_resolved_value_key_has_no_issues(self):
-        raw = """
-[[widgets]]
-type = "kpi-rail"
-id = "summary"
-title = "Summary"
-items = [{ label = "Cost", value_key = "totals.cost" }]
-"""
-        widgets, issues = validate_dashboard_toml(raw, output={"totals": {"cost": 1}})
-        assert len(widgets) == 1
-        assert issues == []
-
-    def test_kpi_rail_item_with_unresolved_rows_key_is_reported_but_not_dropped(self):
-        raw = """
-[[widgets]]
-type = "kpi-rail"
-id = "summary"
-title = "Summary"
-items = [{ label = "Utilization", rows_key = "machiens", progress_key = "utilization_pct" }]
-"""
-        widgets, issues = validate_dashboard_toml(raw, output={"machines": [{"label": "m1", "value": "1"}]})
+        widgets, issues = validate_dashboard_toml(raw, output={"totals": {"delays": 5}})
         assert len(widgets) == 1
         assert len(issues) == 1 and issues[0].dropped is False
-        assert "machiens" in issues[0].message and "items[1].rows_key" in issues[0].message
+        assert "totals.nope" in issues[0].message
 
     def test_resolved_dot_path_has_no_issues(self):
         raw = """
@@ -955,7 +891,7 @@ def test_every_color_bearing_field_kind_is_checked_for_ignored_values():
     from harumi.dashboard import _KNOWN_FIELD_KINDS
 
     checked = {"series", "colorMap"}
-    carries_no_color = {"string", "number", "enum", "columns", "kpiItems"}
+    carries_no_color = {"string", "number", "enum", "columns"}
     assert _KNOWN_FIELD_KINDS == checked | carries_no_color, (
         "a new field kind was added to the schema: decide whether it carries colors and, if so, "
         "teach widget_warnings to check it"

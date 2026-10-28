@@ -36,11 +36,8 @@ Get the live, in-code reference with `harumi dashboard widgets` (add `--type met
 
 | type | required keys | optional keys |
 |---|---|---|
-| `metric` | `value_key` | `delta_key`, `format` (`number`\|`currency`\|`percent`), `unit` |
-| `kpi-rail` | `items` | — (each item optionally: `rows_key`, `progress_key`, `tone`) |
+| `metric` | `value_key` | `delta_key`, `good_direction` (`up`\|`down`), `description`, `description_key`, `format` (`number`\|`currency`\|`percent`), `unit` |
 | `table` | `rows_key`, `columns` | — |
-| `detail` | `items_key`, `id_key` | `fields` |
-| `filter` | `items_key`, `id_key` | `label_key` |
 | `treemap` | `items_key`, `value_key`, `name_key` | `color_key`, `colors`, `capacity_key` |
 | `heatmap` | `items_key` | `resource_key`, `bucket_key`, `value_key`, `unit` |
 | `chart` | `variant` (`line`\|`bar`\|`area`\|`scatter`\|`pie`\|`donut`), `data_key`, `x_key`, `series` | `group_key`, `stack` (`none`\|`stacked`\|`percent`), `orientation` (`vertical`\|`horizontal`), `curve` (`smooth`\|`linear`\|`step`), `sort` (`none`\|`asc`\|`desc`), `format`, `unit`, `x_label`, `y_label`, `colors` (each `series` entry optionally: `label`, `color`, `mark`) |
@@ -52,41 +49,28 @@ Get the live, in-code reference with `harumi dashboard widgets` (add `--type met
 
 Every widget entry also needs `type`, `id` (unique), and `title`. `*_key` fields (except chart `x_key`/gantt's per-task field names) are **dot-paths into `output.json`**, e.g. `"totals.revenue"`.
 
-### `metric` — a single KPI tile
+### `metric` — the KPI card
+
+One card per number: the `title`, the value large, and an optional line under it. Use it for every headline figure; there is no widget that groups several of them (the old `kpi-rail` is gone), so write several `metric` widgets and they sit side by side in one row.
 
 ```toml
 [[widgets]]
 type = "metric"
-id = "revenue"
-title = "Total revenue"
-value_key = "totals.revenue"
-format = "currency"
+id = "delays"
+title = "Delays in the yard"
+value_key = "totals.delays"
+description = "5 of 65 ops"
+delta_key = "totals.delays_change"
+good_direction = "down"
+format = "number"
 ```
 
-Matching `output.json`: `{"totals": {"revenue": 812300}}`.
+Matching `output.json`: `{"totals": {"delays": 5, "delays_change": -0.5}}`.
 
-### `kpi-rail` — several KPI tiles in one row
-
-```toml
-[[widgets]]
-type = "kpi-rail"
-id = "summary"
-title = "Run summary"
-items = [
-  { label = "Cost", value_key = "totals.cost", format = "currency" },
-  { label = "Makespan", value_key = "totals.makespan" },
-]
-```
-
-Each item has its own `value_key`/`format`/`unit`, same as a standalone `metric`. Always renders in a pinned strip above every other widget, regardless of where it's declared in `[[widgets]]`.
-
-An item can instead use `rows_key` in place of `value_key` — a dot-path to an array of rows, rendered as a per-entity `label / meter / value` list within that one tile instead of a single number:
-
-```toml
-{ label = "Utilization", rows_key = "machines", progress_key = "utilization_pct", tone = "warn" }
-```
-
-`rows_key` and `value_key` are mutually exclusive on one item — set one or the other, not both. `progress_key` names a field within each resolved row holding a 0–100 progress value (not validated as a dot-path the way `rows_key` itself is), drawn as a meter under the row's label/value; a row missing it renders with no meter. `tone` is one of `good`\|`warn`\|`bad`\|`neutral` and colors the meter/value — set on the item as a fallback, or on a row itself (a `tone` field within the row) to vary per entity.
+- `description` is a fixed line of context under the value. `description_key` is a dot-path to a string in `output.json` for text that comes from the run; it wins over `description` when the path resolves.
+- `delta_key` is a dot-path to a number, drawn at the right of the description line as an arrow plus the signed change (`+50%`). With `format = "percent"` give a 0–1 fraction. The arrow follows the sign; its color follows `good_direction`: `up` (the default) makes a rise green and a fall red, `down` the opposite (use it for delays, cost, errors). A zero change stays gray.
+- A per-entity breakdown (per machine, per shift) is not a KPI card: put it in a `table` or a `chart`.
+- A spec that still says `type = "kpi-rail"` is reported as an unknown type: replace it with one `metric` per item.
 
 ### `table` — a sortable grid
 
@@ -103,33 +87,6 @@ columns = [
 ```
 
 Matching `output.json`: `{"breakdown": [{"name": "Item A", "value": 52400}]}`. `columns[].key` is a field **within each row object**, not a dot-path.
-
-### `detail` — fields of the currently selected row
-
-```toml
-[[widgets]]
-type = "detail"
-id = "job-detail"
-title = "Job details"
-items_key = "jobs"
-id_key = "id"
-```
-
-Shows the fields of whichever row is currently selected — via a `timeline` click, or a `filter` option — looked up by matching `id_key` against the selection id. Renders in a sidebar column, not the main grid.
-
-### `filter` — a selection producer
-
-```toml
-[[widgets]]
-type = "filter"
-id = "job-picker"
-title = "Pick a job"
-items_key = "jobs"
-id_key = "id"
-label_key = "name"
-```
-
-One option button per distinct `id_key` value in `items_key`; clicking one drives the same selection a `timeline` click would. An alternative entry point into selection, not a data filter on other widgets. Renders in the sidebar, same as `detail`.
 
 ### `treemap` — proportional rectangles
 
@@ -248,7 +205,7 @@ Semantics worth knowing:
 - Set either `end_key` or `duration_key` (added to the start). If both are set, `end_key` wins. A task resolving neither is dropped from the chart.
 - `color_key` names a field grouping tasks into a categorical color (e.g. tasks belonging to the same job).
 - `colors` pins specific `color_key` values to specific Tailwind color names (or a `{ light, dark }` pair of names), e.g. `colors = { "Late job" = "red-600", "Unassigned" = { light = "gray-500", dark = "gray-400" } }` — hex is not accepted — every other value keeps auto-cycling through the default palette (skipping any color pinned here). Same field on `timeline`.
-- `time_unit` is either a plain display suffix (e.g. `"min"`, the default reading — start/end/duration are bare numbers with that unit) or a wall-clock sentinel: `"epoch"` (seconds since epoch), `"epoch_ms"` (milliseconds), or `"iso"` (an ISO 8601 string) — any of the three render as a real date/time instead of a bare number, and scale a `[clock]` transport bar's playback speed accordingly.
+- `time_unit` is either a plain display suffix (e.g. `"min"`, the default reading — start/end/duration are bare numbers with that unit) or a wall-clock sentinel: `"epoch"` (seconds since epoch), `"epoch_ms"` (milliseconds), or `"iso"` (an ISO 8601 string) — any of the three render as a real date/time instead of a bare number, and scale a `[clock]` play bar's playback speed accordingly.
 
 `timeline` is the same shape plus more: fragmented tasks fold into one item with gaps (`id_key`), non-working spans render as background bands (`regions_key` + `region_*`), and a `[clock]` section (see below) drives a now-marker over it.
 
@@ -258,7 +215,7 @@ Beyond `[[widgets]]`, a spec can declare three more top-level sections, all chec
 
 - **`[[datasets]]`** — names a dataset's shape once instead of restating it per widget. Needs `id`, `kind` (`intervals`\|`records`\|`timeline`\|`scalars`), `source_key` (a dot-path into `output.json`), and a `[datasets.roles]` sub-table naming which fields play which role: `intervals` needs `start` plus `end` or `duration`; `timeline` needs `at` or `start` plus `value`; `records`/`scalars` need no roles at all.
 - **`[[metrics]]`** — a KPI as a single read-only SQL query, run against the declared datasets and exposed to any widget under `metrics.<id>`. `sql` must be exactly one `SELECT`/`WITH`/`FROM`/`DESCRIBE`/`SUMMARIZE` statement — no writes, no `ATTACH`/`COPY`/`INSTALL`/`LOAD`/`PRAGMA`, and no table function that reads a path or URL (`read_csv`, `read_parquet`, `postgres_scan`, ...).
-- **`[clock]`** — turns one `intervals` dataset into a play/pause/scrub transport bar over the schedule chart. `dataset` must name a declared `intervals` dataset, or (with no `[[datasets]]` entry needed) a `gantt-chart`/`timeline` widget's own id, suffixed `__source` (e.g. `dataset = "schedule__source"` for `id = "schedule"`) — its rendered schedule counts as an implicit `intervals` dataset. `speed` is optional and, if set, must be a positive finite number.
+- **`[clock]`** — turns one `intervals` dataset into a play/pause/scrub bar, drawn at the top of each `timeline` and `gantt-chart` card (a `[clock]` with neither is reported as a config error by the dashboard). `dataset` must name a declared `intervals` dataset, or (with no `[[datasets]]` entry needed) a `gantt-chart`/`timeline` widget's own id, suffixed `__source` (e.g. `dataset = "schedule__source"` for `id = "schedule"`) — its rendered schedule counts as an implicit `intervals` dataset. `speed` is optional and, if set, must be a positive finite number.
 
 ```toml
 [[datasets]]
@@ -281,16 +238,13 @@ speed = 30
 
 ## Layout
 
-Both keys below are per-dashboard, at the top level of each spec:
+`title` is per-dashboard, at the top level of each spec:
 
 ```toml
 title = "Cost breakdown"   # picker label; optional
-
-[layout]
-columns = 2
 ```
 
-`columns` is the only layout hint; defaults to 2 when omitted.
+There is nothing to lay out by hand: the dashboard packs widgets into rows in declaration order. Consecutive `metric` cards share a row, `chart`/`treemap`/`heatmap` pair two per row, and `table`/`timeline`/`gantt-chart`/`map` take a row each. Put the `metric` widgets first so the headline numbers sit on top. An old `[layout] columns` is still accepted but ignored.
 
 ## Validating
 

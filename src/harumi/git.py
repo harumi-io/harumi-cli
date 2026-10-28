@@ -10,7 +10,7 @@ is not met.
 
 The scratch-branch flow (used by `harumi run` on an un-pushed/dirty tree):
 
-1. `push_scratch(git_url, token, username)` creates a throwaway branch off
+1. `push_scratch(username)` creates a throwaway branch off
    the current HEAD, stages the *entire* working tree (tracked + untracked,
    obeying .gitignore) into a temporary index without touching the user's
    real index or branch, commits it, pushes to the `harumi` remote, then
@@ -28,7 +28,9 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from dataclasses import dataclass, field
+from fnmatch import fnmatch
+from typing import Optional, Sequence
 from urllib.parse import quote
 
 from harumi.errors import HarumiError
@@ -80,7 +82,9 @@ def _run(
     encoded form.
     """
     full_args = ["git"] + args
-    merged_env = {**os.environ, **(env or {})}
+    # Never ask on the terminal: our credential helper is the only source of a password, and a git that cannot get one
+    # should fail with its own message, not sit waiting for a password nobody will type into a pipe.
+    merged_env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", **(env or {})}
     try:
         return subprocess.run(
             full_args,
@@ -165,89 +169,85 @@ def head_sha(cwd: Optional[Path] = None) -> str:
 # Remote management
 # ---------------------------------------------------------------------------
 
-def _authenticated_url(clone_url: str, username: str, token: str) -> str:
-    """Embed basic-auth credentials into a https:// clone URL.
-
-    Gitea expects `https://<user>:<token>@<host>/...` for git-over-HTTPS
-    with token auth.  We never embed credentials in the stored clone_url —
-    only in the ephemeral URL passed to individual git operations.
-
-    Both `username` and `token` are percent-encoded: an unescaped `@`, `:`,
-    or `/` in either would re-split the URL's authority section (e.g. an
-    email-like username `user@harumi.io` yields
-    `https://user@harumi.io:token@host/...`, whose authority becomes
-    `harumi.io:token@host` — `:token` is then parsed as a bogus port,
-    producing "Port number was not a decimal number").
-    """
-    if not clone_url.startswith("https://"):
-        return clone_url
-    host_and_path = clone_url[len("https://"):]
-    # Strip any existing credentials to avoid doubling them.
-    host_and_path = re.sub(r"^[^@]+@", "", host_and_path)
-    safe_username = quote(username, safe="")
-    safe_token = quote(token, safe="")
-    return f"https://{safe_username}:{safe_token}@{host_and_path}"
+# What git runs to ask for a password: `harumi git-credential get`. The "!" makes git run it through the shell, so the
+# name is looked up on PATH the way any command is (a folder that is copied elsewhere keeps working).
+CREDENTIAL_HELPER = "!harumi git-credential"
 
 
-def ensure_remote(
-    clone_url: str,
-    username: str,
-    token: str,
-    name: str = "harumi",
-    cwd: Optional[Path] = None,
-) -> None:
-    """Add or update the `harumi` remote to use an authenticated HTTPS URL.
+def _credential_scope(clone_url: str) -> Optional[str]:
+    """`https://git.harumi.io` for `https://git.harumi.io/owner/repo.git`: the part git's `credential.<url>.*` keys match.
 
-    The URL with embedded credentials is set only for the local repo config;
-    it is never stored in the binding file so the token doesn't leak into
-    committed config.
-    """
-    authed_url = _authenticated_url(clone_url, username, token)
+    Scoped to the host so the helper answers for Harumi's git server and nothing else, and the reset below does not
+    touch what the user has set up for GitHub or anywhere else."""
+    match = re.match(r"^(https://)(?:[^@/]+@)?([^/]+)", clone_url)
+    return f"{match.group(1)}{match.group(2)}" if match else None
 
+
+def credential_config(clone_url: str) -> list[str]:
+    """The `-c key=value` pairs that make git ask `harumi` for this host's password, as a list of arguments.
+
+    The first entry is empty on purpose: it clears the helpers the user already has for this host (a macOS Keychain or
+    git-credential-manager entry would answer first, with an old token, and would also be handed a copy of ours)."""
+    scope = _credential_scope(clone_url)
+    if scope is None:
+        return []
+    return ["-c", f"credential.{scope}.helper=", "-c", f"credential.{scope}.helper={CREDENTIAL_HELPER}"]
+
+
+def _strip_credentials(url: str) -> str:
+    """`https://user:token@host/x.git` -> `https://host/x.git`. Anything else comes back as it was."""
+    return re.sub(r"^(https://)[^@/]+@", r"\1", url)
+
+
+def ensure_remote(clone_url: str, name: str = "harumi", cwd: Optional[Path] = None) -> None:
+    """Add or update the `harumi` remote so it holds no credentials.
+
+    The remote is the plain clone URL, which is what `git remote -v`, an IDE and a screen share show. The password
+    comes from `harumi git-credential` when git needs it, set for this repository only and for Harumi's host only, so
+    a plain `git push harumi` works outside the CLI without the token being written anywhere git config can be read."""
+    plain = _strip_credentials(clone_url)
     result = _run(["remote", "get-url", name], cwd=cwd, check=False)
-    if result.returncode == 0:
-        _run(["remote", "set-url", name, authed_url], cwd=cwd, redact=token)
-    else:
-        _run(["remote", "add", name, authed_url], cwd=cwd, redact=token)
+    _run(["remote", "set-url" if result.returncode == 0 else "add", name, plain], cwd=cwd)
+    scope = _credential_scope(plain)
+    if scope is None:
+        return
+    key = f"credential.{scope}.helper"
+    _run(["config", "--local", "--unset-all", key], cwd=cwd, check=False)  # idempotent: no duplicate entries
+    _run(["config", "--local", "--add", key, ""], cwd=cwd)
+    _run(["config", "--local", "--add", key, CREDENTIAL_HELPER], cwd=cwd)
 
 
-def refresh_remote_token(
-    clone_url: str,
-    username: str,
-    token: str,
-    name: str = "harumi",
-    cwd: Optional[Path] = None,
-) -> None:
-    """Re-embed a fresh token into an existing remote URL (e.g. after token rotation)."""
-    ensure_remote(clone_url, username, token, name=name, cwd=cwd)
+def remote_has_credentials(name: str = "harumi", cwd: Optional[Path] = None) -> bool:
+    """True when the remote's URL still has a user or password in it: a clone made before the token left the URL."""
+    result = _run(["remote", "get-url", name], cwd=cwd, check=False)
+    return result.returncode == 0 and _strip_credentials(result.stdout.strip()) != result.stdout.strip()
+
+
+def scrub_remote(name: str = "harumi", cwd: Optional[Path] = None) -> bool:
+    """Take a token out of an existing clone's remote and give it the credential helper instead. Quiet when there is
+    nothing to do, so it can run on every command. Returns whether it changed anything."""
+    if not remote_has_credentials(name, cwd=cwd):
+        return False
+    url = _run(["remote", "get-url", name], cwd=cwd).stdout.strip()
+    ensure_remote(url, name=name, cwd=cwd)
+    return True
 
 
 # ---------------------------------------------------------------------------
 # Clone: fetch an existing project's repo into a fresh local directory
 # ---------------------------------------------------------------------------
 
-def clone_repo(
-    clone_url: str,
-    username: str,
-    token: str,
-    dest: Path,
-    remote: str = "harumi",
-) -> None:
-    """Clone `clone_url` into `dest` (must not already exist), authenticated
-    with `username`/`token`, and name the resulting remote `harumi`.
+def clone_repo(clone_url: str, dest: Path, remote: str = "harumi") -> None:
+    """Clone `clone_url` into `dest` (must not already exist) and name the resulting remote `harumi`.
 
-    Used by `harumi clone`/`harumi new` to fetch a project's existing repo
-    (which always has at least a scaffold commit — see `harumi-api`'s
-    `provision_from_blueprint`/`_seed_repo_files`) rather than trying to push
-    into it, which would fail as a non-fast-forward push against history the
-    caller doesn't have.
-    """
-    authed_url = _authenticated_url(clone_url, username, token)
-    _run(
-        ["clone", "--origin", remote, authed_url, str(dest)],
-        redact=token,
-    )
+    Used by `harumi clone`/`harumi new` to fetch a project's existing repo (which always has at least a scaffold
+    commit — see `harumi-api`'s `provision_from_blueprint`/`_seed_repo_files`) rather than trying to push into it,
+    which would fail as a non-fast-forward push against history the caller doesn't have.
 
+    `git clone -c` writes the credential settings into the new repository's config before the first fetch, so the
+    clone is authenticated by the helper and ends up with a remote that holds no token."""
+    plain = _strip_credentials(clone_url)
+    _run([*credential_config(plain), "clone", "--origin", remote, plain, str(dest)])
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +256,6 @@ def clone_repo(
 
 def push_scratch(
     username: str,
-    token: str,
     remote: str = "harumi",
     message: Optional[str] = None,
     cwd: Optional[Path] = None,
@@ -275,6 +274,7 @@ def push_scratch(
     root = repo_root(cwd=cwd)
     if root is None:
         raise NotAHarumiRepoError()
+    scrub_remote(remote, cwd=root)  # a clone made before 1.0 still has the token in its remote URL
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     safe_user = re.sub(r"[^a-zA-Z0-9._-]", "-", username)
@@ -343,14 +343,202 @@ def delete_remote_scratch(
 # Import: push a plain folder as the initial commit of a project's repo
 # ---------------------------------------------------------------------------
 
+# What `harumi import` leaves out. Directories nobody wants uploaded, and files that
+# look like credentials. They are excluded through the repo's *local*
+# `.git/info/exclude`, never by editing the user's own `.gitignore`.
+JUNK_DIRS = (
+    ".venv",
+    ".env",  # also a common name for a virtualenv; a `.env` *file* is still a secret
+    "venv",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ipynb_checkpoints",
+)
+SECRET_GLOBS = (
+    ".env",
+    ".env.*",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "*.keystore",
+    "id_rsa",
+    "id_rsa.*",
+    "id_ed25519",
+    "id_ed25519.*",
+)
+# Look like a secret by name but are meant to be shared (a template, not a value).
+SECRET_OK = (".env.example", ".env.sample", ".env.template", ".env.dist")
+# Excluded without comment: noise, not a decision.
+_QUIET_EXCLUDES = ("*.pyc", ".DS_Store")
+LARGE_FILE_BYTES = 50 * 1024 * 1024
+_MARKER = "# harumi import (local; not part of your project)"
+
+
+def _any_case(pattern: str) -> str:
+    """A gitignore pattern that matches whatever the letter case: `*.pem` -> `*.[pP][eE][mM]`.
+
+    Git's patterns compare exactly on a case-sensitive filesystem (Linux, and macOS or
+    Windows volumes set up that way), so `.ENV` would slip past `.env` there. Only letters
+    change; `*`, `.` and the rest stay as they are.
+    """
+    return "".join(f"[{c.lower()}{c.upper()}]" if c.isalpha() else c for c in pattern)
+
+
+def import_excludes() -> list[str]:
+    """The gitignore-syntax patterns `harumi import` adds, in order."""
+    patterns = [f"{d}/" for d in JUNK_DIRS] + [_any_case(g) for g in SECRET_GLOBS]
+    patterns += [f"!{_any_case(name)}" for name in SECRET_OK]
+    return patterns + list(_QUIET_EXCLUDES)
+
+
+def looks_like_secret(path: str) -> bool:
+    """By file name, whatever the case: `.ENV` and `Server.PEM` are secrets too.
+
+    Case matters because most people are on macOS or Windows, where `.ENV` and `.env`
+    are the same file, but git's own patterns (and `fnmatch` on Linux) compare exactly.
+    """
+    name = path.rsplit("/", 1)[-1].lower()
+    if name in SECRET_OK:
+        return False
+    return any(fnmatch(name, g) for g in SECRET_GLOBS)
+
+
+@dataclass
+class ImportPlan:
+    """What an import would upload and what it would leave out."""
+
+    files: int = 0
+    total_bytes: int = 0
+    largest: list[tuple[str, int]] = field(default_factory=list)  # biggest first
+    skipped_secrets: list[str] = field(default_factory=list)
+    skipped_dirs: list[tuple[str, int]] = field(default_factory=list)  # (dir, file count)
+    # Look like secrets but git already tracks them, so they ARE included.
+    included_secrets: list[str] = field(default_factory=list)
+    # Commits already in the folder's git history; the push sends all of them.
+    history_commits: int = 0
+    # Names that look like secrets in any of those commits, including files long since
+    # deleted. They are not in the tree, but they are in what is pushed.
+    history_secrets: list[str] = field(default_factory=list)
+
+
+def _is_repo_root(folder: Path) -> bool:
+    """Whether `folder` is itself the top of a git repo (not merely inside one).
+
+    Compares resolved paths: git reports the real location, so a symlinked path
+    (macOS's /tmp is one) would otherwise never match.
+    """
+    root = repo_root(cwd=folder)
+    return root is not None and root.resolve() == folder.resolve()
+
+
+def _ls_files(folder: Path, extra_excludes: Sequence[str]) -> tuple[list[str], list[str]]:
+    """What `git add --all` would stage in `folder`: (already tracked, new).
+
+    Tracked files are always staged: an exclude pattern keeps a *new* file out, it
+    cannot un-track one git already has. So they are reported separately and
+    never subject to `extra_excludes`. The new files honour the user's own ignore
+    files plus `extra_excludes`.
+
+    Works whether or not `folder` is already a repo, without creating anything in
+    it: a folder that is not a repo is listed through a throwaway git dir with
+    `folder` as its work tree (the same thing `push_folder` will do for real).
+    """
+    new_args = ["ls-files", "-z", "--others", "--exclude-standard"]
+    new_args += [f"--exclude={p}" for p in extra_excludes]
+    if _is_repo_root(folder):
+        tracked = _run(["ls-files", "-z", "--cached"], cwd=folder).stdout
+        new = _run(new_args, cwd=folder).stdout
+    else:
+        tracked = ""
+        with tempfile.TemporaryDirectory() as scratch:
+            _run(["init", "-q", "--bare", scratch])
+            new = _run(
+                new_args, cwd=folder, env={"GIT_DIR": scratch, "GIT_WORK_TREE": str(folder)}
+            ).stdout
+    split = lambda out: sorted({p for p in out.split("\0") if p})  # noqa: E731
+    return split(tracked), split(new)
+
+
+def history_size(folder: Path) -> int:
+    """How many commits of history already exist in `folder` (0 if it is not a repo or has none)."""
+    if not _is_repo_root(folder):
+        return 0
+    result = _run(["rev-list", "--count", "HEAD"], cwd=folder, check=False)
+    try:
+        return int(result.stdout.strip()) if result.returncode == 0 else 0
+    except ValueError:
+        return 0
+
+
+def history_secret_names(folder: Path) -> list[str]:
+    """Secret-looking file names that appear anywhere in the history `push_folder` will send."""
+    if not _is_repo_root(folder):
+        return []
+    result = _run(["log", "HEAD", "--name-only", "--pretty=format:", "-z"], cwd=folder, check=False)
+    if result.returncode != 0:
+        return []
+    return sorted({p for p in result.stdout.split("\0") if p.strip() and looks_like_secret(p)})
+
+
+def plan_import(folder: Path) -> ImportPlan:
+    """Work out, without touching `folder`, what `harumi import` will upload."""
+    tracked, new_kept = _ls_files(folder, import_excludes())
+    _, new_all = _ls_files(folder, [])
+    kept = sorted(set(tracked) | set(new_kept))
+
+    plan = ImportPlan(history_commits=history_size(folder), history_secrets=history_secret_names(folder))
+    sizes: list[tuple[str, int]] = []
+    for rel in kept:
+        try:
+            size = (folder / rel).stat().st_size
+        except OSError:
+            continue  # vanished or a dangling symlink: git will cope, we just don't count it
+        sizes.append((rel, size))
+        plan.total_bytes += size
+        if looks_like_secret(rel) and rel in tracked:
+            # Not skippable from here: git already has it, so `add --all` keeps it.
+            plan.included_secrets.append(rel)
+    plan.files = len(sizes)
+    plan.largest = sorted(sizes, key=lambda x: x[1], reverse=True)[:3]
+
+    dirs: dict[str, int] = {}
+    for rel in sorted(set(new_all) - set(new_kept)):
+        parts = rel.split("/")
+        junk = next((i for i, part in enumerate(parts[:-1]) if part in JUNK_DIRS), None)
+        if junk is not None:
+            key = "/".join(parts[: junk + 1])
+            dirs[key] = dirs.get(key, 0) + 1
+        elif looks_like_secret(rel):
+            plan.skipped_secrets.append(rel)
+        # anything else was skipped quietly (*.pyc, .DS_Store)
+    plan.skipped_dirs = sorted(dirs.items())
+    return plan
+
+
+def _write_local_excludes(folder: Path, patterns: Sequence[str]) -> None:
+    """Add `patterns` to the repo's local exclude file, once, under a marker."""
+    result = _run(["rev-parse", "--git-path", "info/exclude"], cwd=folder)
+    path = Path(result.stdout.strip())
+    if not path.is_absolute():
+        path = folder / path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text() if path.exists() else ""
+    if _MARKER in existing:
+        return
+    block = "\n".join([_MARKER, *patterns, ""])
+    path.write_text(existing + ("" if existing.endswith("\n") or not existing else "\n") + block)
+
+
 def push_folder(
     folder: Path,
     clone_url: str,
-    username: str,
-    token: str,
     branch: str = "main",
     remote: str = "harumi",
     message: str = "Import project",
+    exclude: Sequence[str] = (),
 ) -> str:
     """Commit everything in ``folder`` and push it to ``remote/branch``.
 
@@ -369,11 +557,13 @@ def push_folder(
 
     # Initialize a repo in the folder if it isn't one already. If the folder is
     # a clone of the user's GitHub repo, it already is one — reuse it.
-    if repo_root(cwd=folder) != folder:
+    if not _is_repo_root(folder):
         _run(["init"], cwd=folder)
 
-    ensure_remote(clone_url, username, token, name=remote, cwd=folder)
+    ensure_remote(clone_url, name=remote, cwd=folder)
 
+    if exclude:
+        _write_local_excludes(folder, exclude)
     _run(["add", "--all"], cwd=folder)
     # Commit; allow an empty diff to still produce a commit so push has a ref.
     _run(
@@ -382,5 +572,5 @@ def push_folder(
         cwd=folder,
     )
     sha = head_sha(cwd=folder)
-    _run(["push", "--force", remote, f"HEAD:refs/heads/{branch}"], cwd=folder, redact=token)
+    _run(["push", "--force", remote, f"HEAD:refs/heads/{branch}"], cwd=folder)
     return sha

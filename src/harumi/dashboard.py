@@ -38,6 +38,7 @@ validator.
 
 from __future__ import annotations
 
+import difflib
 import json
 import math
 import sys
@@ -61,7 +62,7 @@ SCHEMA_ARTIFACT_PATH = Path(__file__).with_name("dashboard-schema.json")
 class WidgetField:
     toml_key: str
     required: bool = False
-    kind: str = "string"  # "string" | "number" | "enum" | "columns" | "series" | "kpiItems"
+    kind: str = "string"  # "string" | "number" | "enum" | "columns" | "series" | "colorMap"
     values: Optional[Tuple[str, ...]] = None
     # True for fields that are a dot-path into the run's output.json (as
     # opposed to a field name *within* an already-resolved array item, e.g.
@@ -84,7 +85,7 @@ class DashboardSchemaError(RuntimeError):
 # set would fall through to "no value is ever valid", quietly making a required
 # field impossible to satisfy and an optional one impossible to use — so a typo
 # in the artifact is rejected at load rather than silently weakening validation.
-_KNOWN_FIELD_KINDS = frozenset({"string", "number", "enum", "columns", "series", "kpiItems", "colorMap"})
+_KNOWN_FIELD_KINDS = frozenset({"string", "number", "enum", "columns", "series", "colorMap"})
 
 
 @lru_cache(maxsize=1)
@@ -250,8 +251,6 @@ def _coerce_series(value: Any) -> Optional[List[Dict[str, str]]]:
     return series or None
 
 
-_KPI_ITEM_FORMATS = ("number", "currency", "percent")
-_KPI_ITEM_TONES = ("good", "warn", "bad", "neutral")
 
 def _is_valid_color(value: Any) -> bool:
     """A Tailwind color name from the artifact's `colorNames` (`"green-600"`)
@@ -275,46 +274,6 @@ def _coerce_color_map(value: Any) -> Optional[Dict[str, Any]]:
     return color_map or None
 
 
-def _coerce_kpi_items(value: Any) -> Optional[List[Dict[str, Any]]]:
-    """Mirrors `coerceKpiItems` in schema.ts: each entry is a `metric`-shaped
-    dict (`label`, `value_key`, optional `delta_key`/`format`/`unit`), minus
-    `id`/`type`/`title` since a rail item isn't its own widget, plus the
-    optional `rows_key`/`progress_key`/`tone` that render a per-entity
-    `label / meter / value` list instead of one value. An item missing
-    `label`, or missing both `value_key` and `rows_key`, is dropped rather
-    than failing the whole rail — one bad item shouldn't blank the others.
-    """
-    if not isinstance(value, list):
-        return None
-    items = []
-    for raw in value:
-        if not isinstance(raw, dict):
-            continue
-        label = raw.get("label")
-        value_key, rows_key = raw.get("value_key"), raw.get("rows_key")
-        if not isinstance(label, str):
-            continue
-        if not isinstance(value_key, str) and not isinstance(rows_key, str):
-            continue
-        item: Dict[str, Any] = {"label": label}
-        if isinstance(value_key, str):
-            item["value_key"] = value_key
-        if isinstance(raw.get("delta_key"), str):
-            item["delta_key"] = raw["delta_key"]
-        if raw.get("format") in _KPI_ITEM_FORMATS:
-            item["format"] = raw["format"]
-        if isinstance(raw.get("unit"), str):
-            item["unit"] = raw["unit"]
-        if isinstance(rows_key, str):
-            item["rows_key"] = rows_key
-        if isinstance(raw.get("progress_key"), str):
-            item["progress_key"] = raw["progress_key"]
-        if raw.get("tone") in _KPI_ITEM_TONES:
-            item["tone"] = raw["tone"]
-        items.append(item)
-    return items or None
-
-
 def _coerce_field(value: Any, field: WidgetField) -> Any:
     if value is None:
         return None
@@ -327,8 +286,6 @@ def _coerce_field(value: Any, field: WidgetField) -> Any:
         return value if isinstance(value, str) and field.values and value in field.values else None
     if field.kind == "columns":
         return _coerce_columns(value)
-    if field.kind == "kpiItems":
-        return _coerce_kpi_items(value)
     if field.kind == "series":
         return _coerce_series(value)
     if field.kind == "colorMap":
@@ -450,6 +407,19 @@ def widget_warnings(entry: Dict[str, Any], widget: Dict[str, Any]) -> List[Widge
     return issues
 
 
+def _valid_types_hint(type_: str, schemas: Dict[str, Any]) -> str:
+    """". Did you mean "chart"? Valid types: ..." for an unknown widget type.
+
+    Without it the message sent people to `harumi dashboard widgets` to find out what the type
+    they mistyped should have been.
+    """
+    if type_ == "kpi-rail":
+        return f'. "kpi-rail" is gone: write one "metric" widget per number. Valid types: {", ".join(schemas)}.'
+    close = difflib.get_close_matches(type_, list(schemas), n=1, cutoff=0.6)
+    guess = f' Did you mean "{close[0]}"?' if close else ""
+    return f".{guess} Valid types: {', '.join(schemas)}."
+
+
 def parse_widget_entry(entry: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[WidgetIssue]]:
     """Validate one raw `[[widgets]]` table entry. Mirrors `parseWidgetEntry`
     in schema.ts: returns either a coerced widget dict, or the (single,
@@ -461,9 +431,10 @@ def parse_widget_entry(entry: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]],
     if not isinstance(type_, str) or not isinstance(id_, str) or not isinstance(title, str):
         return None, WidgetIssue(id_ if isinstance(id_, str) else None, "missing or invalid type/id/title")
 
-    schema = widget_schemas().get(type_)
+    schemas = widget_schemas()
+    schema = schemas.get(type_)
     if schema is None:
-        return None, WidgetIssue(id_, f'widget "{id_}": unknown type "{type_}"')
+        return None, WidgetIssue(id_, f'widget "{id_}": unknown type "{type_}"{_valid_types_hint(type_, schemas)}')
 
     widget: Dict[str, Any] = {"type": type_, "id": id_, "title": title}
     for field in schema:
@@ -830,30 +801,6 @@ def validate_dashboard_toml(
         for widget in widgets:
             schema = widget_schemas()[widget["type"]]
             for field in schema:
-                if field.kind == "kpiItems":
-                    # `items` itself isn't a dot-path (it's a list), but each
-                    # item's `value_key`/`delta_key`/`rows_key` is — the doc's
-                    # own claim that a rail item has "the same value/delta/
-                    # format/unit contract as a metric widget" means it needs
-                    # the same check a standalone metric's `value_key` gets
-                    # below, and `rows_key` is a dot-path by the same logic.
-                    for index, item in enumerate(widget.get(field.toml_key) or [], start=1):
-                        for item_field in ("value_key", "delta_key", "rows_key"):
-                            path = item.get(item_field)
-                            if not isinstance(path, str):
-                                continue
-                            resolved = resolve_path(output, path)
-                            if resolved is None:
-                                issues.append(
-                                    WidgetIssue(
-                                        widget["id"],
-                                        f'widget "{widget["id"]}" ({widget["type"]}): '
-                                        f"{describe_missing_key(output, path)} "
-                                        f'(from "{field.toml_key}[{index}].{item_field}")',
-                                        dropped=False,
-                                    )
-                                )
-                    continue
                 if not field.is_output_path:
                     continue
                 path = widget.get(field.toml_key)
