@@ -176,28 +176,27 @@ def test_a_project_name_with_brackets_is_shown_as_typed(server, tmp_path, monkey
 
 
 # -- the old names ---------------------------------------------------------------------------------------------------------------
-# `harumi blueprints` and `new --blueprint` shipped in 0.11.0, so they keep working for a release, hidden, with a
-# line on stderr (never stdout: a script pipes it) saying what replaced them and when they go.
+# `harumi blueprints` and `new --blueprint` shipped in 0.11.0, were deprecated in 1.0.0 and removed in 1.1.0. A script
+# that still uses one is told what replaced it and nothing is created or requested.
 
 
-def test_the_old_command_still_lists_the_same_things_and_warns_on_stderr(server):
+def test_the_old_command_is_removed_and_says_what_replaced_it(server):
     old = runner.invoke(cli.app, ["blueprints", "--json"])
-    new = runner.invoke(cli.app, ["examples", "--json"])
 
-    assert old.exit_code == 0 and json.loads(old.stdout) == json.loads(new.stdout)
-    assert "deprecated" in old.stderr and "harumi examples" in old.stderr and "1.1.0" in old.stderr
-    assert "deprecated" not in old.stdout and new.stderr == ""
+    assert old.exit_code == 2
+    assert "`harumi blueprints` was removed in 1.1.0" in " ".join(old.output.split())
+    assert "harumi examples" in " ".join(old.output.split())
+    assert old.stdout == "" or "removed" in old.output, "nothing a script could parse as a list"
 
 
-def test_the_old_option_still_creates_the_project_and_warns_on_stderr(server, tmp_path, monkeypatch):
+def test_the_old_option_is_removed_and_creates_nothing(server, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(cli.app, ["new", "Demo", "--blueprint", "vehicle-routing", "--no-clone"])
 
-    assert result.exit_code == 0, result.stderr
-    assert server["created"][0]["blueprint"] == "vehicle-routing"
-    assert "deprecated" in result.stderr and "--example" in result.stderr and "1.1.0" in result.stderr
-    assert "deprecated" not in result.stdout
+    assert result.exit_code == 1 and server["created"] == []
+    assert "`harumi new --blueprint` was removed in 1.1.0" in " ".join(result.stderr.split())
+    assert "--example" in result.stderr
 
 
 def test_the_new_option_does_not_warn(server, tmp_path, monkeypatch):
@@ -208,16 +207,16 @@ def test_the_new_option_does_not_warn(server, tmp_path, monkeypatch):
     assert result.exit_code == 0 and "deprecated" not in result.stderr
 
 
-def test_giving_both_options_is_refused_not_guessed(server, tmp_path, monkeypatch):
+def test_giving_both_options_is_refused_and_creates_nothing(server, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     result = runner.invoke(cli.app, ["new", "Demo", "--example", "getting-started", "--blueprint", "vehicle-routing", "--no-clone"])
 
     assert result.exit_code == 1 and server["created"] == []
-    assert "--example" in result.stderr and "--blueprint" in result.stderr
+    assert "removed in 1.1.0" in " ".join(result.stderr.split())
 
 
-def test_the_old_names_are_hidden_from_help_and_the_surface():
+def test_the_old_names_are_gone_from_the_command_tree_and_the_surface():
     from typer.main import get_command
 
     from scripts.emit_cli_surface import build_surface
@@ -226,7 +225,7 @@ def test_the_old_names_are_hidden_from_help_and_the_surface():
     paths = {c["path"] for c in build_surface()["commands"]}
     new_options = {o for c in build_surface()["commands"] if c["path"] == "new" for p in c["params"] for o in p["opts"]}
 
-    assert root.commands["blueprints"].hidden and not root.commands["examples"].hidden
+    assert "blueprints" not in root.commands and not root.commands["examples"].hidden
     assert "blueprints" not in paths and "examples" in paths
     assert "--example" in new_options and "--blueprint" not in new_options
 
