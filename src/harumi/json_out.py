@@ -92,6 +92,10 @@ def organization(o: Any) -> dict:
     return {"id": o.id, "name": o.business_name, "role": o.role_name or o.role}
 
 
+def invitation(i: Any) -> dict:
+    return {"id": i.customer_id, "name": i.business_name, "role": i.role}
+
+
 def member(m: Any) -> dict:
     return _pick(m, MEMBER)
 

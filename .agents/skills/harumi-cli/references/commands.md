@@ -539,6 +539,10 @@ harumi org members [ORG] [--api-url URL]
 harumi org invite ORG --email EMAIL [--role ROLE] [--api-url URL]
 harumi org role ORG [MEMBER] --role ROLE [--api-url URL]
 harumi org rm-member ORG [MEMBER] [--yes] [--api-url URL]
+harumi org leave [ORG] [--yes] [--api-url URL]
+harumi org invitations [--json] [--api-url URL]
+harumi org invitations accept [ORG] [--api-url URL]
+harumi org invitations decline [ORG] [--yes] [--api-url URL]
 harumi org use [ORG | --personal]
 ```
 
@@ -554,6 +558,8 @@ harumi org use [ORG | --personal]
 - **`invite`**: `POST /users/organizations/{id}/users` with `{email, role}`.
 - **`role`**: `PUT /users/organizations/{id}/users/{user_id}` with `{role}`.
 - **`rm-member`**: `DELETE /users/organizations/{id}/users/{user_id}`, prompting for confirmation unless `--yes`.
+- **`leave`**: `DELETE /users/organizations/{id}/users/me`, prompting unless `--yes`. `ORG` is a name or the start of an id; **with no name a terminal picks, and `--yes` with no name is refused**, and it never defaults to the workspace you are in (that would leave whatever is selected). **The owner cannot leave**: it is refused up front, with no question asked, and points at transferring ownership in the web app (it needs a second-factor code, so it is not in the CLI) or `org rm`. Leaving the organization you were working in puts you back in your personal workspace.
+- **`invitations`**: `GET /users/invitations`: a table of the first 8 characters of the organization's id, its name and the role you were invited as. `--json` is an array of `{id, name, role}` (`id` is the whole organization id). `accept` is `POST /users/invitations/{id}/accept` and asks nothing; `decline` is `POST .../decline` and asks first (it cannot be undone: they have to invite you again), taking `--yes`. Both take the organization's name or the start of its id; with none, a terminal picks, and without a terminal they exit 1 listing the invitations. After accepting, work in it with `harumi org use <name>`.
 - **`use`**: `ORG` is checked against your organizations first (name or start of an id, saved as the real id), so a name or an organization you do not belong to is refused instead of being saved. With no argument opens a menu of your organizations plus "Personal workspace" (at a terminal; otherwise it lists the choices and fails). `--personal` clears the saved org. Persists `org_id` in `~/.harumi/config.json` (per environment); every later request sends it as `X-Organization`. The header scopes the *read* endpoints (`projects list`); creation reads the workspace from the request body, so `new` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway. It needs the network to check the choice (and a login); if harumi-api cannot be reached at all, a full id is still saved as given, with a note. Replaces `config set-org`.
 
 ## Scripts and CI (`--json`)
@@ -593,7 +599,7 @@ Every command that deletes or removes something follows one rule, from `projects
 | At a terminal, no `--yes` | Asks `[y/N]`. Enter is **No**. Declining prints `Aborted.` and **exits 1**, so `harumi org rm X && deploy` stops. |
 | No terminal (a script, CI, an agent, a pipe), no `--yes` | **Refuses at once**: `Cannot ask here: no interactive terminal. Run it again with --yes to go ahead.` and exits 1. It never prints a prompt into a log and waits, and a `y` piped to stdin is **not** consent (it was not given to this question). |
 
-The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `tags rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 1.0.0.
+The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `tags rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`, `org leave`, `org invitations decline`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 1.0.0.
 
 - **The permanent ones that take other things with them ask you to type the name** instead of `y`: `projects rm` (the project name) and `org rm` (the organization name, exactly: case and spaces count; Enter is a no). An agent passes `--yes` and still must name the project or organization (`--yes` with no name is refused).
 - **The question says which one**, not a UUID: a schedule by its cron, branch and command, a memory by its text, a file by its name and size, a share link by its label.
