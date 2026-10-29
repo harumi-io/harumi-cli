@@ -19,6 +19,7 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     permissions:
       contents: read
 
@@ -46,6 +47,7 @@ jobs:
     name: wheel (${{ matrix.python-version }})
     # 3.9 has no build on ubuntu-latest (Ubuntu 26.04), and is the lowest Python we support.
     runs-on: ubuntu-24.04
+    timeout-minutes: 6
     permissions:
       contents: read
     strategy:
@@ -73,6 +75,7 @@ jobs:
     name: compat (${{ matrix.python-version }})
     # 3.9 has no build on ubuntu-latest (Ubuntu 26.04), and is the lowest Python we support.
     runs-on: ubuntu-24.04
+    timeout-minutes: 12
     permissions:
       contents: read
     strategy:
