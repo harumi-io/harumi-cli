@@ -83,7 +83,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -204,7 +204,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -319,7 +319,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -536,7 +536,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -591,7 +591,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -646,7 +646,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -749,7 +749,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -817,7 +817,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -1216,7 +1216,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -1326,7 +1326,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -1369,7 +1369,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -1448,7 +1448,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -1528,7 +1528,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -1838,7 +1838,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -1917,7 +1917,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -1985,7 +1985,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -2065,7 +2065,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -3029,7 +3029,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -3097,7 +3097,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -3152,7 +3152,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -3207,7 +3207,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -3395,7 +3395,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -3450,7 +3450,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -3505,7 +3505,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -3585,7 +3585,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -3748,7 +3748,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -3791,7 +3791,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -3871,7 +3871,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -3926,7 +3926,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -4051,7 +4051,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -4106,7 +4106,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -4161,7 +4161,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -4241,7 +4241,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -4309,7 +4309,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -4487,7 +4487,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -4703,7 +4703,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -4783,7 +4783,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [
@@ -4863,7 +4863,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Project id. Uses the .harumi binding if omitted."
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
         },
         {
           "opts": [

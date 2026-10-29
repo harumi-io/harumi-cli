@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0
+
+### New
+
+- A command that needs a project and has none (no `--project`, and the folder is not bound to one) now offers the same arrow-key list of your projects that `clone` and `link` have, instead of stopping with "Provide --project or run from a directory bound to a project". This covers `runs`, `tags`, `compare`, `check`, `files`, `share`, `datasources`, `schedules`, `secrets`, `memories` and `dashboard validate`. Without a terminal nothing changes: same error, no request.
+- `harumi start` asks "What do you have?" with the arrow menu instead of a typed 1, 2 or 3.
+
 ## 1.0.0 - 2026-10-27
 
 A friendlier first session, readable output everywhere, and the same rules for every command: how it confirms, how it fails, what it prints for a script. 0.11 said the old names would go in 0.12.0; they go here, in 1.0.0, instead.

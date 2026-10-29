@@ -906,13 +906,22 @@ def _print_project_workspace(customer_id: Optional[str]) -> None:
         console.print("Workspace: your [bold]personal[/bold] workspace.")
 
 
-def _resolve_project(project: Optional[str]) -> str:
-    """Resolve a project id from --project, falling back to the .harumi binding."""
+def _resolve_project(project: Optional[str], api_url: Optional[str] = None, org: Optional[str] = None) -> str:
+    """Resolve a project id from --project, falling back to the .harumi binding, and at a terminal to a menu.
+
+    The menu is what stops `harumi runs list` from being a dead end when it is run from the wrong folder: it lists your
+    projects the way `clone` and `link` do. `api_url` and `org` are the command's own, since they decide whose projects
+    there are. Without a terminal (a script, CI, an agent) nothing changes: same error, and no request is made."""
     if project:
         return project
     binding = ProjectBinding.load()
     if binding:
         return binding.project_id
+    if interactive.is_interactive():
+        picked = _pick_project(_get_client(api_url=api_url, org=org), action="use", flag="--project")
+        if picked is None:
+            raise typer.Exit(code=0)  # backed out of the menu: nothing was asked for, so nothing is done
+        return picked
     _fail(
         "Provide --project or run from a directory bound to a project "
         "(see `harumi start`, `harumi new`, `harumi import`, `harumi clone`, or `harumi link`)."
@@ -3002,13 +3011,25 @@ def start() -> None:
     if not auth.has_session():
         # Before the questions: answering three of them only to be told to log in is a waste.
         _fail(str(NotAuthenticatedError(environment=active_environment())))
-    console.print("[bold]What do you have?[/bold]\n")
-    console.print("  1. Nothing yet — start a brand-new project")
-    console.print("  2. A folder of code on this machine — bring it into Harumi")
-    console.print("  3. A project that already exists in Harumi — get its code here")
-    choice = ""
-    while choice not in {"1", "2", "3"}:
-        choice = typer.prompt("Choice (1/2/3)")
+    if interactive.is_interactive():
+        choice = interactive.select(
+            "What do you have?",
+            [
+                interactive.Option("Nothing yet", "1", hint="start a brand-new project"),
+                interactive.Option("A folder of code on this machine", "2", hint="bring it into Harumi"),
+                interactive.Option("A project that already exists in Harumi", "3", hint="get its code here"),
+            ],
+        )
+        if choice is None:
+            return  # backed out of the menu
+    else:
+        console.print("[bold]What do you have?[/bold]\n")
+        console.print("  1. Nothing yet — start a brand-new project")
+        console.print("  2. A folder of code on this machine — bring it into Harumi")
+        console.print("  3. A project that already exists in Harumi — get its code here")
+        choice = ""
+        while choice not in {"1", "2", "3"}:
+            choice = typer.prompt("Choice (1/2/3)")
     if choice in {"1", "2"}:
         # Both create a project in the configured org (or Personal): check
         # that workspace before asking for a name or path. Cloning (3) stays
@@ -3536,7 +3557,7 @@ app.add_typer(runs_app, name="runs")
 @runs_app.command("list")
 @_handle_errors
 def runs_list(
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
@@ -3549,7 +3570,7 @@ def runs_list(
     if all_ and limit is not None:
         # Even `--limit 25 --all`: two ways of saying how many must not quietly disagree.
         _fail("--limit and --all are mutually exclusive. Pass only one.")
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     runs = client.list_runs(project_id)
@@ -3587,13 +3608,13 @@ def runs_list(
 @_handle_errors
 def runs_get(
     run_id: Optional[str] = typer.Argument(None, help="Run id, or the start of it (what `runs list` shows). Defaults to the project's latest run."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Show one run: how it went, then everything it printed (the latest run when no id is given)."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     with _pointing_to("harumi runs list"):
@@ -3648,14 +3669,14 @@ def runs_download(
     output_dir: Path = typer.Option(
         Path("."), "--output-dir", "-o", help="Directory to download into. Default: current directory."
     ),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Download a run's committed output as a zip (the latest run when no id is given)."""
     from harumi.execution import download_run_output
 
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     with _pointing_to("harumi runs list"):
@@ -3685,12 +3706,12 @@ def runs_download(
 @_handle_errors
 def runs_cancel(
     run_id: Optional[str] = typer.Argument(None, help="Run id, or the start of it (what `runs list` shows). Pick from the runs still going if omitted."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Cancel a run that is still going (pick one from a list when no id is given)."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     if run_id is None:
@@ -3721,13 +3742,13 @@ app.add_typer(tags_app, name="tags")
 @tags_app.command("list")
 @_handle_errors
 def tags_list(
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """List a project's tags and the commit each one points at."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     tags = client.list_repo_tags(project_id)
@@ -3752,7 +3773,7 @@ def tags_set(
         None, "--to", help="Branch or commit SHA to point the tag at. Default: the branch you are on (it must be pushed)."
     ),
     message: Optional[str] = typer.Option(None, "--message", "-m", help="A note stored with the tag."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
@@ -3762,7 +3783,7 @@ def tags_set(
     from now on. Runs already started keep the commit they resolved. A tag
     cannot have the name of a branch.
     """
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
 
     if to is None:
         # The tag lives on the server, so it can only label what the server has.
@@ -3792,12 +3813,12 @@ def tags_set(
 def tags_rm(
     name: str = typer.Argument(..., help="Tag to delete."),
     yes: bool = _YES,
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Delete a tag. The commits it labelled are untouched; a schedule that follows it must be changed first."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     _confirm(
         f"Delete tag '{_printable(name)}'? Anything that runs it by name stops working until you set it again.",
         yes=yes,
@@ -3893,7 +3914,7 @@ def compare(
     run_ids: Optional[list[str]] = typer.Argument(
         None, metavar="[RUN_ID]...", help="2-4 run ids; the first is the baseline. Pick from a list if omitted."
     ),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     as_json: bool = typer.Option(False, "--json", help="Print the comparison as JSON, for scripts."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
@@ -3908,7 +3929,7 @@ def compare(
         # Say what is wrong with the arguments before needing a project or a login: someone
         # outside a project who mistypes should hear about the typo, not about the project.
         ids = _check_compare_ids(run_ids)
-        project_id = _resolve_project(project)
+        project_id = _resolve_project(project, api_url, org)
         client = _get_client(api_url=api_url, org=org)
         if any(not _FULL_ID.match(i) for i in ids):
             # A start of an id (what `runs list` shows) names a run; the API wants whole ids. Two spellings
@@ -3916,7 +3937,7 @@ def compare(
             runs = client.list_runs(project_id)
             ids = _check_compare_ids([i if _FULL_ID.match(i) else _match_by_id(runs, i, "run", "harumi runs list").id for i in ids])
     else:
-        project_id = _resolve_project(project)
+        project_id = _resolve_project(project, api_url, org)
         client = _get_client(api_url=api_url, org=org)
         picked = _pick_runs_to_compare(client, project_id)
         if picked is None:
@@ -4015,7 +4036,7 @@ def compare(
 @_handle_errors
 def check(
     ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to check (defaults to the default branch)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
@@ -4031,7 +4052,7 @@ def check(
 def _check(*, ref: Optional[str], project: Optional[str], api_url: Optional[str], org: Optional[str], exit_when_blocked: bool) -> None:
     """The body of `harumi check`. The deprecated `harumi repo readiness` shares it but
     keeps its old exit code (always 0), so a script that ignores the status is unaffected."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     readiness = client.get_project_readiness(project_id, ref=ref)
@@ -4086,13 +4107,13 @@ app.add_typer(files_app, name="files")
 @files_app.command("ls")
 @_handle_errors
 def files_ls(
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """List every file uploaded to this project."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     file_list = client.list_project_files(project_id)
@@ -4129,12 +4150,12 @@ def files_ls(
 def files_put(
     local_path: Path = typer.Argument(..., help="Local file to upload."),
     remote_path: Optional[str] = typer.Argument(None, help="Destination path within the project's files (default: the local file's name)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Upload a local file, refusing an upload that would exceed the run-time sync cap."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
 
     if not local_path.is_file():
         _fail(f"{local_path} is not a file.")
@@ -4273,12 +4294,12 @@ def _upload_refusal(exc: ApiError, dest_path: str) -> str:
 def files_get(
     remote_path: str = typer.Argument(..., help="File path within the project's files."),
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Local path to write to (default: the remote file's name)."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Download a file to a local path."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     # A trailing slash (`files get data/`) leaves an empty basename, and
@@ -4310,12 +4331,12 @@ def files_rm(
         "--missing-ok",
         help="Exit 0 when the file is not there, for scripts that may run twice. A folder name is still an error.",
     ),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Delete an uploaded file. This cannot be undone."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     try:
@@ -4377,7 +4398,7 @@ def dashboard_validate(
     against: Optional[Path] = typer.Option(None, "--against", help="Check widget dot-paths against this local output.json."),
     run_id: Optional[str] = typer.Option(None, "--run", help="Check widget dot-paths against this run's output.json."),
     latest: bool = typer.Option(False, "--latest", help="Check widget dot-paths against the most recent run's output.json."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
@@ -4398,7 +4419,7 @@ def dashboard_validate(
     project_id = None
     client = None
     if run_id or latest or ref:
-        project_id = _resolve_project(project)
+        project_id = _resolve_project(project, api_url, org)
         client = _get_client(api_url=api_url, org=org)
 
     # name -> raw TOML, in picker order.
@@ -4640,13 +4661,13 @@ def _share_not_found(exc: ApiError) -> None:
 @share_app.command("list")
 @_handle_errors
 def share_list(
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """List a project's public dashboard links. Use `share get` for a link's full URL and permissions."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     links = client.list_share_links(project_id)
@@ -4685,13 +4706,13 @@ def share_list(
 @_handle_errors
 def share_get(
     link_id: Optional[str] = typer.Argument(None, help="Share link id (or the start of it). Pick from a list if omitted."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Show one share link: its URL, who can do what with it, and whether it has a password."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     if link_id is None:
@@ -4737,7 +4758,7 @@ def share_add(
     run_history: bool = typer.Option(False, "--run-history/--no-run-history", help="Let visitors browse past runs, not just the latest one."),
     comparisons: bool = typer.Option(False, "--comparisons/--no-comparisons", help="Let visitors compare runs side by side. Needs --run-history."),
     run_control: bool = typer.Option(False, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
     io_control: Optional[bool] = _IO_CONTROL_OPTION,
@@ -4746,7 +4767,7 @@ def share_add(
     _warn_io_control_removed(io_control)
     if comparisons and not run_history:
         _fail("--comparisons needs --run-history: without past runs there is nothing to compare.")
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     body: dict = {
@@ -4777,7 +4798,7 @@ def share_update(
     run_control: Optional[bool] = typer.Option(None, "--run-control/--no-run-control", help="Let signed-in visitors run now, override the kernel, and manage schedules."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation when removing a password."),
     password: Optional[bool] = typer.Option(None, "--password/--no-password", help="--password sets or changes the link's password (prompted, hidden, min 8 characters); --no-password removes it. Previously unlocked viewers must re-enter it."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
     io_control: Optional[bool] = _IO_CONTROL_OPTION,
@@ -4786,7 +4807,7 @@ def share_update(
     _warn_io_control_removed(io_control)
     if comparisons and run_history is False:
         _fail("--comparisons can't go with --no-run-history: without past runs there is nothing to compare.")
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     body: dict = {}
@@ -4864,7 +4885,7 @@ def share_update(
 def share_rm(
     link_id: Optional[str] = typer.Argument(None, help="Share link id (or the start of it). Pick from a list if omitted."),
     yes: bool = _YES,
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
@@ -4872,7 +4893,7 @@ def share_rm(
     if link_id is None and yes:
         # --yes removes the question, so nothing would stand between a slip in a list and a deleted link.
         _fail("Say which link to delete: [bold]harumi share rm <link id> --yes[/bold]. Find the id with [bold]harumi share list[/bold].")
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     if link_id is None:
@@ -4906,14 +4927,14 @@ def share_rm(
 def share_rotate(
     link_id: Optional[str] = typer.Argument(None, help="Share link id (or the start of it). Pick from a list if omitted."),
     yes: bool = _YES,
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Invalidate a share link's current token and mint a new one. Its flags are unchanged."""
     if link_id is None and yes:
         _fail("Say which link to rotate: [bold]harumi share rotate <link id> --yes[/bold]. Find the id with [bold]harumi share list[/bold].")
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     if link_id is None:
@@ -5048,13 +5069,13 @@ def _reject_orphan_proxy_flags(
 @datasources_app.command("list")
 @_handle_errors
 def datasources_list(
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """List datasources for a project."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     result = client.list_datasources(project_id)
@@ -5075,13 +5096,13 @@ def datasources_list(
 @_handle_errors
 def datasources_get(
     name: str = typer.Argument(..., help="Datasource name."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Show details for one datasource (credentials are never returned)."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     with _pointing_to("harumi datasources list"):
@@ -5111,13 +5132,13 @@ def datasources_add(
     proxy_tls_ca_cert: Optional[Path] = typer.Option(None, "--proxy-tls-ca-cert", help="Path to the proxy CA certificate PEM. Required with --use-proxy."),
     proxy_tls_client_cert: Optional[Path] = typer.Option(None, "--proxy-tls-client-cert", help="Path to the client certificate PEM. Required with --use-proxy."),
     proxy_tls_client_key: Optional[Path] = typer.Option(None, "--proxy-tls-client-key", help="Path to the client private key PEM. Required with --use-proxy."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Create a new datasource. Credentials are prompted interactively (never a flag)."""
     type = _check_datasource_type(type)  # type: ignore[assignment]
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     # Read and check the proxy material before prompting, so a missing flag
@@ -5169,13 +5190,13 @@ def datasources_update(
     proxy_tls_ca_cert: Optional[Path] = typer.Option(None, "--proxy-tls-ca-cert", help="Path to a new proxy CA certificate PEM."),
     proxy_tls_client_cert: Optional[Path] = typer.Option(None, "--proxy-tls-client-cert", help="Path to a new client certificate PEM."),
     proxy_tls_client_key: Optional[Path] = typer.Option(None, "--proxy-tls-client-key", help="Path to a new client private key PEM."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Partially update a datasource. Only provided fields are changed."""
     type = _check_datasource_type(type)
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     body: dict = {}
@@ -5220,12 +5241,12 @@ def datasources_update(
 def datasources_rm(
     name: str = typer.Argument(..., help="Datasource name."),
     yes: bool = _YES,
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Delete a datasource (removes the DB row and its stored credentials)."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
 
     _confirm(f"Delete datasource '{_printable(name)}'? Its stored credentials are deleted with it. This cannot be undone.", yes=yes)
 
@@ -5295,12 +5316,12 @@ def datasources_query(
     sql: str = typer.Option(..., "--sql", help="SELECT/WITH-only SQL to run."),
     limit: int = typer.Option(10000, "--limit", help="Max rows to return (server-capped at 100000)."),
     csv: Optional[Path] = typer.Option(None, "--csv", help="Write results to this CSV path instead of printing a table."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Run a read-only query against a datasource (SELECT/WITH-only, row-capped server-side)."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     with _pointing_to("harumi datasources list"):
@@ -5370,13 +5391,13 @@ def _pick_schedule(client: Client, project_id: str, action: str) -> Optional[str
 @schedules_app.command("list")
 @_handle_errors
 def schedules_list(
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """List cron schedules for a project."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     schedules = client.list_schedules(project_id)
@@ -5407,13 +5428,13 @@ def schedules_list(
 @_handle_errors
 def schedules_get(
     schedule_id: Optional[str] = typer.Argument(None, help="Schedule id, or the start of it. Pick from a list if omitted."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Show details for one schedule."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     if schedule_id is None:
@@ -5461,7 +5482,7 @@ def schedules_add(
     kernel: Optional[str] = typer.Option(None, "--kernel", help="Kernel to run on (see `harumi specs`), overriding the project's."),
     output_format: Optional[str] = typer.Option(None, "--output-format", help="Output format for scheduled runs."),
     email_to: Optional[str] = typer.Option(None, "--email-to", help="only-me | everyone | comma-separated emails."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
@@ -5475,7 +5496,7 @@ def schedules_add(
     --git-tag it runs whatever the tag points at each time it fires.
     """
     _one_ref(git_tag=git_tag, git_branch=git_branch, git_commit=git_commit)
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     from datetime import datetime, timezone
@@ -5519,13 +5540,13 @@ def schedules_update(
     kernel: Optional[str] = typer.Option(None, "--kernel", help="Kernel to run on (see `harumi specs`), overriding the project's."),
     output_format: Optional[str] = typer.Option(None, "--output-format", help="Output format for scheduled runs."),
     email_to: Optional[str] = typer.Option(None, "--email-to", help="only-me | everyone | comma-separated emails."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Partially update a cron schedule. Only provided fields are changed."""
     _one_ref(git_tag=git_tag, git_branch=git_branch, git_commit=git_commit)
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     body: dict = {}
@@ -5565,7 +5586,7 @@ def schedules_update(
 def schedules_rm(
     schedule_id: Optional[str] = typer.Argument(None, help="Schedule id, or the start of it. Pick from a list if omitted."),
     yes: bool = _YES,
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
@@ -5573,7 +5594,7 @@ def schedules_rm(
     if schedule_id is None and yes:
         # --yes removes the question, so nothing would stand between a slip in a list and a deleted schedule.
         _fail("Say which schedule to delete: [bold]harumi schedules rm <schedule id> --yes[/bold]. Find the id with [bold]harumi schedules list[/bold].")
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     if schedule_id is None:
@@ -5615,13 +5636,13 @@ _SECRET_NAME_ENV = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 @secrets_app.command("list")
 @_handle_errors
 def secrets_list(
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """List secret names for a project. Values are never printed by `list`."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     secrets = client.list_secrets(project_id)
@@ -5642,7 +5663,7 @@ def secrets_list(
 @_handle_errors
 def secrets_set(
     name: str = typer.Argument(..., help="Secret (env var) name."),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
@@ -5658,7 +5679,7 @@ def secrets_set(
             "and underscores, not starting with a digit), so a shell cannot read it as a variable. "
             "Saving it anyway."
         )
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     try:
@@ -5676,12 +5697,12 @@ def secrets_set(
 def secrets_rm(
     name: str = typer.Argument(..., help="Secret name."),
     yes: bool = _YES,
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Delete a secret."""
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
 
     _confirm(f"Delete secret '{_printable(name)}'? Runs that read it will no longer find it. This cannot be undone.", yes=yes)
 
@@ -5774,7 +5795,7 @@ _MODE_HELP = "'always' loads the memory into every chat; 'on_demand' (default) o
 def memories_list(
     query: Optional[str] = typer.Option(None, "--query", "-q", help="Full-text search over memory content."),
     mode: Optional[str] = typer.Option(None, "--mode", help="Only 'always' or only 'on_demand' memories.", autocompletion=_completing(_MEMORY_MODES)),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
@@ -5785,7 +5806,7 @@ def memories_list(
     or remove them from the workspace's own settings.
     """
     _check_memory_mode(mode)
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     memories = client.list_memories(project_id, query=query, retrieval_mode=mode)
@@ -5814,13 +5835,13 @@ def memories_list(
 def memories_add(
     content: Optional[str] = typer.Argument(None, help="The memory text (1-4000 characters), or - to read it from standard input. Prompted for at a terminal if omitted."),
     mode: str = typer.Option("on_demand", "--mode", help=_MODE_HELP, autocompletion=_completing(_MEMORY_MODES)),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Add a memory to the project, visible to every member with access to it."""
     _check_memory_mode(mode)
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
 
     if content == "-":
         content = sys.stdin.read().strip()  # explicit, so a command run with no input never waits on a pipe
@@ -5844,13 +5865,13 @@ def memories_edit(
     memory_id: Optional[str] = typer.Argument(None, help="Memory id, or the start of it. Pick from a list if omitted."),
     content: Optional[str] = typer.Option(None, "--content", help="New memory text."),
     mode: Optional[str] = typer.Option(None, "--mode", help="New retrieval mode: 'always' or 'on_demand'.", autocompletion=_completing(_MEMORY_MODES)),
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """Edit a project memory's text and/or retrieval mode. Only provided fields change."""
     _check_memory_mode(mode)
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
 
     if content is None and mode is None:
         _fail("No fields to update. Pass --content and/or --mode.")
@@ -5873,7 +5894,7 @@ def memories_edit(
 def memories_rm(
     memory_id: Optional[str] = typer.Argument(None, help="Memory id, or the start of it. Pick from a list if omitted."),
     yes: bool = _YES,
-    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted."),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
@@ -5881,7 +5902,7 @@ def memories_rm(
     if memory_id is None and yes:
         # --yes removes the question, so nothing would stand between a slip in a list and a deleted memory.
         _fail("Say which memory to delete: [bold]harumi memories rm <memory id> --yes[/bold]. Find the id with [bold]harumi memories list[/bold].")
-    project_id = _resolve_project(project)
+    project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
     if memory_id is None:

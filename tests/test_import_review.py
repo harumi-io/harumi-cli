@@ -253,7 +253,8 @@ def test_start_option_two_imports_the_folder_it_is_pointed_at(world, tmp_path, a
     (f / "a.py").write_text("1\n")
     (f / ".env").write_text("KEY=1\n")
 
-    result = runner.invoke(cli.app, ["start"], input=f"2\n{f}\nRouting\ny\n")
+    monkeypatch.setattr(cli.interactive, "select", lambda *a, **k: "2")  # the arrow menu: "a folder of code"
+    result = runner.invoke(cli.app, ["start"], input=f"{f}\nRouting\ny\n")
 
     out = " ".join(result.output.split())
     assert result.exit_code == 0, result.output
@@ -262,10 +263,11 @@ def test_start_option_two_imports_the_folder_it_is_pointed_at(world, tmp_path, a
     assert world.pushed[0]["exclude"] == hgit.import_excludes()  # the push is told what to leave out
 
 
-def test_start_option_two_will_not_import_a_tracked_secret_just_because_the_flow_is_menu_driven(world, tmp_path, at_terminal):  # noqa: F811
+def test_start_option_two_will_not_import_a_tracked_secret_just_because_the_flow_is_menu_driven(world, tmp_path, at_terminal, monkeypatch):  # noqa: F811
     folder = repo_tracking_a_secret(tmp_path)
 
-    result = runner.invoke(cli.app, ["start"], input=f"2\n{folder}\nRouting\n\n")  # Enter at the confirmation = no
+    monkeypatch.setattr(cli.interactive, "select", lambda *a, **k: "2")  # the arrow menu: "a folder of code"
+    result = runner.invoke(cli.app, ["start"], input=f"{folder}\nRouting\n\n")  # Enter at the confirmation = no
 
     assert world.client.created == []
 

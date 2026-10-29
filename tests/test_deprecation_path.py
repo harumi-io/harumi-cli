@@ -572,7 +572,9 @@ def test_the_draft_notes_exist_ahead_of_the_release_and_are_newest_first():
     from harumi import changelog
 
     versions = [r.version for r in changelog.load()]
-    assert versions[0] == cli._REMOVAL_VERSION and __version__ in versions
+    assert cli._REMOVAL_VERSION in versions and __version__ in versions
+    assert versions == sorted(versions, key=version_tuple, reverse=True), "newest first"
+    assert version_tuple(versions[0]) >= version_tuple(__version__)  # the next release may be drafted above the shipped one
 
 
 def deprecating_release() -> str:
