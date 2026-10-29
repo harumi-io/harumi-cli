@@ -95,7 +95,7 @@ class Api:
 def api(monkeypatch):
     a = Api()
     monkeypatch.setattr(cli, "_get_client", lambda *x, **k: Client(api_url="https://api.harumi.io/api", transport=httpx.MockTransport(a.handler)))
-    monkeypatch.setattr(cli, "_resolve_project", lambda p: p or PID)
+    monkeypatch.setattr(cli, "_resolve_project", lambda p, *a, **k: p or PID)
     return a
 
 

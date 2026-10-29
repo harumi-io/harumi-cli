@@ -22,7 +22,7 @@ The staging endpoints (`api.dev.harumi.io`, `git.dev.harumi.io`) are internal AL
 
 ## The always-bound-repo invariant
 
-Every `harumi run` (and every command that accepts `--project`) requires either an explicit `--project <ID>`, or the working directory (or a parent) to be bound to a Harumi project — which `harumi new`/`harumi import`/`harumi clone`/`harumi link` all do. Without either, the command exits with a clear error pointing at those verbs.
+Every `harumi run` (and every command that accepts `--project`) requires either an explicit `--project <ID>`, or the working directory (or a parent) to be bound to a Harumi project — which `harumi new`/`harumi import`/`harumi clone`/`harumi link` all do. Without either, a person at a terminal gets an arrow-key list of their projects; anything without a terminal (a script, CI, an agent) exits with a clear error pointing at those verbs, so always pass `--project` or work inside a bound folder.
 
 ## Onboarding — three journeys, three commands
 
