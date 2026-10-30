@@ -3345,7 +3345,7 @@ def projects_restore(
     restored = client.restore_project(target.id)
     console.print(f"[bold green]Restored[/bold green] project [bold]{escape(restored.name)}[/bold] ({escape(restored.id)}).")
     console.print(
-        "Its schedules are running again. Its share links were removed when it was deleted and are not brought back: "
+        "Its schedules are registered again. Its share links were removed when it was deleted and are not brought back: "
         "make new ones with [bold]harumi share add[/bold].",
         soft_wrap=True,
     )
