@@ -4,9 +4,14 @@
 
 ### New
 
+- `harumi projects trash` lists the projects in the Trash and how long each has left, nearest deletion first (`--json` too), and `harumi projects restore` brings one back by id, the start of an id or its name. `projects rm` used to end by sending you to the web app's Trash page because the CLI could not restore. Restoring re-registers the project's schedules; its share links were removed when it was deleted and are not brought back.
 - `harumi run` lists the files from `harumi files put` that the run will find at `inputs/` before it starts: name, size and how long ago, newest first, or a line saying there are none. They stay in storage until `files rm`, so a forgotten upload used to change what the code did without a word. `--quiet`/`-q` hides the list, and if listing them fails the run starts anyway. (`runs get` showing the files a past run used needs harumi-api to return them first: harumi-api#647.)
 - A command that needs a project and has none (no `--project`, and the folder is not bound to one) now offers the same arrow-key list of your projects that `clone` and `link` have, instead of stopping with "Provide --project or run from a directory bound to a project". This covers `runs`, `tags`, `compare`, `check`, `files`, `share`, `datasources`, `schedules`, `secrets`, `memories` and `dashboard validate`. Without a terminal nothing changes: same error, no request.
 - `harumi start` asks "What do you have?" with the arrow menu instead of a typed 1, 2 or 3.
+
+### Removed
+
+- `harumi blueprints` and `harumi new --blueprint`, as announced in 1.0.0. Examples is the only name now. Running the command exits 2, and the option exits 1 before anything is created, each saying `harumi examples` / `--example` (`harumi blueprints` was removed in 1.1.0. Use: harumi examples).
 
 ## 1.0.0 - 2026-10-27
 

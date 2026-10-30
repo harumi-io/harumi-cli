@@ -495,3 +495,43 @@ def test_a_dangling_symlink_is_written_through_too(tmp_path):
     config.save_credentials(access_token="a", refresh_token="r")
 
     assert link.is_symlink() and json.loads(target.read_text())["refresh_token"] == "r"
+
+
+# -- a script can tell why a refresh failed ----------------------------------------------------------------------------
+
+
+def test_a_rate_limited_refresh_keeps_the_code_and_the_wait_on_the_error():
+    """`SessionRefreshError` is an `ApiError`, so a script that catches it reads `.code` and `.retry_after`. It used to
+    rebuild the error from the status and the text alone, so a 429 with `Retry-After` and a reason looked like any 429."""
+    from harumi.errors import SessionRefreshError
+
+    log_in(refresh="r1")
+    transport = httpx.MockTransport(
+        lambda r: httpx.Response(429, json={"detail": "slow down", "code": "rate_limited"}, headers={"Retry-After": "37"})
+    )
+
+    with pytest.raises(SessionRefreshError) as exc:
+        auth.renew_session(Config.load(), "r1", transport=transport)
+
+    assert exc.value.status_code == 429 and exc.value.code == "rate_limited" and exc.value.retry_after == 37
+
+
+def test_a_blocked_refresh_keeps_its_reason_code():
+    from harumi.errors import SessionRefreshError
+
+    log_in(refresh="r1")
+    transport = httpx.MockTransport(lambda r: httpx.Response(403, json={"detail": "blocked", "code": "waf_block"}))
+
+    with pytest.raises(SessionRefreshError) as exc:
+        auth.renew_session(Config.load(), "r1", transport=transport)
+
+    assert exc.value.code == "waf_block" and exc.value.retry_after is None
+
+
+def test_the_message_does_not_change_when_the_code_is_kept():
+    from harumi.errors import SessionRefreshError
+
+    error = SessionRefreshError(429, "slow down", code="rate_limited", retry_after=37)
+
+    assert str(error) == "Could not renew your login: harumi-api returned HTTP 429: slow down"
+    assert SessionRefreshError(403, "x").code is None and SessionRefreshError(403, "x").retry_after is None

@@ -11,9 +11,11 @@ Timestamps are ISO 8601 (`model_dump(mode="json")`); ids are whole; text is exac
 from __future__ import annotations
 
 import json
+from datetime import timedelta, timezone
 from typing import Any, Iterable, Optional
 
 PROJECT = ("id", "name", "customer_id", "kernel_spec", "role_name", "created_at", "updated_at")
+TRASHED_PROJECT = ("id", "name", "deleted_at")
 RUN = (
     "id", "status", "exit_code", "source", "triggered_by", "git_branch", "git_tag", "git_commit", "command",
     "kernel_spec", "created_at", "started", "ended",
@@ -51,6 +53,20 @@ def _pick(model: Any, fields: Iterable[str]) -> dict:
 
 def project(p: Any) -> dict:
     return _pick(p, PROJECT)
+
+
+def trashed_project(p: Any, *, days: int) -> dict:
+    """A project in the Trash: when it was removed, and when the server deletes it for good (`days` later)."""
+    record = _pick(p, TRASHED_PROJECT)
+    deleted = p.deleted_at
+    if deleted is None:
+        record["deleted_for_good_at"] = None
+        return record
+    # One shape for a script: UTC with a Z. A time with no offset is UTC, as everywhere else in the CLI.
+    utc = (deleted if deleted.tzinfo is not None else deleted.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    record["deleted_at"] = utc.isoformat().replace("+00:00", "Z")
+    record["deleted_for_good_at"] = (utc + timedelta(days=days)).isoformat().replace("+00:00", "Z")
+    return record
 
 
 def run(r: Any, *, detail: bool = False) -> dict:

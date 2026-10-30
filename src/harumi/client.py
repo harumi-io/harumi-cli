@@ -380,6 +380,21 @@ class Client:
         response = self.api.request("DELETE", f"/projects/{project_id}")
         return Project.model_validate(response.json())
 
+    def list_trashed_projects(self) -> list[Project]:
+        """The projects in the Trash (`GET /projects/trash`), each with the `deleted_at` it was moved there.
+
+        One request: unlike `GET /projects`, the server's `list_trash` takes no `limit` or `offset` and returns every
+        trashed project the caller may act on (with a `total_count` equal to the list), so there are no pages to follow."""
+        response = self.api.request("GET", "/projects/trash")
+        data = response.json()
+        rows = data.get("projects", data) if isinstance(data, dict) else data
+        return [Project.model_validate(row) for row in rows]
+
+    def restore_project(self, project_id: str) -> Project:
+        """Bring a project back from the Trash (`POST /projects/{id}/restore`); its schedules are registered again."""
+        response = self.api.request("POST", f"/projects/{project_id}/restore")
+        return Project.model_validate(response.json())
+
     def get_specs(self) -> list[KernelSpec]:
         response = self.api.request("GET", "/sandbox/specs")
         return [KernelSpec.model_validate(s) for s in response.json()]

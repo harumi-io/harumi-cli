@@ -40,6 +40,7 @@ jobs:
   resolve:
     name: Resolve version
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write # create the tag and the GitHub Release
     outputs:
@@ -112,6 +113,7 @@ jobs:
     needs: resolve
     if: needs.resolve.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -163,6 +165,7 @@ jobs:
     if: needs.resolve.outputs.publish == 'true'
     # 3.9 has no build on ubuntu-latest (Ubuntu 26.04), and is the lowest Python we support.
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
     strategy:
@@ -192,6 +195,8 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: [build, smoke]
+    # No timeout-minutes on purpose: stopping an upload part-way could leave a half-published version, and a PyPI version
+    # can never be reused. Every job before it has one, so a hang never reaches here.
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -211,6 +216,7 @@ jobs:
     name: Attach CLI surface to release
     needs: [resolve, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write # attach a release asset
     steps:
@@ -234,6 +240,7 @@ jobs:
     name: Mirror skills to harumi-skills
     needs: [resolve, publish]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:

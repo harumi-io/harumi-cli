@@ -3107,7 +3107,7 @@ def test_the_removed_names_are_gone_from_the_command_tree_and_the_surface():
     for gone in ("push", "repo", "outputs", "config", "skill"):
         assert gone not in top, f"{gone} was removed in 1.0.0"
     assert not top["import"].hidden
-    assert top["blueprints"].hidden  # deprecated in 1.0.0, removed in 1.1.0: still here, still warning
+    assert "blueprints" not in top  # deprecated in 1.0.0, removed in 1.1.0
 
     paths = {command["path"] for command in build_surface()["commands"]}
     assert "push" not in paths and "outputs" not in paths and "blueprints" not in paths
