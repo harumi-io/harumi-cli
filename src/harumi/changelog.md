@@ -8,6 +8,10 @@
 - `harumi start` asks "What do you have?" with the arrow menu instead of a typed 1, 2 or 3.
 - `harumi org leave` leaves an organization you belong to (it asks first; an owner cannot leave and is told how to transfer ownership or delete the organization). `harumi org invitations` lists who invited you and as what (`--json` too), and `org invitations accept` / `decline` answer one. Before, the server's own message told you to "leave the organization" and the CLI had no way to.
 
+### Removed
+
+- `harumi blueprints` and `harumi new --blueprint`, as announced in 1.0.0. Examples is the only name now. Running the command exits 2, and the option exits 1 before anything is created, each saying `harumi examples` / `--example` (`harumi blueprints` was removed in 1.1.0. Use: harumi examples).
+
 ## 1.0.0 - 2026-10-27
 
 A friendlier first session, readable output everywhere, and the same rules for every command: how it confirms, how it fails, what it prints for a script. 0.11 said the old names would go in 0.12.0; they go here, in 1.0.0, instead.

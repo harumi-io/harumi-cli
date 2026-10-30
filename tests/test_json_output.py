@@ -174,7 +174,7 @@ def test_the_option_is_documented_in_help(args):
 
 LISTS = [
     (["projects", "list"], "projects"), (["runs", "list"], "runs"), (["share", "list"], "links"), (["datasources", "list"], "datasources"),
-    (["schedules", "list"], "schedules"), (["memories", "list"], "memories"), (["org", "list"], "orgs"), (["specs"], "specs"), (["blueprints"], "blueprints"),
+    (["schedules", "list"], "schedules"), (["memories", "list"], "memories"), (["org", "list"], "orgs"), (["specs"], "specs"), (["examples"], "examples"),
     (["secrets", "list"], "secrets"),
 ]
 

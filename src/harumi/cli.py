@@ -34,7 +34,7 @@
 Names removed in 1.0.0 (`push`, `repo`, `outputs`, `projects create`, `config
 set-org`, `skill`, `profile show`, `... remove`/`delete`,
 `share set-password`/`rm-password`, `run --output-dir`) answer with what to use
-instead. `blueprints` and `new --blueprint` still work, and warn, until 1.1.0.
+instead, and so do `blueprints` and `new --blueprint` (removed in 1.1.0, now `examples` and `--example`).
 
 Onboarding — three journeys, three commands
 ---------------------------------------------
@@ -588,8 +588,8 @@ _REMOVAL_VERSION = "1.0.0"
 # release, since nobody would see the warning first. Only the exceptions are listed; everything else in `_RETIRED`
 # goes at `_REMOVAL_VERSION`.
 _REMOVED_IN: dict[str, str] = {
-    "harumi blueprints": "1.1.0",  # renamed to `examples` in 1.0.0
-    "harumi new --blueprint": "1.1.0",  # renamed to `--example` in 1.0.0
+    "harumi blueprints": "1.1.0",  # renamed to `examples` in 1.0.0, deprecated there, removed here
+    "harumi new --blueprint": "1.1.0",  # renamed to `--example` in 1.0.0, deprecated there, removed here
 }
 
 
@@ -599,8 +599,9 @@ def _removal_version(key: str) -> str:
 
 # Every name that has gone, or is going away -> what to use instead. A removed command is deleted, and its entry stays
 # here: `_Group.resolve_command` answers a script that still calls it with "was removed in X. Use: ...". A name that
-# still works is registered with `_deprecated`, which adds its entry and prints the same text as a warning.
-# When 1.1.0 removes `blueprints`, delete its command and keep the entry.
+# still works is registered with `_deprecated`, which adds its entry and prints the same text as a warning. Nothing is
+# deprecated-but-working right now; the next deprecation starts the same way: register with `_deprecated`, name the
+# release that removes it in `_REMOVED_IN`.
 _RETIRED: dict[str, str] = {
     # Whole groups: a bare `harumi repo` gets one answer, not twelve.
     "harumi repo": "git in your clone (`harumi clone` sets up a `harumi` git remote that signs in for you)",
@@ -641,7 +642,8 @@ _RETIRED: dict[str, str] = {
     "harumi schedules remove": "harumi schedules rm",
     "harumi org delete": "harumi org rm",
     "harumi org remove": "harumi org rm-member",
-    # Deprecated in 1.0.0, removed in 1.1.0 (see `_REMOVED_IN`). `blueprints` is added by `_deprecated` where it is registered.
+    # Examples were called blueprints; deprecated in 1.0.0 and removed in 1.1.0 (see `_REMOVED_IN`).
+    "harumi blueprints": "harumi examples",
     "harumi new --blueprint": "harumi new <NAME> --example <slug>",
 }
 
@@ -2757,7 +2759,7 @@ def new(
         None, "--example", help="Start from a copy of this example (a slug from `harumi examples`, optional)."
     ),
     blueprint: Optional[str] = typer.Option(
-        None, "--blueprint", hidden=True, help="Deprecated: use --example. (Examples were called blueprints.)"
+        None, "--blueprint", hidden=True, help="Removed in 1.1.0: use --example. (Examples were called blueprints.)"
     ),
     no_clone: bool = typer.Option(
         False,
@@ -2780,10 +2782,13 @@ def new(
     Project already exists in Harumi (web app or a teammate made it)? Use
     `harumi clone <PROJECT_ID>`.
     """
-    if example and blueprint:
-        _fail("Use [bold]--example[/bold] only: [bold]--blueprint[/bold] is its old name, and two were given.")
     if blueprint:
-        _warn_deprecated("harumi new --blueprint", _RETIRED["harumi new --blueprint"])
+        # Still parsed, so a script that passes it gets the answer instead of click's "No such option", and nothing
+        # is created first.
+        _fail(
+            f"`harumi new --blueprint` was removed in {_removal_version('harumi new --blueprint')}. "
+            f"Use: {escape(_RETIRED['harumi new --blueprint'])}"
+        )
     if name is None:
         if not interactive.is_interactive():
             _fail("Give the project a name: [bold]harumi new \"My Project\"[/bold].")
@@ -2793,7 +2798,7 @@ def new(
         dir=dir,
         customer_id=customer_id,
         personal=personal,
-        blueprint=example or blueprint,
+        blueprint=example,
         clone=not no_clone,
         api_url=api_url,
         git_url=git_url,
@@ -6382,15 +6387,6 @@ def org_invitations_decline(
     with _pointing_to("harumi org invitations"):
         client.decline_invitation(chosen.customer_id)
     console.print(f"[bold red]Declined[/bold red] the invitation from [bold]{escape(_printable(chosen.business_name))}[/bold].")
-
-
-# ---------------------------------------------------------------------------
-# Deprecated names — hidden, warn on stderr, removed in 1.0.0
-# ---------------------------------------------------------------------------
-# Renamed in 0.11. Each runs the new command's code unchanged. (Aliases whose
-# behaviour differs are declared next to the command they replace.)
-
-app.command("blueprints", hidden=True)(_deprecated("harumi blueprints", "harumi examples")(examples))
 
 
 # Which help panel each command is listed under. One table so the grouping can be read, and argued with, in
