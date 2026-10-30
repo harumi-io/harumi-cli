@@ -159,6 +159,33 @@ def test_a_truncated_listing_says_it_is_a_minimum(backend):
     assert "at least" in said(run()).lower()
 
 
+def test_timestamps_with_and_without_an_offset_do_not_stop_the_run(backend):
+    """The bot's finding: a naive timestamp next to an aware one (or a missing one) made the sort raise TypeError, and
+    the sort was outside the guard, so `harumi run` died before it started."""
+    backend.files = [
+        {"name": "naive.json", "key": "k", "size": 10, "last_modified": "2026-10-30T10:00:00"},
+        {"name": "aware.json", "key": "k", "size": 10, "last_modified": "2026-10-29T10:00:00Z"},
+        {"name": "missing.json", "key": "k", "size": 10, "last_modified": None},
+    ]
+
+    result = run()
+
+    assert result.exit_code == 0, result.output
+    assert "Queued run run-1" in result.output and "Traceback" not in result.output
+    out = said(result)
+    assert all(name in out for name in ("naive.json", "aware.json", "missing.json"))
+    assert out.index("naive.json") < out.index("aware.json") < out.index("missing.json"), "newest first, unknown last"
+
+
+def test_anything_going_wrong_while_listing_or_drawing_never_stops_the_run(backend, monkeypatch):
+    """The whole courtesy is guarded, not just the request: drawing it is the part that can also fail."""
+    monkeypatch.setattr(cli, "_format_bytes", lambda n: 1 / 0)
+
+    result = run()
+
+    assert result.exit_code == 0 and "Queued run run-1" in result.output
+
+
 # -- never in the way ------------------------------------------------------------------------------------------------
 
 

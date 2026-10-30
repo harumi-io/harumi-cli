@@ -3433,27 +3433,40 @@ _STDERR_SHOWN = 20  # lines of a failed run's stderr shown before pointing at `r
 _INPUTS_SHOWN = 10  # uploaded files listed before a run; the rest are one line and `files ls`
 
 
+def _upload_time(when: Optional[datetime]) -> datetime:
+    """A sortable instant for an upload time: no offset means UTC, and none at all sorts oldest."""
+    if when is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return when if when.tzinfo is not None else when.replace(tzinfo=timezone.utc)
+
+
 def _print_run_inputs(client: Client, project_id: str) -> None:
     """Say which uploaded files the run is about to find at `inputs/`, newest first.
 
     They stay in storage and appear in every later run until someone runs `files rm`, so a forgotten upload can quietly
-    change what the code does. This is the same data `files ls` shows. It is a courtesy: if the listing fails for any
-    reason the run goes ahead without it, since a hiccup in storage must never stop someone starting a job."""
+    change what the code does. This is the same data `files ls` shows. It is a courtesy, so none of it may stop a run:
+    the request, the sort and the drawing are all inside the guard, and if any of them fails the run goes ahead without
+    the list, since a hiccup in storage or an odd timestamp must never stop someone starting a job."""
     try:
         listing = client.list_project_files(project_id)
+        files = sorted(listing.files, key=lambda x: _upload_time(x.last_modified), reverse=True)
+        if not files:
+            console.print("[dim]Inputs: no uploaded files, so the run reads only your code at inputs/.[/dim]")
+            return
+        at_least = "at least " if listing.is_truncated else ""
+        lines = [f"Inputs at [bold]inputs/[/bold] ({at_least}{len(files)}):"]
+        for f in files[:_INPUTS_SHOWN]:
+            age = _ago(f.last_modified)
+            lines.append(
+                f"  {escape(_printable(f.name))}  [dim]{_format_bytes(f.size)}" + (f"  uploaded {age}" if age else "") + "[/dim]"
+            )
+        if len(files) > _INPUTS_SHOWN:
+            lines.append(f"  [dim]and {len(files) - _INPUTS_SHOWN} more: [bold]harumi files ls[/bold][/dim]")
     except Exception:  # noqa: BLE001 - see the docstring
         return
-    files = sorted(listing.files, key=lambda x: x.last_modified or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
-    if not files:
-        console.print("[dim]Inputs: no uploaded files, so the run reads only your code at inputs/.[/dim]")
-        return
-    at_least = "at least " if listing.is_truncated else ""
-    console.print(f"Inputs at [bold]inputs/[/bold] ({at_least}{len(files)}):")
-    for f in files[:_INPUTS_SHOWN]:
-        age = _ago(f.last_modified)
-        console.print(f"  {escape(_printable(f.name))}  [dim]{_format_bytes(f.size)}" + (f"  uploaded {age}" if age else "") + "[/dim]", soft_wrap=True)
-    if len(files) > _INPUTS_SHOWN:
-        console.print(f"  [dim]and {len(files) - _INPUTS_SHOWN} more: [bold]harumi files ls[/bold][/dim]")
+    # Printed only once the whole list is built: a failure half-way must not leave half a list on screen.
+    for line in lines:
+        console.print(line, soft_wrap=True)
 
 
 def _running_line(project_id: str, branch: Optional[str], commit: Optional[str], *, tag: Optional[str] = None) -> str:
