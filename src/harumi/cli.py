@@ -6223,8 +6223,17 @@ def org_rm_member(
 
     _confirm(f"Remove {_member_label(target)} from '{_printable(org_name)}'? They lose access to its projects.", yes=yes)
 
-    with _pointing_to("harumi org members"):
-        client.remove_organization_member(org_id, str(target.user_id))
+    try:
+        with _pointing_to("harumi org members"):
+            client.remove_organization_member(org_id, str(target.user_id))
+    except ApiError as exc:
+        # The server's own words for removing yourself are "use leave organization", which had no command to point at.
+        if exc.status_code in (400, 403, 409) and "leave" in str(exc.detail).lower():
+            _fail(
+                f"{escape(str(exc))}\nTo leave an organization yourself, run "
+                f"[bold]harumi org leave {escape(shlex.quote(org_name))}[/bold]."
+            )
+        raise
     console.print(f"[bold red]Removed[/bold red] {escape(_member_label(target))}.")
 
 
@@ -6272,22 +6281,32 @@ invitations_app = _typer(help="Organizations that invited you: list them, accept
 org_app.add_typer(invitations_app, name="invitations")
 
 
-def _find_invitation(invitations: list, typed: str):
-    """The one invitation `typed` names: the organization's name (any case), or the start of its id."""
+def _find_invitation(invitations: list, typed: str, *, min_prefix: int = 1):
+    """The one invitation `typed` names: the organization's name (any case), or the start of its id.
+
+    `min_prefix` is how much of an id counts as naming it. Declining cannot be taken back, so it asks for a whole first
+    group of the UUID (as `org rm` and `org leave` do), and `decline 9 --yes` cannot match the one invitation that
+    happens to start with 9. A name is typed in full, so it is never held to this.
+    """
     low = typed.strip().lower()
     by_name = [i for i in invitations if i.business_name.lower() == low]
-    candidates = by_name or [i for i in invitations if low and i.customer_id.lower().startswith(low)]
+    candidates = by_name or [i for i in invitations if len(low) >= min_prefix and i.customer_id.lower().startswith(low)]
     if len(candidates) == 1:
         return candidates[0]
     if len(candidates) > 1:
         _fail(f"'{escape(typed)}' matches more than one invitation. Give more of the id (see [bold]harumi org invitations[/bold]).")
+    if min_prefix > 1 and 0 < len(low) < min_prefix and any(i.customer_id.lower().startswith(low) for i in invitations):
+        _fail(
+            f"'{escape(typed)}' is too short to name an invitation for this. Use the organization's name or at least "
+            f"{min_prefix} characters of its id."
+        )
     _fail(f"No invitation from '{escape(typed)}'. See yours with [bold]harumi org invitations[/bold].")
 
 
-def _invitation_choice(client: Client, typed: Optional[str], action: str):
+def _invitation_choice(client: Client, typed: Optional[str], action: str, *, destructive: bool = False):
     invitations = client.list_invitations()
     if typed is not None:
-        return _find_invitation(invitations, typed)
+        return _find_invitation(invitations, typed, min_prefix=_DESTRUCTIVE_MIN_PREFIX if destructive else 1)
     if not invitations:
         _fail("You have no invitations.")
     picked = interactive.select(
@@ -6355,7 +6374,7 @@ def org_invitations_decline(
     if organization is None and yes:
         _fail("Say which invitation to decline: [bold]harumi org invitations decline <name> --yes[/bold]. See them with [bold]harumi org invitations[/bold].")
     client = _get_client(api_url=api_url)
-    chosen = _invitation_choice(client, organization, "decline")
+    chosen = _invitation_choice(client, organization, "decline", destructive=True)
     _confirm(
         f"Decline the invitation from '{_printable(chosen.business_name)}'? They have to invite you again if you change your mind.",
         yes=yes,

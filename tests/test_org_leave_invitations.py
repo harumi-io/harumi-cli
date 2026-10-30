@@ -143,7 +143,7 @@ def test_leaving_does_not_fall_back_to_the_workspace_you_are_in(api, no_terminal
     result = runner.invoke(cli.app, ["org", "leave", "--yes"])
 
     assert result.exit_code == 1 and sent(api, "DELETE") == []
-    assert "org leave <" in said(result) or "Say which" in said(result)
+    assert "Say which organization to leave" in said(result), "tells you to name one instead of leaving the current workspace"
 
 
 def test_without_a_name_a_terminal_picks_from_your_organizations(api, at_terminal, monkeypatch):
@@ -177,6 +177,24 @@ def test_leaving_another_organization_keeps_your_workspace(api, no_terminal):
     runner.invoke(cli.app, ["org", "leave", "Zeta", "--yes"])
 
     assert config.Config.load().org_id == O2
+
+
+def test_leaving_still_succeeds_when_the_saved_workspace_cannot_be_updated(api, no_terminal, monkeypatch):
+    """The leave already happened on the server. A read-only home must not turn that into a failure, or a retry would
+    try to leave an organization that is no longer there."""
+    config.Config.load().save_org_id(O3)
+
+    def refuse(self):
+        raise OSError(30, "Read-only file system")
+
+    monkeypatch.setattr(config.Config, "clear_org_id", refuse)
+
+    result = runner.invoke(cli.app, ["org", "leave", "Zeta", "--yes"])
+
+    out = said(result)
+    assert result.exit_code == 0, result.output
+    assert sent(api, "DELETE") == [f"DELETE /api/users/organizations/{O3}/users/me"]
+    assert "Left" in out and "could not update your saved workspace" in out and "org use --personal" in out
 
 
 def test_a_server_refusal_is_shown_not_a_traceback(api, no_terminal):
@@ -245,6 +263,32 @@ def test_decline_sends_the_decline_call_and_does_not_join(api, no_terminal):
     assert "Declined" in said(result) and "Initech [x]" in said(result)
 
 
+@pytest.mark.parametrize("typed", ["b", "bbb", "bbbb222"])
+def test_a_short_start_of_an_id_cannot_decline_an_invitation(api, no_terminal, typed):
+    """The bot's finding. `org rm` and `org leave` need 8+ characters of an id for an irreversible step; declining is
+    irreversible too, so `decline b --yes` must not decline whichever single invitation happens to start with b."""
+    result = runner.invoke(cli.app, ["org", "invitations", "decline", typed, "--yes"])
+
+    assert result.exit_code == 1 and sent(api, "POST") == []
+    assert "too short" in said(result) and "8" in said(result)
+
+
+def test_a_name_still_declines_however_short_it_is(api, no_terminal):
+    """The guard is about ids: a name is typed in full, so it names exactly one invitation."""
+    api.invitations[1]["business_name"] = "X"
+
+    result = runner.invoke(cli.app, ["org", "invitations", "decline", "x", "--yes"])
+
+    assert result.exit_code == 0 and sent(api, "POST") == [f"POST /api/users/invitations/{I2}/decline"]
+
+
+def test_accepting_with_a_short_start_still_works(api, no_terminal):
+    """Joining is not destructive, so the short start stays convenient for `accept`."""
+    result = runner.invoke(cli.app, ["org", "invitations", "accept", "aa"])
+
+    assert result.exit_code == 0 and sent(api, "POST") == [f"POST /api/users/invitations/{I1}/accept"]
+
+
 def test_decline_asks_first_because_it_cannot_be_taken_back(api, at_terminal, monkeypatch):
     asked = []
     monkeypatch.setattr(cli.typer, "confirm", lambda text, **k: asked.append(text) or False)
@@ -307,17 +351,64 @@ def test_two_invitations_sharing_a_start_are_not_guessed_between(api, no_termina
 # -- where the server's own advice now leads ------------------------------------------------------------------------
 
 
-def test_removing_yourself_points_at_the_command_that_exists(api, no_terminal):
-    """harumi-api answers that removing yourself is not allowed and to use 'leave organization'."""
+MEMBERS = [
+    {"user_id": "11111111-aaaa-4bbb-8ccc-000000000001", "email": "ana@example.com", "role": "member", "pending": False},
+    {"user_id": "22222222-aaaa-4bbb-8ccc-000000000002", "email": "bo@example.com", "role": "admin", "pending": False},
+]
+
+
+def test_removing_yourself_points_at_the_command_that_exists(api, no_terminal, monkeypatch):
+    """harumi-api answers that removing yourself is not allowed and to use 'leave organization'. There is a command for
+    that now, so the answer says its name instead of leaving the user to look for it."""
+    original = api.handler
+
+    def handler(request):
+        if request.url.path.endswith("/users") and request.method == "GET":
+            return httpx.Response(200, json=MEMBERS)
+        return original(request)
+
+    monkeypatch.setattr(
+        cli, "_get_client", lambda *x, **k: Client(api_url="https://api.harumi.io/api", transport=httpx.MockTransport(handler))
+    )
     api.fail = (403, {"detail": "You cannot remove yourself. Use leave organization instead."})
-    api.members = None
 
-    result = runner.invoke(cli.app, ["org", "leave", "Zeta", "--yes"])
+    result = runner.invoke(cli.app, ["org", "rm-member", "Zeta", "ana@example.com", "--yes"])
 
-    assert "Traceback" not in result.output
+    out = said(result)
+    assert result.exit_code == 1 and "Traceback" not in result.output
+    assert "You cannot remove yourself" in out, "the server's own words stay"
+    assert "harumi org leave Zeta" in out, "and so does the command that does it"
 
 
-def test_the_help_lists_both_and_the_reference_documents_them():
+def test_other_refusals_to_remove_a_member_get_no_leave_advice(api, no_terminal, monkeypatch):
+    original = api.handler
+
+    def handler(request):
+        if request.url.path.endswith("/users") and request.method == "GET":
+            return httpx.Response(200, json=MEMBERS)
+        return original(request)
+
+    monkeypatch.setattr(
+        cli, "_get_client", lambda *x, **k: Client(api_url="https://api.harumi.io/api", transport=httpx.MockTransport(handler))
+    )
+    api.fail = (403, {"detail": "Only an admin can remove members."})
+
+    result = runner.invoke(cli.app, ["org", "rm-member", "Zeta", "bo@example.com", "--yes"])
+
+    assert result.exit_code == 1 and "Only an admin" in said(result) and "org leave" not in said(result)
+
+
+def test_the_help_lists_both():
     out = runner.invoke(cli.app, ["org", "--help"]).output
 
     assert "leave" in out and "invitations" in out
+
+
+def test_the_skill_reference_documents_both_commands_and_their_guards():
+    """The test used to promise this in its name and never read the reference."""
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / ".agents/skills/harumi-cli/references/commands.md").read_text(encoding="utf-8")
+
+    assert "harumi org leave" in text and "harumi org invitations" in text
+    assert "second-factor" in text or "web app" in text, "says transfer of ownership stays in the web app"
