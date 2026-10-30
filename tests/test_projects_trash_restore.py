@@ -166,7 +166,7 @@ def test_a_project_with_no_deletion_time_sorts_last_and_does_not_break_the_list(
 
 @pytest.mark.parametrize("stamp", ["2026-10-30T10:00:00", "2026-10-30T10:00:00Z", "2026-10-30T10:00:00+00:00", "2026-10-30T06:00:00-04:00"])
 def test_json_dates_are_always_utc_with_a_z(api, no_terminal, stamp):
-    """The bot's finding: a time with no offset came out zone-less. All four spellings are the same instant."""
+    """A time with no offset is UTC, so it is written with a Z like the rest. All four spellings are the same instant."""
     api.trash = [{**row("p-1", "One", 1), "deleted_at": stamp}]
 
     data = json.loads(runner.invoke(cli.app, ["projects", "trash", "--json"]).stdout)
@@ -227,8 +227,9 @@ def test_two_matches_are_not_guessed_between_and_both_are_named(api, no_terminal
     assert "p-aaa1" in out and "Same" in out and "p-aaa2" in out and "Other" in out, "saves a round trip to find which"
 
 
-def test_an_exact_name_beats_the_start_of_another_projects_id(api, no_terminal):
-    """The bot noted a name is matched before an id prefix. That is deliberate: what you type in full is what you mean."""
+def test_a_whole_id_beats_another_projects_name_that_looks_like_it(api, no_terminal):
+    """Typing a whole id means that project, even when another project is named exactly that. (A name is otherwise
+    matched before the start of an id: what you type in full is what you mean.)"""
     api.trash = [row("p-old", "p-new", 1), row("p-new", "Routing", 2)]
 
     runner.invoke(cli.app, ["projects", "restore", "p-new"])
@@ -317,7 +318,7 @@ def test_the_help_lists_both():
 # -- the 7 days is the default, not something the server told us -----------------------------------------------------
 #
 # harumi-api's window is a setting (`project_trash_retention_days`, default 7) and the trash response carries only
-# `deleted_at`. The review bot noticed that the CLI's "time left" and `deleted_for_good_at` are therefore an assumption.
+# `deleted_at`, so the CLI's "time left" and `deleted_for_good_at` are an assumption.
 # Until the API sends the deadline (harumi-io/harumi-api#654) every place that shows it says so.
 
 
