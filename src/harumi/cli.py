@@ -155,7 +155,7 @@ import re
 import shlex
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, NoReturn, Optional
 
@@ -3205,7 +3205,7 @@ def projects_rm(
 
     The project stops at once: its schedules are cancelled, a deployed app is shut down and its share links are removed (restoring does not bring them back).
 
-    It stays in the Trash for 7 days. Restore it from the Trash in the web app; after that it is deleted for good.
+    It stays in the Trash for 7 days. Bring it back with `harumi projects restore`; after that it is deleted for good.
     """
     if project_id is None and yes:
         # --yes skips the typed-name check, so nothing would stand between a slip in a
@@ -3233,8 +3233,120 @@ def projects_rm(
         "It has stopped running and its share links are removed."
     )
     console.print(
-        f"Restore it within {_TRASH_DAYS} days from the Trash in the web app ({active_platform_url()}); "
+        f"Bring it back within {_TRASH_DAYS} days with [bold]harumi projects restore {escape(deleted.id)}[/bold]; "
         "after that it is deleted for good.",
+        soft_wrap=True,
+    )
+
+
+def _trash_left(project) -> tuple[str, bool]:
+    """How long a trashed project has before the server deletes it, in words, and whether it is already past that."""
+    if project.deleted_at is None:
+        return "", False
+    deleted = project.deleted_at if project.deleted_at.tzinfo else project.deleted_at.replace(tzinfo=timezone.utc)
+    left = (deleted + timedelta(days=_TRASH_DAYS) - datetime.now(timezone.utc)).total_seconds()
+    if left <= 0:
+        return "about to be deleted for good", True
+    days = int(left // 86400)
+    if days >= 1:
+        return f"{days} day{'' if days == 1 else 's'} left", False
+    hours = int(left // 3600)
+    return (f"{hours} hour{'' if hours == 1 else 's'} left" if hours >= 1 else "less than an hour left"), False
+
+
+def _trash_nearest_first(projects):
+    """The project closest to being deleted for good first: it is the one you most need to see."""
+    far = datetime.max.replace(tzinfo=timezone.utc)
+
+    def key(p):
+        d = p.deleted_at
+        return (d if d is None or d.tzinfo else d.replace(tzinfo=timezone.utc)) or far
+
+    return sorted(projects, key=key)
+
+
+@projects_app.command("trash")
+@_handle_errors
+def projects_trash(
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """List the projects in the Trash, and how long each has left.
+
+    `harumi projects rm` moves a project here. It stays for 7 days and then the server deletes it for good; bring one
+    back before then with `harumi projects restore`. The one closest to the end is listed first.
+    """
+    client = _get_client(api_url=api_url, org=org)
+    projects = _trash_nearest_first(client.list_trashed_projects())
+    if as_json:
+        _emit_json([json_out.trashed_project(p, days=_TRASH_DAYS) for p in projects])
+        return
+    if not projects:
+        console.print("The Trash is empty.")
+        return
+    table = Table("id", "name", "moved to the Trash", "time left")
+    table.columns[0].no_wrap = True
+    for p in projects:
+        left, past = _trash_left(p)
+        table.add_row(
+            _cell(p.id), _cell(p.name), _cell(_ago(p.deleted_at)), f"[red]{left}[/red]" if past else _cell(left)
+        )
+    console.print(table)
+    console.print("[dim]Bring one back with [bold]harumi projects restore <id or name>[/bold].[/dim]")
+
+
+def _match_trashed(projects, typed: str):
+    """The one trashed project that `typed` names: its id, the start of its id, or its name."""
+    lowered = typed.lower()
+    exact = [p for p in projects if p.id == typed]
+    named = [p for p in projects if p.name.lower() == lowered]
+    starts = [p for p in projects if typed and p.id.startswith(typed)]
+    for found in (exact, named, starts):
+        if len(found) == 1:
+            return found[0]
+        if len(found) > 1:
+            _fail(
+                f"'{escape(typed)}' matches more than one project in the Trash. Give more of the id "
+                "(see [bold]harumi projects trash[/bold])."
+            )
+    _fail(f"No project '{escape(typed)}' in the Trash. See what is there with [bold]harumi projects trash[/bold].")
+
+
+@projects_app.command("restore")
+@_handle_errors
+def projects_restore(
+    project: Optional[str] = typer.Argument(None, help="Id (or the start of it) or name of the project. Pick from the Trash if omitted."),
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Bring a project back from the Trash.
+
+    Its schedules are registered again. What `projects rm` removed is not brought back: its share links, and a deployed
+    app stays shut down. It never asks first: restoring undoes a delete, so there is nothing to protect.
+    """
+    client = _get_client(api_url=api_url, org=org)
+    trashed = _trash_nearest_first(client.list_trashed_projects())
+    if project is None:
+        if not trashed:
+            _fail("The Trash is empty: there is nothing to restore.")
+        options = []
+        for p in trashed:
+            left, _ = _trash_left(p)
+            options.append(interactive.Option(p.name, p.id, hint="  ".join(part for part in (left, p.id) if part)))
+        # With no terminal this raises NonInteractiveError, which lists the choices and says to pass one.
+        picked = interactive.select("Which project do you want to restore?", options, flag="the PROJECT argument")
+        if picked is None:
+            return
+        target = _match_trashed(trashed, picked)
+    else:
+        target = _match_trashed(trashed, project)
+
+    restored = client.restore_project(target.id)
+    console.print(f"[bold green]Restored[/bold green] project [bold]{escape(restored.name)}[/bold] ({escape(restored.id)}).")
+    console.print(
+        "Its schedules are running again. Its share links were removed when it was deleted and are not brought back: "
+        "make new ones with [bold]harumi share add[/bold].",
         soft_wrap=True,
     )
 

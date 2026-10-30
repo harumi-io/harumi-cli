@@ -72,6 +72,9 @@ class Project(BaseModel):
     role_name: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Set when the project is in the Trash (harumi-api's projects/schemas.py:Project.deleted_at): the moment it was
+    # removed. The server deletes it for good a fixed time later.
+    deleted_at: Optional[datetime] = None
 
 
 class InteractiveResult(BaseModel):

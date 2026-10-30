@@ -76,7 +76,8 @@ def test_the_help_says_trash_and_the_window_not_that_it_is_final():
     out = plain(runner.invoke(cli.app, ["projects", "rm", "--help"]).output)
 
     assert out.count("7 days") == 2, "the window should be stated at the top and where the restore is explained"
-    assert "Restore it from the Trash in the web app" in out and "deleted for good" in out
+    assert "harumi projects restore" in out and "deleted for good" in out
+    assert "web app" not in out, "restoring is a command now, not a trip to the web app"
     assert "cannot be undone" not in out and "irreversible" not in out.lower()
 
 
@@ -120,14 +121,15 @@ def test_the_result_says_it_was_moved_and_how_to_get_it_back(api):
     out = plain(result.output)
     assert result.exit_code == 0 and api.deleted == ["/api/projects/proj-1"]
     assert "Moved project Routing [v2] to the Trash" in out  # the name's brackets survive Rich
-    assert "Restore it" in out and "7 days" in out and "web app" in out
+    assert "Bring it back" in out and "7 days" in out and "harumi projects restore proj-1" in out
+    assert "web app" not in out
     assert "Deleted project" not in out
 
 
-def test_the_result_names_the_place_to_restore_from(api):
+def test_the_result_names_the_command_that_restores_it_with_this_projects_id(api):
     out = plain(runner.invoke(cli.app, ["projects", "rm", "proj-1", "--yes"]).output)
 
-    assert config.active_platform_url() in out and "Trash" in out
+    assert "harumi projects restore proj-1" in out and "Trash" in out
 
 
 def test_a_wrong_name_still_aborts_and_deletes_nothing(api, monkeypatch):
@@ -220,8 +222,8 @@ def test_the_skill_reference_tells_an_agent_that_projects_rm_goes_to_the_trash()
     text = reference()
     section = text[text.index("- **`rm`**: `DELETE /projects/{id}`") :].split("\n")[0]
 
-    assert "Trash" in section and "7 days" in section and "no restore command" in section
-    assert "web app" in section and "share links" in section
+    assert "Trash" in section and "7 days" in section and "harumi projects restore" in section
+    assert "no restore command" not in section and "share links" in section
     assert "cannot be undone" not in section
 
 
