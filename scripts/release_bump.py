@@ -165,24 +165,30 @@ def run(
     old_surface = _read(surface_path) if surface_path.exists() else None
 
     # The surface generator reads `harumi.__version__`, so the source is written first. If anything after that fails,
-    # put every file back: half a release is worse than none.
-    written = []
+    # put every file back: half a release is worse than none. Each file is recorded BEFORE it is written, because
+    # opening for writing truncates it first: a failure part-way through a write (disk full) leaves it half-empty,
+    # and a file recorded only afterwards would never be put back. Restoring a file that was not changed is harmless.
+    # `None` means "was not there": it is removed again rather than left behind empty.
+    undo: list[tuple[pathlib.Path, Optional[str]]] = []
     try:
+        undo.append((init_path, init_text))
         _write(init_path, new_init)
-        written.append((init_path, init_text))
         new_surface = None
         if surface:
             new_surface = _generate_surface(root)
             json.loads(new_surface)  # refuse to write something that is not JSON
+        undo.append((notes_path, notes_text))
         _write(notes_path, new_notes)
-        written.append((notes_path, notes_text))
         if new_surface is not None:
+            undo.append((surface_path, old_surface))
             _write(surface_path, new_surface)
-            written.append((surface_path, old_surface if old_surface is not None else ""))
     except BaseException:
-        for path, original in reversed(written):
+        for path, original in reversed(undo):
             try:
-                _write(path, original)
+                if original is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    _write(path, original)
             except OSError:
                 pass  # the original error is the one worth reporting
         raise

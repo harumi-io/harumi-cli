@@ -228,6 +228,53 @@ def test_a_failure_after_the_notes_are_written_restores_the_notes_and_the_surfac
     assert {n: (root / n).read_text() for n in before} == before, "all three files are back as they were"
 
 
+def test_a_write_that_fails_halfway_through_a_file_is_still_undone(tmp_path, monkeypatch):
+    """The bot's finding: opening for writing truncates the file first, so a failure mid-write (disk full) leaves it
+    half-empty. A file is only recorded for rollback once its write has returned, so that one was never put back."""
+    root = tree(tmp_path)
+    before = {n: (root / n).read_text() for n in ("src/harumi/__init__.py", "src/harumi/changelog.md")}
+    real_write = rb._write
+
+    failed = []
+
+    def truncating(path, text):
+        # What a disk filling up does: some bytes land, then it fails. Once only: the restore that follows is a later
+        # write, after space has been freed, and must be able to succeed.
+        if path.name == "changelog.md" and not failed:
+            failed.append(path)
+            path.write_text(text[: len(text) // 3])
+            raise OSError(28, "No space left on device")
+        return real_write(path, text)
+
+    monkeypatch.setattr(rb, "_write", truncating)
+
+    with pytest.raises(OSError):
+        rb.run(root, today="2026-11-02", surface=False)
+
+    monkeypatch.setattr(rb, "_write", real_write)
+    assert {n: (root / n).read_text() for n in before} == before, "the half-written file is restored, not left truncated"
+
+
+def test_a_surface_that_did_not_exist_is_removed_again_not_left_empty(tmp_path, monkeypatch):
+    root = tree(tmp_path)
+    (root / "cli-surface.json").unlink()
+    real_write = rb._write
+
+    def flaky(path, text):
+        if path.name == "cli-surface.json":
+            real_write(path, text)  # it landed ...
+            raise OSError(5, "Input/output error")  # ... and then something failed
+        return real_write(path, text)
+
+    monkeypatch.setattr(rb, "_write", flaky)
+    monkeypatch.setattr(rb, "_generate_surface", lambda r: json.dumps({"cli_version": "1.1.0", "commands": []}))
+
+    with pytest.raises(OSError):
+        rb.run(root, today="2026-11-02", surface=True)
+
+    assert not (root / "cli-surface.json").exists(), "a file that was not there before is not left behind, empty or not"
+
+
 # -- what it writes -------------------------------------------------------------------------------------------------
 
 
