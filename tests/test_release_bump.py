@@ -131,6 +131,103 @@ def test_versions_compare_as_numbers_not_text():
         rb.plan(notes.replace("## 1.10.0\n", "## 1.9.0\n"), "1.10.0", today="2026-11-02")
 
 
+# -- the review bot's findings on the heading checks ------------------------------------------------------------------
+
+PRERELEASE_ABOVE = "# Changelog\n\n## 1.1.0rc1\n\nrc notes\n\n## 1.1.0\n\nnotes\n\n## 1.0.0 - 2026-10-27\n\nx\n"
+PRERELEASE_BELOW = "# Changelog\n\n## 1.1.0\n\nnotes\n\n## 1.1.0rc1\n\nold rc\n\n## 1.0.0 - 2026-10-27\n\nx\n"
+
+
+def test_a_prerelease_heading_above_the_real_one_is_refused_even_when_their_text_overlaps():
+    """`## 1.1.0rc1` starts with `## 1.1.0`, so looking the real heading up by its text found the rc line itself and
+    the guard compared a position with itself: the bot would have released 1.1.0 and left the rc's notes behind."""
+    with pytest.raises(rb.ReleaseError) as exc:
+        rb.plan(PRERELEASE_ABOVE, "1.0.0", today="2026-11-02")
+
+    assert "1.1.0rc1" in str(exc.value)
+
+
+def test_a_prerelease_heading_below_the_real_one_is_old_history_and_does_not_block_it():
+    """The other direction of the same bug: a leftover rc heading further down must not stop the real release."""
+    assert rb.plan(PRERELEASE_BELOW, "1.0.0", today="2026-11-02").version == "1.1.0"
+
+
+def test_a_heading_not_at_the_start_of_a_line_is_not_a_heading():
+    notes = "# Changelog\n\nSee ## 1.2.0 for more.\n\n## 1.1.0\n\nnotes\n\n## 1.0.0 - 2026-10-27\n\nx\n"
+
+    assert [r.version for r in rb.releases(notes)] == ["1.1.0", "1.0.0"]
+    assert rb.plan(notes, "1.0.0", today="2026-11-02").version == "1.1.0"
+
+
+CRLF = "# Changelog\r\n\r\n## 1.1.0\r\n\r\n### New\r\n\r\n- Something.\r\n\r\n## 1.0.0 - 2026-10-27\r\n\r\nIntro.\r\n"
+
+
+def test_a_changelog_with_windows_line_endings_is_read_the_same():
+    assert [(r.version, r.date) for r in rb.releases(CRLF)] == [("1.1.0", None), ("1.0.0", "2026-10-27")]
+    assert rb.plan(CRLF, "1.0.0", today="2026-11-02").version == "1.1.0"
+
+
+def test_a_bump_keeps_the_line_endings_the_file_has(tmp_path):
+    root = tree(tmp_path, notes=CRLF)
+
+    rb.run(root, today="2026-11-02", surface=False)
+
+    raw = (root / "src/harumi/changelog.md").read_bytes()
+    assert b"## 1.1.0 - 2026-11-02\r\n" in raw
+    assert raw.count(b"\r\n") == CRLF.count("\r\n") and b"\n" not in raw.replace(b"\r\n", b""), "every ending still CRLF"
+
+
+def test_the_version_file_keeps_its_line_endings_too(tmp_path):
+    root = tree(tmp_path)
+    init = root / "src/harumi/__init__.py"
+    init.write_bytes(init.read_bytes().replace(b"\n", b"\r\n"))
+
+    rb.run(root, today="2026-11-02", surface=False)
+
+    raw = init.read_bytes()
+    assert b'__version__ = "1.1.0"\r\n' in raw and b"\n" not in raw.replace(b"\r\n", b"")
+
+
+def test_a_failure_writing_the_notes_puts_the_version_back(tmp_path, monkeypatch):
+    """`everything or nothing`: the notes are written after the version, so a failure there must undo the version."""
+    root = tree(tmp_path)
+    before = (root / "src/harumi/__init__.py").read_text()
+    real_write = rb._write
+
+    def flaky(path, text):
+        if path.name == "changelog.md":
+            raise OSError(28, "No space left on device")
+        return real_write(path, text)
+
+    monkeypatch.setattr(rb, "_write", flaky)
+
+    with pytest.raises(OSError):
+        rb.run(root, today="2026-11-02", surface=False)
+
+    monkeypatch.setattr(rb, "_write", real_write)
+    assert (root / "src/harumi/__init__.py").read_text() == before
+    assert (root / "src/harumi/changelog.md").read_text() == NOTES, "the notes were never touched"
+
+
+def test_a_failure_after_the_notes_are_written_restores_the_notes_and_the_surface_too(tmp_path, monkeypatch):
+    root = tree(tmp_path)
+    before = {n: (root / n).read_text() for n in ("src/harumi/__init__.py", "src/harumi/changelog.md", "cli-surface.json")}
+    real_write = rb._write
+
+    def flaky(path, text):
+        if path.name == "cli-surface.json":
+            raise OSError(28, "No space left on device")
+        return real_write(path, text)
+
+    monkeypatch.setattr(rb, "_write", flaky)
+    monkeypatch.setattr(rb, "_generate_surface", lambda r: json.dumps({"cli_version": "1.1.0", "commands": []}))
+
+    with pytest.raises(OSError):
+        rb.run(root, today="2026-11-02", surface=True)
+
+    monkeypatch.setattr(rb, "_write", real_write)
+    assert {n: (root / n).read_text() for n in before} == before, "all three files are back as they were"
+
+
 # -- what it writes -------------------------------------------------------------------------------------------------
 
 

@@ -39,8 +39,12 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # The same anchored line `release.yml` reads the version with: it must not match the "__version__" entry in `__all__`.
 VERSION_LINE = re.compile(r'^__version__ = "([^"]+)"$', re.M)
+# The same line, tolerating a Windows line ending (`$` stops before `\n` but not before `\r`). release.yml reads the file
+# in text mode, which turns CRLF into LF, so its own pattern above is right for what it sees.
+_VERSION_LINE_ANY_EOL = re.compile(r'^__version__ = "([^"]+)"(?=\r?$)', re.M)
 # The same heading pattern as `harumi.changelog`, copied so deciding needs no install. A test keeps the two in step.
-HEADING = re.compile(r"^## (\d+(?:\.\d+)*)(?:[ \t]+-[ \t]+(\S.*))?[ \t]*$", re.M)
+# `\r?` so a changelog with Windows line endings reads the same: `$` stops before the `\n` but not before a `\r`.
+HEADING = re.compile(r"^## (\d+(?:\.\d+)*)(?:[ \t]+-[ \t]+(\S.*?))?[ \t]*\r?$", re.M)
 # Any '## ' line that looks like it is meant to be a release but is not one the parser reads (a prerelease, a typo).
 _ATTEMPT = re.compile(r"^## (?:v|\d)\S*", re.M)
 _NUMERIC = re.compile(r"^\d+(?:\.\d+)*$")
@@ -79,13 +83,21 @@ def plan(changelog_text: str, current_version: str, *, today: str) -> Plan:
         raise ReleaseError(f"the date {today!r} is not a real YYYY-MM-DD date") from None
     if not _NUMERIC.match(current_version or ""):
         raise ReleaseError(f"__version__ is {current_version!r}, which is not a plain number like 1.2.3")
+    first = HEADING.search(changelog_text)
     found = releases(changelog_text)
-    unread = [m.group(0) for m in _ATTEMPT.finditer(changelog_text) if not HEADING.match(changelog_text, m.start())]
-    if unread and (not found or changelog_text.index(unread[0]) < changelog_text.index(f"## {found[0].version}")):
+    # A '## ' line that looks like a release but is not one the parser reads (a prerelease, a typo), ABOVE the first
+    # one it does read: the notes the author meant to release would be skipped and the previous release published
+    # instead. Compared by position in the file, not by looking the heading's text up, which finds the wrong line
+    # whenever one heading starts with another ('## 1.1.0rc1' and '## 1.1.0').
+    unread = next(
+        (m for m in _ATTEMPT.finditer(changelog_text) if not HEADING.match(changelog_text, m.start())),
+        None,
+    )
+    if unread is not None and (first is None or unread.start() < first.start()):
         raise ReleaseError(
-            f"no release notes: the heading {unread[0]!r} is not one the changelog reads (a plain 'X.Y.Z', optionally "
-            "followed by ' - YYYY-MM-DD'; a prerelease like 1.1.0rc1 is not supported). Fix it, or the bot would "
-            f"quietly release {found[0].version if found else 'nothing'} instead."
+            f"no release notes: the heading {unread.group(0)!r} is not one the changelog reads (a plain 'X.Y.Z', "
+            "optionally followed by ' - YYYY-MM-DD'; a prerelease like 1.1.0rc1 is not supported). Fix it, or the bot "
+            f"would quietly release {found[0].version if found else 'nothing'} instead."
         )
     if not found:
         raise ReleaseError(
@@ -118,6 +130,17 @@ def _generate_surface(root: pathlib.Path) -> str:
     return result.stdout
 
 
+def _read(path: pathlib.Path) -> str:
+    """The file's text with its line endings untouched (`read_text` would turn CRLF into LF)."""
+    with open(path, encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+def _write(path: pathlib.Path, text: str) -> None:
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+
+
 def run(
     root: pathlib.Path = ROOT, *, today: Optional[str] = None, surface: bool = True, check: bool = False
 ) -> Plan:
@@ -125,8 +148,9 @@ def run(
     today = today or dt.datetime.now(dt.timezone.utc).date().isoformat()
     init_path = root / "src" / "harumi" / "__init__.py"
     notes_path = root / "src" / "harumi" / "changelog.md"
-    init_text, notes_text = init_path.read_text(encoding="utf-8"), notes_path.read_text(encoding="utf-8")
-    match = VERSION_LINE.search(init_text)
+    surface_path = root / "cli-surface.json"
+    init_text, notes_text = _read(init_path), _read(notes_path)
+    match = _VERSION_LINE_ANY_EOL.search(init_text)
     if match is None:
         raise ReleaseError('could not find `__version__ = "..."` in src/harumi/__init__.py')
 
@@ -134,24 +158,34 @@ def run(
     if check or decided.action == "noop":
         return decided
 
-    new_init = VERSION_LINE.sub(f'__version__ = "{decided.version}"', init_text, count=1)
+    new_init = _VERSION_LINE_ANY_EOL.sub(f'__version__ = "{decided.version}"', init_text, count=1)
     top = HEADING.search(notes_text)
-    new_notes = notes_text[: top.start()] + f"## {decided.version} - {decided.date}" + notes_text[top.end():]
+    ending = "\r" if notes_text[top.end() - 1 : top.end()] == "\r" else ""  # keep a CRLF heading a CRLF heading
+    new_notes = notes_text[: top.start()] + f"## {decided.version} - {decided.date}{ending}" + notes_text[top.end() :]
+    old_surface = _read(surface_path) if surface_path.exists() else None
 
-    new_surface = None
-    # The surface generator reads `harumi.__version__`, so the source is written first. If the generator fails, put it
-    # back: half a release is worse than none.
-    init_path.write_text(new_init, encoding="utf-8")
-    if surface:
-        try:
+    # The surface generator reads `harumi.__version__`, so the source is written first. If anything after that fails,
+    # put every file back: half a release is worse than none.
+    written = []
+    try:
+        _write(init_path, new_init)
+        written.append((init_path, init_text))
+        new_surface = None
+        if surface:
             new_surface = _generate_surface(root)
             json.loads(new_surface)  # refuse to write something that is not JSON
-        except (ReleaseError, ValueError):
-            init_path.write_text(init_text, encoding="utf-8")
-            raise
-    notes_path.write_text(new_notes, encoding="utf-8")
-    if new_surface is not None:
-        (root / "cli-surface.json").write_text(new_surface, encoding="utf-8")
+        _write(notes_path, new_notes)
+        written.append((notes_path, notes_text))
+        if new_surface is not None:
+            _write(surface_path, new_surface)
+            written.append((surface_path, old_surface if old_surface is not None else ""))
+    except BaseException:
+        for path, original in reversed(written):
+            try:
+                _write(path, original)
+            except OSError:
+                pass  # the original error is the one worth reporting
+        raise
     return decided
 
 
