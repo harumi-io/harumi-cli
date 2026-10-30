@@ -290,11 +290,13 @@ def active_environment() -> str:
     return _ENV_SCOPE.get() or _ACTIVE_ENV or resolve_environment()
 
 
-def active_platform_url() -> str:
+def active_platform_url(*, use_stored: bool = True) -> str:
     """Harumi web app URL for the active environment (honors the same
-    HARUMI_PLATFORM_URL / env config.json override as Config.load)."""
+    HARUMI_PLATFORM_URL / env config.json override as Config.load).
+
+    `use_stored=False` leaves the saved config.json out, as `Config.load(use_stored=False)` does."""
     name = active_environment()
-    env_config = _read_json(env_config_path(name))
+    env_config = _read_json(env_config_path(name)) if use_stored else {}
     url = (
         os.environ.get("HARUMI_PLATFORM_URL")
         or _str_setting(env_config, "platform_url")
@@ -513,7 +515,7 @@ class Config:
         return cls(
             api_url=resolved_api_url.rstrip("/"),
             git_url=resolved_git_url.rstrip("/"),
-            platform_url=active_platform_url(),
+            platform_url=active_platform_url(use_stored=use_stored),
             org_id=resolved_org_id,
             environment=env_name,
         )

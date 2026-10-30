@@ -279,3 +279,20 @@ def test_the_environment_variables_still_apply(home, monkeypatch):
 
     assert server.requests[0].url.host == "from-env.example"
     assert server.requests[0].headers["X-Organization"] == "org-env"
+
+
+def test_a_stored_platform_url_is_not_read_either(home):
+    """The bot's finding: `platform_url` came from the stored file even with a token, so 'stored settings are not used'
+    had an exception. It is the web app's address, not where the token goes, but the claim should simply be true."""
+    path = stored(home)
+    path.write_text(json.dumps({"platform_url": "https://stored-app.example", "api_url": "https://stored.example/api"}))
+
+    client = Server().client()
+
+    assert client.config.platform_url == "https://app.harumi.io"
+
+
+def test_the_platform_url_variable_still_applies_to_a_token_client(home, monkeypatch):
+    monkeypatch.setenv("HARUMI_PLATFORM_URL", "https://from-env.example")
+
+    assert Server().client().config.platform_url == "https://from-env.example"
