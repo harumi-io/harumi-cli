@@ -239,8 +239,13 @@ def test_backing_out_of_the_start_menu_does_nothing(at_terminal, monkeypatch):
 def test_start_without_a_terminal_still_takes_a_typed_number(no_terminal, monkeypatch):
     shown = choose(monkeypatch, "1")
     monkeypatch.setattr(cli.auth, "has_session", lambda: True)
+    cloned = []
+    monkeypatch.setattr(cli, "_clone_impl", lambda **kw: cloned.append(kw))
 
-    result = runner.invoke(cli.app, ["start"], input="9\nx\n")
+    # Two answers that are not a choice, then one that is. `start` asks again until it gets a valid one, so the input
+    # must end with a valid one: a loop fed only invalid answers never ends on Python 3.9's click, and hung CI for 72 minutes.
+    result = runner.invoke(cli.app, ["start"], input="9\nx\n3\n")
 
     assert shown == {}, "a menu with nobody to press a key"
     assert "Choice (1/2/3)" in result.output
+    assert len(cloned) == 1, "the typed 3 should have gone on to clone"
