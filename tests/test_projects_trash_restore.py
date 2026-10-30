@@ -312,3 +312,47 @@ def test_the_help_lists_both():
     out = runner.invoke(cli.app, ["projects", "--help"]).output
 
     assert "trash" in out and "restore" in out
+
+
+# -- the 7 days is the default, not something the server told us -----------------------------------------------------
+#
+# harumi-api's window is a setting (`project_trash_retention_days`, default 7) and the trash response carries only
+# `deleted_at`. The review bot noticed that the CLI's "time left" and `deleted_for_good_at` are therefore an assumption.
+# Until the API sends the deadline (harumi-io/harumi-api#654) every place that shows it says so.
+
+
+def test_the_table_says_the_time_left_assumes_the_default_window(api, no_terminal):
+    out = said(runner.invoke(cli.app, ["projects", "trash"]))
+
+    assert "assumes the default 7-day window" in out and "the server does not say" in out
+
+
+def test_the_help_says_the_time_left_assumes_the_default_window(no_terminal):
+    out = said(runner.invoke(cli.app, ["projects", "trash", "--help"]))
+
+    assert "default" in out and "7" in out
+    assert "deleted_for_good_at" in out and ("estimate" in out or "assumes" in out)
+
+
+def test_an_empty_trash_does_not_add_the_note(api, no_terminal):
+    api.trash = []
+
+    out = said(runner.invoke(cli.app, ["projects", "trash"]))
+
+    assert "default" not in out, "a note about a figure nobody is shown"
+
+
+def test_json_is_still_just_the_data_so_a_script_can_parse_it(api, no_terminal):
+    """The note belongs in the help and the docs, not in the document: stdout stays one JSON array."""
+    result = runner.invoke(cli.app, ["projects", "trash", "--json"])
+
+    assert isinstance(json.loads(result.stdout), list) and "default" not in result.stdout
+
+
+def test_the_skill_reference_says_the_deadline_assumes_the_default_window():
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / ".agents/skills/harumi-cli/references/commands.md").read_text(encoding="utf-8")
+    section = text[text.index("- **`trash`**") :].split("\n")[0]
+
+    assert "deleted_for_good_at" in section and "default" in section and "project_trash_retention_days" in section
