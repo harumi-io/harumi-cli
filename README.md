@@ -124,6 +124,17 @@ client = Client()  # loads stored credentials
 response = client.execute_project(binding.project_id, branch="main")
 ```
 
+For a pipeline, pass a token instead of logging in:
+
+```python
+import os
+client = Client(token=os.environ["HARUMI_TOKEN"])
+```
+
+The token is sent as given. Nothing else is read or written: the stored login is not used, nothing is saved to disk, and the token is hidden from `repr` and from errors. A refused token raises `NotAuthenticatedError` at once, because there is no session to renew. **Harumi does not issue long-lived tokens yet** ([#124](https://github.com/harumi-io/harumi-cli/issues/124), which needs harumi-api work first): a session's access token expires in about an hour, so today this suits a short job, not a standing pipeline.
+
+**The library is not a stability promise.** It is the CLI's own client, published so scripts can reuse it. Methods, models and their fields can change in any release, and the release notes mention them only when the CLI's behaviour changes. For something a script can rely on, use the CLI's `--json` output: its fields are named and changes to them are listed in the notes.
+
 See the [command reference](.agents/skills/harumi-cli/references/commands.md#python-library-client-alternative) for more examples (polling, repo edits, datasources, schedules, secrets, orgs).
 
 ## Development

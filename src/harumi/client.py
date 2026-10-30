@@ -20,6 +20,7 @@ from harumi import auth
 from harumi.config import Config, environment_scope
 from harumi.errors import (
     ApiError,
+    HarumiError,
     NotAuthenticatedError,
     guard_json,
     raise_for_status as _raise_for_status,
@@ -79,6 +80,30 @@ PROJECTS_PAGE_SIZE = 200
 MAX_PROJECT_PAGES = 50
 
 
+class _Secret:
+    """A bearer token that cannot be printed by accident.
+
+    Anything that formats an object (`repr`, `str`, a logger, a debugger, a traceback with locals) shows `<token ***>`;
+    the value comes out only through `reveal()`, which only the request signing calls. It is not a security boundary
+    against code in the same process, only against the token ending up in a log."""
+
+    __slots__ = ("_value",)
+
+    def __init__(self, value: str) -> None:
+        self._value = value
+
+    def reveal(self) -> str:
+        return self._value
+
+    def __repr__(self) -> str:
+        return "<token ***>"
+
+    __str__ = __repr__
+
+    def __reduce__(self):  # a pickle or a deepcopy would carry the value somewhere it should not go
+        raise TypeError("a token is not copied or pickled")
+
+
 class ApiClient:
     """Low-level HTTP wrapper: injects auth headers and retries once on 401
     after refreshing the session. Not usually used directly — see `Client`.
@@ -89,11 +114,26 @@ class ApiClient:
         config: Config,
         timeout: float = 60.0,
         transport: Optional[httpx.BaseTransport] = None,
+        token: Optional[str] = None,
     ) -> None:
         self.config = config
         self.timeout = timeout
         # Injectable for tests (httpx.MockTransport); None uses the real network.
         self.transport = transport
+        # A token handed in by the caller (CI) stands in for the stored login: it is sent as given, never saved, and
+        # there is nothing to renew behind it.
+        self._token: Optional[_Secret] = _Secret(token) if token else None
+
+    def _unauthorized(self) -> NotAuthenticatedError:
+        """The error for a 401 that renewing cannot fix. A token has no session to renew, so it must not say to log in."""
+        if self._token is not None:
+            return NotAuthenticatedError(
+                "harumi-api refused the token this Client was given (HTTP 401). Check that it is current and is for "
+                "this environment.",
+                expired=True,
+                environment=self.config.environment,
+            )
+        return NotAuthenticatedError(expired=True, environment=self.config.environment)
 
     def _signed(self) -> tuple[dict[str, str], Optional[str]]:
         """(the request headers, the refresh token of the session they were signed with).
@@ -103,6 +143,11 @@ class ApiClient:
         not spent as if it were stale. The two come from one read of the credentials (`auth.signing_session`):
         read apart, a renewal in between paired the old access token with the new refresh token.
         """
+        if self._token is not None:
+            headers = {"Authorization": f"Bearer {self._token.reveal()}"}
+            if self.config.org_id:
+                headers["X-Organization"] = self.config.org_id
+            return headers, None  # no refresh token: a 401 is final
         token, refresh = auth.signing_session(self.config, transport=self.transport)
         headers = {"Authorization": f"Bearer {token}"}
         if self.config.org_id:
@@ -162,11 +207,11 @@ class ApiClient:
                     _retried=True,
                     **kwargs,
                 )
-            raise NotAuthenticatedError(expired=True, environment=self.config.environment)
+            raise self._unauthorized()
 
         if response.status_code == 401:
             # Refreshed and retried, and still refused: the login is no good.
-            raise NotAuthenticatedError(expired=True, environment=self.config.environment)
+            raise self._unauthorized()
         _raise_for_status(response)
         return guard_json(response)
 
@@ -206,7 +251,7 @@ class ApiClient:
                 # this its connection stayed open for the whole download.
                 response.close()
                 if not sent_with:
-                    raise NotAuthenticatedError(expired=True, environment=self.config.environment)
+                    raise self._unauthorized()
                 with environment_scope(self.config.environment):
                     auth.renew_session(self.config, sent_with, transport=self.transport)
                     headers, _ = self._signed()
@@ -268,6 +313,12 @@ class Client:
     Usage:
         client = Client()  # loads ~/.harumi/credentials.json
         client.execute_project("proj-id", branch="main")
+
+        client = Client(token=os.environ["HARUMI_TOKEN"])  # CI: no `harumi login` needed
+
+    `token` is a bearer token you already have. It is sent as given and nothing else is read or written: no stored
+    login is used, nothing is saved, and it is hidden from `repr`. With a token there is no session to renew, so a 401
+    raises `NotAuthenticatedError` at once, and `logout()` and the login methods are not available.
     """
 
     def __init__(
@@ -277,22 +328,37 @@ class Client:
         org_id: Optional[str] = None,
         environment: Optional[str] = None,
         transport: Optional[httpx.BaseTransport] = None,
+        token: Optional[str] = None,
     ) -> None:
+        if token is not None and not token.strip():
+            # `Client(token=os.environ.get("X"))` with X unset must not quietly fall back to the stored login.
+            raise HarumiError("`token` is empty. Pass the token itself, or leave it out to use the stored login.")
         self.config = Config.load(
             api_url=api_url, git_url=git_url, org_id=org_id, environment=environment
         )
-        self.api = ApiClient(self.config, transport=transport)
+        self.api = ApiClient(self.config, transport=transport, token=token.strip() if token else None)
+        self._has_token = token is not None
 
     # -- Auth ---------------------------------------------------------------
 
+    def _no_login_with_a_token(self, what: str) -> None:
+        if self._has_token:
+            raise HarumiError(
+                f"{what} is not available on a Client created with a token: there is no stored login behind it. "
+                "Create a Client without `token` to sign in."
+            )
+
     def request_otp(self, email: str) -> None:
+        self._no_login_with_a_token("Signing in")
         auth.request_otp(self.config, email, transport=self.api.transport)
 
     def verify_otp(self, email: str, token: str):
+        self._no_login_with_a_token("Signing in")
         with environment_scope(self.config.environment):  # saves the new login
             return auth.verify_otp(self.config, email, token, transport=self.api.transport)
 
     def logout(self) -> None:
+        self._no_login_with_a_token("Logging out")  # it would delete a stored login this Client never used
         with environment_scope(self.config.environment):  # forgets this client's login, not another's
             auth.logout()
 
