@@ -135,6 +135,22 @@ pytest
 
 All tests are offline (SSE parser + mocked HTTP transport) — no live backend required.
 
+### Releasing
+
+Write the notes for the next release under an undated heading at the top of `src/harumi/changelog.md` while you work
+(`## 1.2.0`, no date). Then:
+
+1. Open **Promote dev to main** (`dev` into `main`).
+2. The *Release bump* workflow sets `__version__`, dates that heading and regenerates `cli-surface.json`, commits it to
+   `dev`, starts CI on that commit, and comments the result on the PR. Wait for `test` to pass on the new head.
+3. Merge with **Create a merge commit** (never squash). `release.yml` tags `vX.Y.Z` and publishes to PyPI.
+
+`python scripts/release_bump.py --check` says what the bot would do, and changes nothing. If it comments that there is
+nothing to bump, no undated heading is waiting, and merging will publish nothing.
+
+A **hotfix** merged straight to `main` is not a promotion, so nothing bumps it: change `__version__` and add a dated
+changelog entry by hand in that PR, as 0.11.1 was, then merge `main` back into `dev`.
+
 ### Checking the CLI against a real backend
 
 The offline suite proves the CLI *builds* the right request; it cannot prove a
