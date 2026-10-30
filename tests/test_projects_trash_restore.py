@@ -101,7 +101,11 @@ def test_trash_lists_what_was_deleted_and_how_long_is_left(api, no_terminal):
     assert result.exit_code == 0
     assert "Routing" in out and "Old model [v1]" in out, "a name with brackets is shown as typed"
     assert "p-old" in out and "p-new" in out, "the whole id, which restore takes"
-    assert "6 days left" in out or "5 days left" in out or "less than a day" in out or "day" in out
+    # Exact wording, row by row: 6.5 days in leaves 11 hours, 1.2 days in leaves 5 days.
+    old_row = next(l for l in result.output.splitlines() if "p-old" in l)
+    new_row = next(l for l in result.output.splitlines() if "p-new" in l)
+    assert "11 hours left" in " ".join(old_row.split())
+    assert "5 days left" in " ".join(new_row.split())
     assert "restore" in out
 
 
@@ -145,7 +149,37 @@ def test_a_project_past_the_window_is_not_promised_a_restore(api, no_terminal):
 
     out = said(runner.invoke(cli.app, ["projects", "trash"]))
 
-    assert "Too late" in out and "any moment" in out or "about to be deleted" in out or "deleted for good" in out
+    after_name = out.split("Too late", 1)[1]
+    assert "about to be deleted for good" in after_name
+    assert "days left" not in after_name and "hours left" not in after_name, "must not promise time that is gone"
+
+
+def test_a_project_with_no_deletion_time_sorts_last_and_does_not_break_the_list(api, no_terminal):
+    """The `far` fallback in the sort: a row with `deleted_at` null must not raise or jump the queue."""
+    api.trash = [{**row("p-none", "No date", 1), "deleted_at": None}, row("p-soon", "Soon", 6.5)]
+
+    result = runner.invoke(cli.app, ["projects", "trash"])
+
+    out = result.output
+    assert result.exit_code == 0 and out.index("Soon") < out.index("No date")
+
+
+@pytest.mark.parametrize("stamp", ["2026-10-30T10:00:00", "2026-10-30T10:00:00Z", "2026-10-30T10:00:00+00:00", "2026-10-30T06:00:00-04:00"])
+def test_json_dates_are_always_utc_with_a_z(api, no_terminal, stamp):
+    """The bot's finding: a time with no offset came out zone-less. All four spellings are the same instant."""
+    api.trash = [{**row("p-1", "One", 1), "deleted_at": stamp}]
+
+    data = json.loads(runner.invoke(cli.app, ["projects", "trash", "--json"]).stdout)
+
+    assert data[0]["deleted_at"] == "2026-10-30T10:00:00Z"
+    assert data[0]["deleted_for_good_at"] == "2026-11-06T10:00:00Z"
+
+
+def test_the_trash_is_read_in_one_request(api, no_terminal):
+    """The server's trash endpoint takes no paging, so one request is all of it (stated in the client's docstring)."""
+    runner.invoke(cli.app, ["projects", "trash"])
+
+    assert api.calls == ["GET /api/projects/trash"]
 
 
 # -- restore --------------------------------------------------------------------------------------------------------
@@ -183,12 +217,31 @@ def test_restore_accepts_the_name(api, no_terminal):
     assert posts(api) == ["POST /api/projects/p-new/restore"]
 
 
-def test_two_matches_are_not_guessed_between(api, no_terminal):
+def test_two_matches_are_not_guessed_between_and_both_are_named(api, no_terminal):
     api.trash = [row("p-aaa1", "Same", 1), row("p-aaa2", "Other", 2)]
 
     result = runner.invoke(cli.app, ["projects", "restore", "p-aaa"])
 
-    assert result.exit_code == 1 and "more than one" in said(result) and posts(api) == []
+    out = said(result)
+    assert result.exit_code == 1 and "more than one" in out and posts(api) == []
+    assert "p-aaa1" in out and "Same" in out and "p-aaa2" in out and "Other" in out, "saves a round trip to find which"
+
+
+def test_an_exact_name_beats_the_start_of_another_projects_id(api, no_terminal):
+    """The bot noted a name is matched before an id prefix. That is deliberate: what you type in full is what you mean."""
+    api.trash = [row("p-old", "p-new", 1), row("p-new", "Routing", 2)]
+
+    runner.invoke(cli.app, ["projects", "restore", "p-new"])
+
+    assert posts(api) == ["POST /api/projects/p-new/restore"], "the exact id wins over the name of another project"
+
+
+def test_two_projects_with_the_same_name_are_not_guessed_between(api, no_terminal):
+    api.trash = [row("p-1", "Routing", 1), row("p-2", "Routing", 2)]
+
+    result = runner.invoke(cli.app, ["projects", "restore", "routing"])
+
+    assert result.exit_code == 1 and posts(api) == [] and "p-1" in said(result) and "p-2" in said(result)
 
 
 def test_an_unknown_project_points_at_the_trash_list(api, no_terminal):

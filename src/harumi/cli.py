@@ -3306,9 +3306,10 @@ def _match_trashed(projects, typed: str):
         if len(found) == 1:
             return found[0]
         if len(found) > 1:
+            names = "\n".join(f"  {escape(p.id)}  {escape(_printable(p.name))}" for p in found[:6])
             _fail(
-                f"'{escape(typed)}' matches more than one project in the Trash. Give more of the id "
-                "(see [bold]harumi projects trash[/bold])."
+                f"'{escape(typed)}' matches more than one project in the Trash:\n{names}\n"
+                "Give more of the id (see [bold]harumi projects trash[/bold])."
             )
     _fail(f"No project '{escape(typed)}' in the Trash. See what is there with [bold]harumi projects trash[/bold].")
 

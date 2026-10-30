@@ -381,7 +381,10 @@ class Client:
         return Project.model_validate(response.json())
 
     def list_trashed_projects(self) -> list[Project]:
-        """The projects in the Trash (`GET /projects/trash`), each with the `deleted_at` it was moved there."""
+        """The projects in the Trash (`GET /projects/trash`), each with the `deleted_at` it was moved there.
+
+        One request: unlike `GET /projects`, the server's `list_trash` takes no `limit` or `offset` and returns every
+        trashed project the caller may act on (with a `total_count` equal to the list), so there are no pages to follow."""
         response = self.api.request("GET", "/projects/trash")
         data = response.json()
         rows = data.get("projects", data) if isinstance(data, dict) else data
