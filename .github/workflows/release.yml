@@ -5,9 +5,12 @@ name: Release
 # repo that npx-skills/Claude-Code-marketplace/Cursor-plugin installs pull
 # from) so that repo never drifts from what actually shipped.
 #
-# Normal path: bump `__version__` in src/harumi/__init__.py and merge to main.
-# The `resolve` job below turns that bump into a vX.Y.Z tag + GitHub Release,
-# then build/publish run in the same workflow run.
+# Normal path: write the notes under an undated heading in src/harumi/changelog.md,
+# open "Promote dev to main", and merge it. The Release bump workflow
+# (release-bump.yml) sets `__version__`, dates the heading and commits that to
+# dev when the PR opens. The `resolve` job below turns the version change into a
+# vX.Y.Z tag + GitHub Release, then build/publish run in the same workflow run.
+# A hotfix straight to main bumps `__version__` by hand.
 #
 # Escape hatch: publishing a GitHub Release by hand (UI or `gh release create`)
 # also triggers build/publish, skipping the tagging step.
