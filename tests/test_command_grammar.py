@@ -133,11 +133,12 @@ def test_a_removed_verb_is_answered_not_guessed_at(args, answer):
     assert "Did you mean" not in out
 
 
-def test_blueprints_is_the_one_old_name_that_still_works():
-    """Deprecated in 1.0.0, so it keeps working, with a warning, until 1.1.0."""
-    code, _ = said(["blueprints", "--help"])
+def test_blueprints_is_answered_like_every_other_removed_name():
+    """Removed in 1.1.0, after a release of warnings: it gets the removal answer, not a spelling guess."""
+    code, out = said(["blueprints"])
 
-    assert code == 0
+    assert code == 2 and "was removed in 1.1.0" in out and "harumi examples" in out
+    assert "Did you mean" not in out
 
 
 def test_a_close_typo_still_gets_the_spelling_suggestion_and_not_a_wrong_synonym():
