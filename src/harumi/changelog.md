@@ -6,6 +6,7 @@
 
 - A command that needs a project and has none (no `--project`, and the folder is not bound to one) now offers the same arrow-key list of your projects that `clone` and `link` have, instead of stopping with "Provide --project or run from a directory bound to a project". This covers `runs`, `tags`, `compare`, `check`, `files`, `share`, `datasources`, `schedules`, `secrets`, `memories` and `dashboard validate`. Without a terminal nothing changes: same error, no request.
 - `harumi start` asks "What do you have?" with the arrow menu instead of a typed 1, 2 or 3.
+- `harumi org leave` leaves an organization you belong to (it asks first; an owner cannot leave and is told how to transfer ownership or delete the organization). `harumi org invitations` lists who invited you and as what (`--json` too), and `org invitations accept` / `decline` answer one. Before, the server's own message told you to "leave the organization" and the CLI had no way to.
 
 ### Removed
 

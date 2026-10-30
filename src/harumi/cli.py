@@ -28,7 +28,8 @@
     harumi schedules list|get|add|update|rm [--project <id>]
     harumi secrets list|set|rm [--project <id>]
     harumi memories list|add|edit|rm [--project <id>]
-    harumi org list|create|rename|use|rm|members|invite|role|rm-member
+    harumi org list|create|rename|use|rm|members|invite|role|rm-member|leave
+    harumi org invitations [accept|decline]
 
 Names removed in 1.0.0 (`push`, `repo`, `outputs`, `projects create`, `config
 set-org`, `skill`, `profile show`, `... remove`/`delete`,
@@ -6227,9 +6228,165 @@ def org_rm_member(
 
     _confirm(f"Remove {_member_label(target)} from '{_printable(org_name)}'? They lose access to its projects.", yes=yes)
 
-    with _pointing_to("harumi org members"):
-        client.remove_organization_member(org_id, str(target.user_id))
+    try:
+        with _pointing_to("harumi org members"):
+            client.remove_organization_member(org_id, str(target.user_id))
+    except ApiError as exc:
+        # The server's own words for removing yourself are "use leave organization", which had no command to point at.
+        if exc.status_code in (400, 403, 409) and "leave" in str(exc.detail).lower():
+            _fail(
+                f"{escape(str(exc))}\nTo leave an organization yourself, run "
+                f"[bold]harumi org leave {escape(shlex.quote(org_name))}[/bold]."
+            )
+        raise
     console.print(f"[bold red]Removed[/bold red] {escape(_member_label(target))}.")
+
+
+@org_app.command("leave")
+@_handle_errors
+def org_leave(
+    organization: Optional[str] = typer.Argument(
+        None, help="Organization name, or the start of its id. A terminal picks from yours if omitted."
+    ),
+    yes: bool = _YES,
+    api_url: Optional[str] = _API_URL,
+) -> None:
+    """Leave an organization you belong to. Its owner cannot: transfer ownership in the web app, or `org rm` it."""
+    if organization is None and yes:
+        # Like `org rm`: --yes removes the question, so nothing would stand between a slip and leaving the wrong team.
+        _fail("Say which organization to leave: [bold]harumi org leave <name> --yes[/bold]. See yours with [bold]harumi org list[/bold].")
+    client = _get_client(api_url=api_url)
+    # Never the workspace you happen to be in: that would leave whatever is selected.
+    org_id, name = _org_choice(client, organization, "leave", destructive=True)
+    mine = next((o for o in client.list_organizations() if o.id == org_id), None)
+    if mine is not None and (mine.role_name or mine.role) == "owner":
+        _fail(
+            f"You own '{escape(_printable(name))}', and an owner cannot leave: it would be left with no owner. "
+            "Transfer ownership to another member in the web app, or delete the organization with "
+            f"[bold]harumi org rm {escape(shlex.quote(name))}[/bold]."
+        )
+
+    _confirm(
+        f"Leave organization '{_printable(name)}'? You lose access to its projects until someone invites you again.",
+        yes=yes,
+    )
+
+    client.leave_organization(org_id)
+    console.print(f"[bold green]Left[/bold green] organization [bold]{escape(_printable(name))}[/bold].")
+    try:
+        config = Config.load()
+        if config.org_id == org_id:
+            config.clear_org_id()
+            console.print("You were working in it, so you are now in your [bold]personal workspace[/bold].")
+    except OSError as exc:
+        err_console.print(f"[yellow]Note:[/yellow] could not update your saved workspace ({escape(str(exc))}). Run [bold]harumi org use --personal[/bold].")
+
+
+invitations_app = _typer(help="Organizations that invited you: list them, accept one, or decline it.")
+org_app.add_typer(invitations_app, name="invitations")
+
+
+def _find_invitation(invitations: list, typed: str, *, min_prefix: int = 1):
+    """The one invitation `typed` names: the organization's name (any case), or the start of its id.
+
+    `min_prefix` is how much of an id counts as naming it. Declining cannot be taken back, so it asks for a whole first
+    group of the UUID (as `org rm` and `org leave` do), and `decline 9 --yes` cannot match the one invitation that
+    happens to start with 9. A name is typed in full, so it is never held to this.
+    """
+    low = typed.strip().lower()
+    by_name = [i for i in invitations if i.business_name.lower() == low]
+    candidates = by_name or [i for i in invitations if len(low) >= min_prefix and i.customer_id.lower().startswith(low)]
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        _fail(f"'{escape(typed)}' matches more than one invitation. Give more of the id (see [bold]harumi org invitations[/bold]).")
+    if min_prefix > 1 and 0 < len(low) < min_prefix and any(i.customer_id.lower().startswith(low) for i in invitations):
+        _fail(
+            f"'{escape(typed)}' is too short to name an invitation for this. Use the organization's name or at least "
+            f"{min_prefix} characters of its id."
+        )
+    _fail(f"No invitation from '{escape(typed)}'. See yours with [bold]harumi org invitations[/bold].")
+
+
+def _invitation_choice(client: Client, typed: Optional[str], action: str, *, destructive: bool = False):
+    invitations = client.list_invitations()
+    if typed is not None:
+        return _find_invitation(invitations, typed, min_prefix=_DESTRUCTIVE_MIN_PREFIX if destructive else 1)
+    if not invitations:
+        _fail("You have no invitations.")
+    picked = interactive.select(
+        f"Which invitation do you want to {action}?",
+        [interactive.Option(_printable(i.business_name), i.customer_id, hint=f"as {i.role}  {i.customer_id[:8]}") for i in invitations],
+        flag="the ORGANIZATION argument",
+    )
+    if picked is None:
+        raise typer.Exit(code=0)
+    return next(i for i in invitations if i.customer_id == picked)
+
+
+@invitations_app.callback(invoke_without_command=True)
+def org_invitations(
+    ctx: typer.Context,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+) -> None:
+    """List the invitations you have received (no subcommand), or `accept` / `decline` one."""
+    if ctx.invoked_subcommand is not None:
+        return
+    invitations = _handle_errors(lambda: _get_client(api_url=api_url).list_invitations())()
+    if as_json:
+        _emit_json([json_out.invitation(i) for i in invitations])
+        return
+    if not invitations:
+        console.print("You have no invitations.")
+        return
+    table = Table("id", "organization", "as")
+    table.columns[0].no_wrap = True
+    rows = []
+    for i in invitations:
+        row = [_cell(i.customer_id[:8]), _cell(i.business_name), _cell(i.role)]
+        table.add_row(*row)
+        rows.append(row)
+    _print_records(table, ["id", "organization", "as"], rows)
+    console.print("[dim]Answer one with[/dim] [bold]harumi org invitations accept <name>[/bold] [dim]or[/dim] [bold]decline[/bold]")
+
+
+@invitations_app.command("accept")
+@_handle_errors
+def org_invitations_accept(
+    organization: Optional[str] = typer.Argument(None, help="Organization name, or the start of its id. A terminal picks if omitted."),
+    api_url: Optional[str] = _API_URL,
+) -> None:
+    """Accept an invitation and join the organization."""
+    client = _get_client(api_url=api_url)
+    chosen = _invitation_choice(client, organization, "accept")
+    with _pointing_to("harumi org invitations"):
+        client.accept_invitation(chosen.customer_id)
+    console.print(
+        f"[bold green]Joined[/bold green] [bold]{escape(_printable(chosen.business_name))}[/bold] as {escape(chosen.role)}. "
+        f"[dim]Work in it with[/dim] [bold]harumi org use {escape(shlex.quote(chosen.business_name))}[/bold]"
+    )
+
+
+@invitations_app.command("decline")
+@_handle_errors
+def org_invitations_decline(
+    organization: Optional[str] = typer.Argument(None, help="Organization name, or the start of its id. A terminal picks if omitted."),
+    yes: bool = _YES,
+    api_url: Optional[str] = _API_URL,
+) -> None:
+    """Decline an invitation. The organization has to invite you again if you change your mind."""
+    if organization is None and yes:
+        _fail("Say which invitation to decline: [bold]harumi org invitations decline <name> --yes[/bold]. See them with [bold]harumi org invitations[/bold].")
+    client = _get_client(api_url=api_url)
+    chosen = _invitation_choice(client, organization, "decline", destructive=True)
+    _confirm(
+        f"Decline the invitation from '{_printable(chosen.business_name)}'? They have to invite you again if you change your mind.",
+        yes=yes,
+    )
+    with _pointing_to("harumi org invitations"):
+        client.decline_invitation(chosen.customer_id)
+    console.print(f"[bold red]Declined[/bold red] the invitation from [bold]{escape(_printable(chosen.business_name))}[/bold].")
 
 
 # Which help panel each command is listed under. One table so the grouping can be read, and argued with, in

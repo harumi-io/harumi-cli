@@ -42,6 +42,7 @@ from harumi.models import (
     MemoryList,
     MyEntitlement,
     Organization,
+    OrganizationInvitation,
     OrganizationMember,
     Project,
     ProjectExecuteResponse,
@@ -908,6 +909,20 @@ class Client:
         self.api.request(
             "DELETE", f"/users/organizations/{organization_id}/users/{user_id}"
         )
+
+    def leave_organization(self, organization_id: str) -> None:
+        """Remove yourself from an organization. The owner cannot: ownership has to be transferred first."""
+        self.api.request("DELETE", f"/users/organizations/{organization_id}/users/me")
+
+    def list_invitations(self) -> list[OrganizationInvitation]:
+        response = self.api.request("GET", "/users/invitations")
+        return [OrganizationInvitation.model_validate(i) for i in response.json()]
+
+    def accept_invitation(self, organization_id: str) -> None:
+        self.api.request("POST", f"/users/invitations/{organization_id}/accept")
+
+    def decline_invitation(self, organization_id: str) -> None:
+        self.api.request("POST", f"/users/invitations/{organization_id}/decline")
 
     # -- Project share links -------------------------------------------------
     # /projects/{id}/share-links — a project's public dashboard links (many

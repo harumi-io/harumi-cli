@@ -516,6 +516,16 @@ class Organization(BaseModel):
     role_name: Optional[str] = None
 
 
+class OrganizationInvitation(BaseModel):
+    """One entry from GET /users/invitations: an organization that invited you, and as what."""
+
+    model_config = ConfigDict(extra="allow")
+
+    customer_id: str
+    business_name: str
+    role: str
+
+
 class OrganizationMember(BaseModel):
     """One entry from GET /users/organizations/{id}/users."""
 
