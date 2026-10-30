@@ -189,7 +189,7 @@ def test_the_old_command_is_removed_and_says_what_replaced_it(server):
     assert old.exit_code == 2
     assert "`harumi blueprints` was removed in 1.1.0" in said
     assert "harumi examples" in said
-    assert old.stdout == "" or "removed" in said, "nothing a script could parse as a list"
+    assert old.stdout == "", "the answer is on stderr, so nothing a script reads on stdout could be mistaken for a list"
 
 
 def test_the_old_option_is_removed_and_creates_nothing(server, tmp_path, monkeypatch):

@@ -6232,14 +6232,6 @@ def org_rm_member(
     console.print(f"[bold red]Removed[/bold red] {escape(_member_label(target))}.")
 
 
-# ---------------------------------------------------------------------------
-# Names that were deprecated and have been removed (see `_RETIRED`)
-# ---------------------------------------------------------------------------
-# Renamed in 0.11. Each runs the new command's code unchanged. (Aliases whose
-# behaviour differs are declared next to the command they replace.)
-
-
-
 # Which help panel each command is listed under. One table so the grouping can be read, and argued with, in
 # one place; a test fails if a visible command is missing from it, or the table names one that does not
 # exist. Both the panels and the commands within them are listed in the order shown (see `_Group.list_commands`).

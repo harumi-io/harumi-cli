@@ -345,7 +345,7 @@ def still_here_after(removal_version: str):
     return [" ".join(path) for path, _ in hidden_leaves(by=removal_version)]
 
 
-def test_once_0_13_removes_blueprints_it_says_0_13_and_what_replaced_it():
+def test_once_1_1_removes_blueprints_it_says_1_1_and_what_replaced_it():
     """The answer a script gets the day after, built for the release that removes it. Tested with the version a
     name is due at, not the default one, or a tombstone quoting the wrong release would pass."""
     message = what_it_says(["blueprints"], release="1.1.0")
