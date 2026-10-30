@@ -329,10 +329,10 @@ def test_the_table_says_the_time_left_assumes_the_default_window(api, no_termina
 
 
 def test_the_help_says_the_time_left_assumes_the_default_window(no_terminal):
-    out = said(runner.invoke(cli.app, ["projects", "trash", "--help"]))
+    out = said(runner.invoke(cli.app, ["projects", "trash", "--help"]))  # whitespace-normalised: help wraps at the width
 
-    assert "default" in out and "7" in out
-    assert "deleted_for_good_at" in out and ("estimate" in out or "assumes" in out)
+    assert "assume the default 7-day window" in out, "the whole phrase, not a '7' and a 'default' that could be anywhere"
+    assert "deleted_for_good_at" in out and "estimate" in out
 
 
 def test_an_empty_trash_does_not_add_the_note(api, no_terminal):
