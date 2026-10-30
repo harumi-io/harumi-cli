@@ -183,10 +183,13 @@ def test_a_project_name_with_brackets_is_shown_as_typed(server, tmp_path, monkey
 def test_the_old_command_is_removed_and_says_what_replaced_it(server):
     old = runner.invoke(cli.app, ["blueprints", "--json"])
 
+    # The answer is a usage error, which goes to stderr; click 8.1 keeps the two streams apart here and 8.2 mixes them
+    # in `output`, so read both.
+    said = " ".join((old.stdout + (old.stderr if hasattr(old, "stderr") else "")).split())
     assert old.exit_code == 2
-    assert "`harumi blueprints` was removed in 1.1.0" in " ".join(old.output.split())
-    assert "harumi examples" in " ".join(old.output.split())
-    assert old.stdout == "" or "removed" in old.output, "nothing a script could parse as a list"
+    assert "`harumi blueprints` was removed in 1.1.0" in said
+    assert "harumi examples" in said
+    assert old.stdout == "" or "removed" in said, "nothing a script could parse as a list"
 
 
 def test_the_old_option_is_removed_and_creates_nothing(server, tmp_path, monkeypatch):
