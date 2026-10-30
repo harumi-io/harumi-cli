@@ -157,20 +157,26 @@ def test_an_empty_token_is_refused_up_front():
         assert "token" in str(exc.value).lower()
 
 
-def test_without_a_token_nothing_changes(home):
-    """The stored login is still what a plain `Client()` uses."""
+def test_without_a_token_the_stored_login_and_settings_are_still_what_is_used(home):
+    """The other half of the promise: a plain `Client()` is unchanged, so the saved login, host and organization apply."""
+    import base64
+    import time
+
     from harumi import config
 
-    config.save_credentials(access_token="stored-access", refresh_token="stored-refresh", email="a@b.co")
+    def b64(d):
+        return base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()
+
+    access = f"{b64({'alg': 'none'})}.{b64({'exp': int(time.time()) + 3600, 'sub': 'u'})}.sig"
+    config.save_credentials(access_token=access, refresh_token="stored-refresh", email="a@b.co")
+    stored(home)
     server = Server()
-    client = Client(transport=httpx.MockTransport(server.handler))
 
-    try:
-        client.get_profile()
-    except Exception:  # the stored token is not a real JWT; what matters is which credential was chosen
-        pass
+    Client(transport=httpx.MockTransport(server.handler)).get_profile()
 
-    assert all(TOKEN not in r.headers.get("Authorization", "") for r in server.requests)
+    assert server.requests, "a request must actually have been made"
+    assert server.requests[0].headers["Authorization"] == f"Bearer {access}"
+    assert server.requests[0].url.host == "stored.example" and server.requests[0].headers["X-Organization"] == "org-stored"
 
 
 def test_two_clients_keep_their_own_tokens():
@@ -210,3 +216,66 @@ def test_the_documented_signature_names_the_parameter():
 
     assert "token" in inspect.signature(Client.__init__).parameters
     assert "token" in (Client.__doc__ or "") or "token" in (Client.__init__.__doc__ or "")
+
+
+# -- what a token does NOT read: the stored configuration ------------------------------------------------------------
+
+
+def stored(home, *, api_url="https://stored.example/api", org_id="org-stored"):
+    path = home / "environments" / "production" / "config.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"api_url": api_url, "org_id": org_id}))
+    return path
+
+
+def test_a_stored_api_url_cannot_redirect_a_token_to_another_host(home):
+    """Where the token goes must be what the caller said, never what an old ~/.harumi happens to hold."""
+    stored(home)
+    server = Server()
+
+    server.client().get_profile()
+
+    assert server.requests[0].url.host != "stored.example"
+    assert server.requests[0].url.host == "api.harumi.io"
+
+
+def test_a_stored_organization_is_not_attached_to_a_token(home):
+    stored(home)
+    server = Server()
+
+    server.client().get_profile()
+
+    assert "X-Organization" not in server.requests[0].headers
+
+
+def test_an_explicit_url_or_org_still_wins_over_the_defaults(home):
+    stored(home)
+    server = Server()
+
+    server.client(org_id="org-given", api_url="https://given.example/api").get_profile()
+
+    assert server.requests[0].url.host == "given.example"
+    assert server.requests[0].headers["X-Organization"] == "org-given"
+
+
+def test_the_legacy_credentials_file_is_not_moved(home, tmp_path):
+    """Config.load used to migrate ~/.harumi/credentials.json into place: a write the docs said never happens."""
+    home.mkdir(parents=True)
+    legacy = home / "credentials.json"
+    legacy.write_text(json.dumps({"access_token": "old", "refresh_token": "old"}))
+
+    Server().client().get_profile()
+
+    assert legacy.exists() and not (home / "environments").exists(), "nothing may be moved or created"
+
+
+def test_the_environment_variables_still_apply(home, monkeypatch):
+    """A CI job sets HARUMI_API_URL / HARUMI_ORG: those are the caller's explicit choice, not stored state."""
+    monkeypatch.setenv("HARUMI_API_URL", "https://from-env.example/api")
+    monkeypatch.setenv("HARUMI_ORG", "org-env")
+    server = Server()
+
+    server.client().get_profile()
+
+    assert server.requests[0].url.host == "from-env.example"
+    assert server.requests[0].headers["X-Organization"] == "org-env"

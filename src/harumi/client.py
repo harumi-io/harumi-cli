@@ -333,8 +333,10 @@ class Client:
         if token is not None and not token.strip():
             # `Client(token=os.environ.get("X"))` with X unset must not quietly fall back to the stored login.
             raise HarumiError("`token` is empty. Pass the token itself, or leave it out to use the stored login.")
+        # With a token the stored settings are left alone, not just the stored login: a saved api_url would decide which
+        # host receives the token, and a saved organization would scope it without being asked.
         self.config = Config.load(
-            api_url=api_url, git_url=git_url, org_id=org_id, environment=environment
+            api_url=api_url, git_url=git_url, org_id=org_id, environment=environment, use_stored=token is None
         )
         self.api = ApiClient(self.config, transport=transport, token=token.strip() if token else None)
         self._has_token = token is not None
