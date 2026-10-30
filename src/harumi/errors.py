@@ -72,8 +72,12 @@ class SessionRefreshError(ApiError):
     running: a refresh that fails while `harumi run` executes is not the project's fault.
     """
 
-    def __init__(self, status_code: int, detail: str) -> None:
-        super().__init__(status_code, detail)
+    def __init__(
+        self, status_code: int, detail: str, code: str | None = None, retry_after: int | None = None
+    ) -> None:
+        # `code` and `retry_after` are what tell a script *why* it failed (a rate limit and how long to wait, or a
+        # firewall's reason), so they are kept; only the message is reworded.
+        super().__init__(status_code, detail, code=code, retry_after=retry_after)
         self.args = (f"Could not renew your login: harumi-api returned HTTP {status_code}: {detail}",)
 
     def __str__(self) -> str:

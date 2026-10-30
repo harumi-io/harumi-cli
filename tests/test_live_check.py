@@ -393,6 +393,7 @@ class TestTierSanity:
 
 
 @pytest.mark.live
+@pytest.mark.timeout(900)  # a real backend and a real run; the offline cap would cut it off
 def test_the_cli_works_against_a_deployed_backend():
     """The only test here that touches a network.
 

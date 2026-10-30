@@ -101,6 +101,8 @@ TIERS: dict[str, tuple[str, str]] = {
     # -- projects -------------------------------------------------------------
     "projects list": (READ, ""),
     "projects get": (READ, ""),
+    "projects trash": (READ, ""),
+    "projects restore": (MANUAL, "needs a project that is in the Trash, which the live run never leaves one in"),
     "projects rename": (CANARY, ""),
     "projects rm": (CANARY, "teardown; only ever a project this run created"),
     "link": (CANARY, "binds a throwaway directory to the canary"),
@@ -226,6 +228,7 @@ PLAN: tuple[Step, ...] = (
     # Skipped automatically for a personal-workspace session, where {org} is empty.
     Step("org members", ("{org}",)),
     Step("projects list"),
+    Step("projects trash"),
     Step("dashboard widgets"),
     Step("dashboard validate", ("{spec}",)),
     Step("agent-skills install", ("--dry-run",)),

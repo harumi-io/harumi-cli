@@ -100,6 +100,9 @@ def required_args(command):
 
 
 OLD_NAMES = [pytest.param(path, id=" ".join(path)) for path, _ in hidden_leaves()]  # still registered: deprecated, not yet removed
+# With nothing deprecated-but-working (the state after a removal), the two tests parametrised over it have nothing to
+# run on. Say so, instead of pytest's "empty parameter set", and let the stand-in test below keep the machinery honest.
+_NOTHING_DEPRECATED = [pytest.param((), marks=pytest.mark.skip(reason="nothing is deprecated-but-working; see the stand-in test"))]
 REMOVED_IN_THIS_RELEASE = [pytest.param(path, id=" ".join(path)) for path in removed_names()]
 
 
@@ -108,7 +111,7 @@ REMOVED_IN_THIS_RELEASE = [pytest.param(path, id=" ".join(path)) for path in rem
 
 def test_the_audit_found_the_old_names():
     assert len(REMOVED_IN_THIS_RELEASE) >= 28, "the table lost names, so every test below would prove little"
-    assert [p.id for p in OLD_NAMES] == ["blueprints"], "the one deprecated name left; it goes in 1.1.0"
+    assert OLD_NAMES == [], "nothing is deprecated-but-working now; a new deprecation shows up here and gets the tests below"
 
 
 def test_every_hidden_old_name_is_in_the_retired_table_and_the_removed_ones_are_really_gone():
@@ -129,7 +132,7 @@ def test_the_removed_output_dir_option_is_in_the_table_too():
 # -- while it still works -------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("path", OLD_NAMES)
+@pytest.mark.parametrize("path", OLD_NAMES or _NOTHING_DEPRECATED)
 def test_an_old_name_warns_on_stderr_and_never_on_stdout(path):
     """A script pipes stdout; a warning there would corrupt what it parses."""
     result = runner.invoke(cli.app, [*path, *required_args(dict(hidden_leaves())[path])])
@@ -138,7 +141,7 @@ def test_an_old_name_warns_on_stderr_and_never_on_stdout(path):
     assert "deprecated" not in result.stdout
 
 
-@pytest.mark.parametrize("path", OLD_NAMES)
+@pytest.mark.parametrize("path", OLD_NAMES or _NOTHING_DEPRECATED)
 def test_an_old_name_says_in_its_help_that_it_is_going_away(path):
     """25 of 29 said nothing, so `harumi push --help` read as if push were the way to do it."""
     out = " ".join(runner.invoke(cli.app, [*path, "--help"]).stdout.split())
@@ -147,6 +150,22 @@ def test_an_old_name_says_in_its_help_that_it_is_going_away(path):
 
     assert f"Deprecated: removed in {cli._removal_version(key)}" in out
     assert " ".join(use.split()) in out  # all of it, brackets too: `[RUN_ID]` must not be swallowed as styling
+
+
+def test_a_stand_in_deprecated_command_warns_on_stderr_only_and_says_so_in_its_help(monkeypatch):
+    """The two tests above have no real name to run on while nothing is deprecated. This registers one, the way the next
+    deprecation will (`_deprecated` + `_REMOVED_IN`), so the warning and the help line are still proven to work."""
+    before = list(cli.app.registered_commands)
+    monkeypatch.setitem(cli._REMOVED_IN, "harumi zzz-old", "9.9.0")
+    cli.app.command("zzz-old", hidden=True)(cli._deprecated("harumi zzz-old", "harumi new")(lambda: print("ran")))
+    try:
+        result = runner.invoke(cli.app, ["zzz-old"])
+    finally:
+        cli.app.registered_commands[:] = before
+        cli._RETIRED.pop("harumi zzz-old", None)
+
+    assert "deprecated:" in result.stderr and "9.9.0" in result.stderr and "harumi new" in result.stderr
+    assert "deprecated" not in result.stdout and "ran" in result.stdout
 
 
 def typer_version():
@@ -326,28 +345,13 @@ def still_here_after(removal_version: str):
     return [" ".join(path) for path, _ in hidden_leaves(by=removal_version)]
 
 
-def test_a_name_renamed_in_this_release_is_still_there_after_it():
-    """`blueprints` is deprecated in 1.0.0 and removed in 1.1.0. A tree built for 1.0.0 must still have it,
-    working and warning, or its users would meet the removal in the same release as the warning."""
-    root = with_the_old_names_gone()
-
-    assert "blueprints" in root.commands and root.commands["blueprints"].hidden
-    assert cli._removal_version("harumi blueprints") == "1.1.0" != cli._REMOVAL_VERSION
-
-
-def test_once_0_13_removes_blueprints_it_says_0_13_and_what_replaced_it():
+def test_once_1_1_removes_blueprints_it_says_1_1_and_what_replaced_it():
     """The answer a script gets the day after, built for the release that removes it. Tested with the version a
     name is due at, not the default one, or a tombstone quoting the wrong release would pass."""
     message = what_it_says(["blueprints"], release="1.1.0")
 
     assert "`harumi blueprints` was removed in 1.1.0" in message and "harumi examples" in message
     assert "1.0.0" not in message
-
-
-def test_in_the_0_12_tree_blueprints_still_works_rather_than_being_a_tombstone():
-    root = with_the_old_names_gone()
-
-    assert "blueprints" in root.commands
 
 
 def test_every_name_removed_later_is_deprecated_in_an_earlier_release_than_it_is_removed_in():
@@ -366,11 +370,19 @@ def test_the_names_promised_gone_in_the_removal_version_are_gone_by_then():
 
 
 def test_the_tripwire_does_fire_when_the_version_is_reached(monkeypatch):
-    """Today it passes only because 1.0 is before 1.1. The same check, run as if this were the release that
-    removes `blueprints` (the installed version set to 1.1.0), must report it left behind."""
-    monkeypatch.setattr(sys.modules[__name__], "__version__", "1.1.0")
-
-    assert still_here_after("1.1.0") == ["blueprints"]
+    """Nothing is deprecated right now, so prove the check can fail with a stand-in: a hidden command that is due at 1.1.0.
+    Set the installed version to 1.1.0 and it must be reported as left behind; before 1.1.0 it must not."""
+    before = list(cli.app.registered_commands)
+    monkeypatch.setitem(cli._RETIRED, "harumi zzz-old", "harumi new")
+    monkeypatch.setitem(cli._REMOVED_IN, "harumi zzz-old", "1.1.0")
+    cli.app.command("zzz-old", hidden=True)(lambda: None)
+    try:
+        monkeypatch.setattr(sys.modules[__name__], "__version__", "1.0.0")
+        assert still_here_after("1.1.0") == []
+        monkeypatch.setattr(sys.modules[__name__], "__version__", "1.1.0")
+        assert still_here_after("1.1.0") == ["zzz-old"]
+    finally:
+        cli.app.registered_commands[:] = before
 
 
 def release_notes(version: str):
