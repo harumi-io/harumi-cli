@@ -87,7 +87,7 @@ def refresh_session(
     try:
         _raise_for_status(response)
     except ApiError as exc:
-        raise SessionRefreshError(exc.status_code, exc.detail) from exc
+        raise SessionRefreshError(exc.status_code, exc.detail, code=exc.code, retry_after=exc.retry_after) from exc
     user = LoggedUser.model_validate(guard_json(response).json())
     _persist(user)
     return user
