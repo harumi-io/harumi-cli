@@ -3281,6 +3281,10 @@ def projects_trash(
 
     `harumi projects rm` moves a project here. It stays for 7 days and then the server deletes it for good; bring one
     back before then with `harumi projects restore`. The one closest to the end is listed first.
+
+    The time left, and `deleted_for_good_at` in `--json`, assume the default 7-day window: the server sends when a
+    project was moved here but not when it will be deleted, so this is an estimate. A server set to another window
+    deletes sooner or later than shown.
     """
     client = _get_client(api_url=api_url, org=org)
     projects = _trash_nearest_first(client.list_trashed_projects())
@@ -3298,7 +3302,11 @@ def projects_trash(
             _cell(p.id), _cell(p.name), _cell(_ago(p.deleted_at)), f"[red]{left}[/red]" if past else _cell(left)
         )
     console.print(table)
-    console.print("[dim]Bring one back with [bold]harumi projects restore <id or name>[/bold].[/dim]")
+    console.print(
+        f"[dim]Time left assumes the default {_TRASH_DAYS}-day window; the server does not say. "
+        "Bring one back with [bold]harumi projects restore <id or name>[/bold].[/dim]",
+        soft_wrap=True,
+    )
 
 
 def _match_trashed(projects, typed: str):
