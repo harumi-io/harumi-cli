@@ -290,11 +290,13 @@ def active_environment() -> str:
     return _ENV_SCOPE.get() or _ACTIVE_ENV or resolve_environment()
 
 
-def active_platform_url() -> str:
+def active_platform_url(*, use_stored: bool = True) -> str:
     """Harumi web app URL for the active environment (honors the same
-    HARUMI_PLATFORM_URL / env config.json override as Config.load)."""
+    HARUMI_PLATFORM_URL / env config.json override as Config.load).
+
+    `use_stored=False` leaves the saved config.json out, as `Config.load(use_stored=False)` does."""
     name = active_environment()
-    env_config = _read_json(env_config_path(name))
+    env_config = _read_json(env_config_path(name)) if use_stored else {}
     url = (
         os.environ.get("HARUMI_PLATFORM_URL")
         or _str_setting(env_config, "platform_url")
@@ -476,13 +478,20 @@ class Config:
         git_url: Optional[str] = None,
         org_id: Optional[str] = None,
         environment: Optional[str] = None,
+        *,
+        use_stored: bool = True,
     ) -> "Config":
+        """`use_stored=False` ignores what `harumi login` and `harumi org use` saved: no legacy credentials are moved
+        into place and the stored `api_url`, `git_url` and `org_id` are not read, so only what the caller passed and
+        the `HARUMI_*` variables decide the result. The library uses it when it is given a token, because the host a
+        bearer token is sent to must be the caller's choice, not whatever an old `~/.harumi` holds."""
         env_name = resolve_environment(environment)
         set_active_environment(env_name)
-        _migrate_legacy_credentials(env_name)
+        if use_stored:
+            _migrate_legacy_credentials(env_name)
 
         env = ENVIRONMENTS[env_name]
-        env_config = _read_json(env_config_path(env_name))
+        env_config = _read_json(env_config_path(env_name)) if use_stored else {}
 
         resolved_api_url = (
             api_url
@@ -506,7 +515,7 @@ class Config:
         return cls(
             api_url=resolved_api_url.rstrip("/"),
             git_url=resolved_git_url.rstrip("/"),
-            platform_url=active_platform_url(),
+            platform_url=active_platform_url(use_stored=use_stored),
             org_id=resolved_org_id,
             environment=env_name,
         )

@@ -676,6 +676,7 @@ from harumi.config import ProjectBinding
 
 binding = ProjectBinding.load()        # reads .harumi/config.json
 client = Client()                      # loads ~/.harumi/credentials.json
+# In CI: client = Client(token=os.environ["HARUMI_TOKEN"]) uses that bearer token and nothing stored (see below)
 
 # Queue a git-ref run
 response = client.execute_project(
@@ -739,5 +740,7 @@ links = client.list_share_links(binding.project_id)
 project = client.create_project("New Project")  # project.repo is None if unprovisioned
 ```
 
-`Client(api_url=..., git_url=..., org_id=...)` accepts the same overrides as the CLI flags. Requires the user to have run `harumi login` at least once.
+**`Client(token=...)`** takes a bearer token you already have, for a pipeline with no `harumi login`. It is sent as given. The stored login is not used and neither are the stored settings (a host or organization saved by `harumi login`/`org use` does not apply, so the token only goes where the `Client`'s arguments or the `HARUMI_API_URL`/`HARUMI_ORG` variables say); nothing is saved, and the token is hidden from `repr` and from errors. An empty string is refused, so an unset environment variable cannot fall back to a stored login without a word. There is no session behind it, so a 401 raises `NotAuthenticatedError` at once (no refresh, no retry), and `login`/`logout` raise `HarumiError`. **Harumi does not issue long-lived tokens yet** (harumi-cli#124): a session's access token lasts about an hour. **The library is not a stability promise**: methods, models and fields can change in any release; prefer the CLI's `--json` output for anything a script depends on.
+
+`Client(api_url=..., git_url=..., org_id=...)` accepts the same overrides as the CLI flags. Requires the user to have run `harumi login` at least once, unless you pass `token=` (above).
 

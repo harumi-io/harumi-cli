@@ -5,6 +5,7 @@
 ### New
 
 - `harumi projects trash` lists the projects in the Trash and how long each has left, nearest deletion first (`--json` too), and `harumi projects restore` brings one back by id, the start of an id or its name. `projects rm` used to end by sending you to the web app's Trash page because the CLI could not restore. Restoring re-registers the project's schedules; its share links were removed when it was deleted and are not brought back.
+- `Client(token=...)` (the Python library) takes a bearer token, so a pipeline can use it without `harumi login`: it is sent as given, the stored login and settings are not used (so a saved host cannot redirect it), nothing is stored, and it is hidden from `repr` and errors. Harumi does not issue long-lived tokens yet, so a session's token, which lasts about an hour, is what there is today. The README now says plainly that the library is not a stability promise.
 - A command that needs a project and has none (no `--project`, and the folder is not bound to one) now offers the same arrow-key list of your projects that `clone` and `link` have, instead of stopping with "Provide --project or run from a directory bound to a project". This covers `runs`, `tags`, `compare`, `check`, `files`, `share`, `datasources`, `schedules`, `secrets`, `memories` and `dashboard validate`. Without a terminal nothing changes: same error, no request.
 - `harumi start` asks "What do you have?" with the arrow menu instead of a typed 1, 2 or 3.
 
