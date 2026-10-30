@@ -3256,6 +3256,9 @@ def run(
     as_json: bool = typer.Option(
         False, "--json", help="Print the result as JSON on stdout (progress goes to stderr). Exits 1 if a watched run fails."
     ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Do not list the uploaded files the run will find at inputs/ before it starts."
+    ),
     output_dir: Optional[Path] = typer.Option(
         None,
         "--output-dir",
@@ -3350,6 +3353,9 @@ def run(
             run_branch = scratch_branch
             run_commit = None
 
+    if not quiet:
+        _print_run_inputs(client, project_id)
+
     try:
         try:
             response = client.execute_project(
@@ -3422,6 +3428,32 @@ def run(
 # manifest, a missing repo, a conflict) rather than about you: `harumi check` says why.
 _RUN_REJECTED = {400, 404, 409, 422}
 _STDERR_SHOWN = 20  # lines of a failed run's stderr shown before pointing at `runs get`
+
+
+_INPUTS_SHOWN = 10  # uploaded files listed before a run; the rest are one line and `files ls`
+
+
+def _print_run_inputs(client: Client, project_id: str) -> None:
+    """Say which uploaded files the run is about to find at `inputs/`, newest first.
+
+    They stay in storage and appear in every later run until someone runs `files rm`, so a forgotten upload can quietly
+    change what the code does. This is the same data `files ls` shows. It is a courtesy: if the listing fails for any
+    reason the run goes ahead without it, since a hiccup in storage must never stop someone starting a job."""
+    try:
+        listing = client.list_project_files(project_id)
+    except Exception:  # noqa: BLE001 - see the docstring
+        return
+    files = sorted(listing.files, key=lambda x: x.last_modified or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    if not files:
+        console.print("[dim]Inputs: no uploaded files, so the run reads only your code at inputs/.[/dim]")
+        return
+    at_least = "at least " if listing.is_truncated else ""
+    console.print(f"Inputs at [bold]inputs/[/bold] ({at_least}{len(files)}):")
+    for f in files[:_INPUTS_SHOWN]:
+        age = _ago(f.last_modified)
+        console.print(f"  {escape(_printable(f.name))}  [dim]{_format_bytes(f.size)}" + (f"  uploaded {age}" if age else "") + "[/dim]", soft_wrap=True)
+    if len(files) > _INPUTS_SHOWN:
+        console.print(f"  [dim]and {len(files) - _INPUTS_SHOWN} more: [bold]harumi files ls[/bold][/dim]")
 
 
 def _running_line(project_id: str, branch: Optional[str], commit: Optional[str], *, tag: Optional[str] = None) -> str:

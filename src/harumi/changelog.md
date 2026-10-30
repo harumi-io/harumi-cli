@@ -4,6 +4,7 @@
 
 ### New
 
+- `harumi run` lists the files from `harumi files put` that the run will find at `inputs/` before it starts: name, size and how long ago, newest first, or a line saying there are none. They stay in storage until `files rm`, so a forgotten upload used to change what the code did without a word. `--quiet`/`-q` hides the list, and if listing them fails the run starts anyway. (`runs get` showing the files a past run used needs harumi-api to return them first: harumi-api#647.)
 - A command that needs a project and has none (no `--project`, and the folder is not bound to one) now offers the same arrow-key list of your projects that `clone` and `link` have, instead of stopping with "Provide --project or run from a directory bound to a project". This covers `runs`, `tags`, `compare`, `check`, `files`, `share`, `datasources`, `schedules`, `secrets`, `memories` and `dashboard validate`. Without a terminal nothing changes: same error, no request.
 - `harumi start` asks "What do you have?" with the arrow menu instead of a typed 1, 2 or 3.
 

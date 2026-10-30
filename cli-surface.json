@@ -2966,6 +2966,19 @@
         },
         {
           "opts": [
+            "--quiet",
+            "-q"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Do not list the uploaded files the run will find at inputs/ before it starts."
+        },
+        {
+          "opts": [
             "--api-url"
           ],
           "secondary_opts": [],
