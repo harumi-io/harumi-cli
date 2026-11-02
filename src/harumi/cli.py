@@ -6355,8 +6355,11 @@ def org_invite(
     role = _check_org_role(role)
     client = _get_client(api_url=api_url)
     org_id, _ = _org_choice(client, organization, "invite someone to")
-    member = client.invite_organization_member(org_id, email, role)
-    console.print(f"[bold green]Invited[/bold green] {escape(email)} as [bold]{member.role}[/bold].")
+    client.invite_organization_member(org_id, email, role)
+    console.print(
+        f"[bold green]Invited[/bold green] {escape(email)} as [bold]{role}[/bold]. "
+        "[dim]They get an email to join, and can create an account first if they need one.[/dim]"
+    )
 
 
 @org_app.command("role")

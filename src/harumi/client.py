@@ -968,15 +968,17 @@ class Client:
         response = self.api.request("GET", f"/users/organizations/{organization_id}/users")
         return [OrganizationMember.model_validate(m) for m in response.json()]
 
-    def invite_organization_member(
-        self, organization_id: str, email: str, role: str
-    ) -> OrganizationMember:
-        response = self.api.request(
+    def invite_organization_member(self, organization_id: str, email: str, role: str) -> None:
+        """Invite an email, whether or not it has an account.
+
+        The API answers 202 with an empty body on purpose: the answer never says
+        whether the address has an account, so there is nothing to parse.
+        """
+        self.api.request(
             "POST",
             f"/users/organizations/{organization_id}/users",
             json={"email": email, "role": role},
         )
-        return OrganizationMember.model_validate(response.json())
 
     def update_organization_member_role(
         self, organization_id: str, user_id: str, role: str

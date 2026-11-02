@@ -73,7 +73,8 @@ class Api:
         if p.endswith("/users") and "/organizations/" in p and m == "GET":
             return httpx.Response(200, json=self.members)
         if p.endswith("/users") and m == "POST":
-            return httpx.Response(200, json={"user_id": U3, "role": body["role"], "email": body["email"], "pending": True})
+            # Always 202 with nothing to read: the answer never says whether the email has an account.
+            return httpx.Response(202)
         if "/users/" in p.split("/organizations/")[-1]:
             return httpx.Response(204) if m == "DELETE" else httpx.Response(200, json={**self.members[1], **body})
         if "/organizations/" in p and m in ("PATCH",):
@@ -223,6 +224,15 @@ def test_a_mistyped_role_gets_a_suggestion_before_any_request(api):
     result = runner.invoke(cli.app, ["org", "invite", "zeta", "--email", "d@example.com", "--role", "admn"])
 
     assert result.exit_code == 1 and "Did you mean admin" in plain(result.output) and api.sent == []
+
+
+def test_inviting_an_email_confirms_it_without_reading_a_reply(api):
+    result = runner.invoke(cli.app, ["org", "invite", "zeta", "--email", "new@example.com", "--role", "viewer"])
+
+    out = plain(result.output)
+    assert result.exit_code == 0 and "Invited new@example.com as viewer" in out and "create an account" in out
+    assert api.calls[-1] == f"POST /api/users/organizations/{O3}/users"
+    assert api.sent[-1] == {"email": "new@example.com", "role": "viewer"}
 
 
 def test_a_role_in_the_wrong_case_is_sent_lower_cased(api):
