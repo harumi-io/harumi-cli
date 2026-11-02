@@ -260,6 +260,8 @@ harumi org members [ORG]                # defaults to the workspace you are in
 harumi org invite <ORG> --email a@b.com --role member   # admin | member | viewer; owner is refused
 harumi org role <ORG> [MEMBER] --role admin             # MEMBER is an email or the start of an id
 harumi org rm-member <ORG> [MEMBER]
+harumi org leave [ORG]                 # not for an owner: transfer ownership in the web app first, or `org rm`
+harumi org invitations                 # who invited you; `accept` / `decline` <ORG> answer one
 harumi org use <ORG>                   # a name or the start of an id; persists the org sent as X-Organization (checked first)
 harumi org use --personal              # back to the personal workspace (no argument at a terminal: a menu)
 

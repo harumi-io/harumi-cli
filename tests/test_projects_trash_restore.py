@@ -166,7 +166,7 @@ def test_a_project_with_no_deletion_time_sorts_last_and_does_not_break_the_list(
 
 @pytest.mark.parametrize("stamp", ["2026-10-30T10:00:00", "2026-10-30T10:00:00Z", "2026-10-30T10:00:00+00:00", "2026-10-30T06:00:00-04:00"])
 def test_json_dates_are_always_utc_with_a_z(api, no_terminal, stamp):
-    """The bot's finding: a time with no offset came out zone-less. All four spellings are the same instant."""
+    """A time with no offset is UTC, so it is written with a Z like the rest. All four spellings are the same instant."""
     api.trash = [{**row("p-1", "One", 1), "deleted_at": stamp}]
 
     data = json.loads(runner.invoke(cli.app, ["projects", "trash", "--json"]).stdout)
@@ -227,8 +227,9 @@ def test_two_matches_are_not_guessed_between_and_both_are_named(api, no_terminal
     assert "p-aaa1" in out and "Same" in out and "p-aaa2" in out and "Other" in out, "saves a round trip to find which"
 
 
-def test_an_exact_name_beats_the_start_of_another_projects_id(api, no_terminal):
-    """The bot noted a name is matched before an id prefix. That is deliberate: what you type in full is what you mean."""
+def test_a_whole_id_beats_another_projects_name_that_looks_like_it(api, no_terminal):
+    """Typing a whole id means that project, even when another project is named exactly that. (A name is otherwise
+    matched before the start of an id: what you type in full is what you mean.)"""
     api.trash = [row("p-old", "p-new", 1), row("p-new", "Routing", 2)]
 
     runner.invoke(cli.app, ["projects", "restore", "p-new"])
@@ -312,3 +313,47 @@ def test_the_help_lists_both():
     out = runner.invoke(cli.app, ["projects", "--help"]).output
 
     assert "trash" in out and "restore" in out
+
+
+# -- the 7 days is the default, not something the server told us -----------------------------------------------------
+#
+# harumi-api's window is a setting (`project_trash_retention_days`, default 7) and the trash response carries only
+# `deleted_at`, so the CLI's "time left" and `deleted_for_good_at` are an assumption.
+# Until the API sends the deadline (harumi-io/harumi-api#654) every place that shows it says so.
+
+
+def test_the_table_says_the_time_left_assumes_the_default_window(api, no_terminal):
+    out = said(runner.invoke(cli.app, ["projects", "trash"]))
+
+    assert "assumes the default 7-day window" in out and "the server does not say" in out
+
+
+def test_the_help_says_the_time_left_assumes_the_default_window(no_terminal):
+    out = said(runner.invoke(cli.app, ["projects", "trash", "--help"]))  # whitespace-normalised: help wraps at the width
+
+    assert "assume the default 7-day window" in out, "the whole phrase, not a '7' and a 'default' that could be anywhere"
+    assert "deleted_for_good_at" in out and "estimate" in out
+
+
+def test_an_empty_trash_does_not_add_the_note(api, no_terminal):
+    api.trash = []
+
+    out = said(runner.invoke(cli.app, ["projects", "trash"]))
+
+    assert "default" not in out, "a note about a figure nobody is shown"
+
+
+def test_json_is_still_just_the_data_so_a_script_can_parse_it(api, no_terminal):
+    """The note belongs in the help and the docs, not in the document: stdout stays one JSON array."""
+    result = runner.invoke(cli.app, ["projects", "trash", "--json"])
+
+    assert isinstance(json.loads(result.stdout), list) and "default" not in result.stdout
+
+
+def test_the_skill_reference_says_the_deadline_assumes_the_default_window():
+    from pathlib import Path
+
+    text = (Path(__file__).resolve().parents[1] / ".agents/skills/harumi-cli/references/commands.md").read_text(encoding="utf-8")
+    section = text[text.index("- **`trash`**") :].split("\n")[0]
+
+    assert "deleted_for_good_at" in section and "default" in section and "project_trash_retention_days" in section
