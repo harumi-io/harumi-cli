@@ -4,7 +4,7 @@
 
 ### New
 
-- `harumi projects trash` lists the projects in the Trash and how long each has left, nearest deletion first (`--json` too), and `harumi projects restore` brings one back by id, the start of an id or its name. `projects rm` used to end by sending you to the web app's Trash page because the CLI could not restore. Restoring re-registers the project's schedules; its share links were removed when it was deleted and are not brought back.
+- `harumi projects trash` lists the projects in the Trash and how long each has left, nearest deletion first (`--json` too), and `harumi projects restore` brings one back by id, the start of an id or its name. `projects rm` used to end by sending you to the web app's Trash page because the CLI could not restore. The time left (and `deleted_for_good_at` in `--json`) assumes the default 7-day window, because the server does not say when a project will be deleted: on a server set to another window it is an estimate, and the table says so. Restoring re-registers the project's schedules; its share links were removed when it was deleted and are not brought back.
 - A command that needs a project and has none (no `--project`, and the folder is not bound to one) now offers the same arrow-key list of your projects that `clone` and `link` have, instead of stopping with "Provide --project or run from a directory bound to a project". This covers `runs`, `tags`, `compare`, `check`, `files`, `share`, `datasources`, `schedules`, `secrets`, `memories` and `dashboard validate`. Without a terminal nothing changes: same error, no request.
 - `harumi start` asks "What do you have?" with the arrow menu instead of a typed 1, 2 or 3.
 
