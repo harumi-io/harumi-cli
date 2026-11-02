@@ -22,7 +22,7 @@ The staging endpoints (`api.dev.harumi.io`, `git.dev.harumi.io`) are internal AL
 
 ## The always-bound-repo invariant
 
-Every `harumi run` (and every command that accepts `--project`) requires either an explicit `--project <ID>`, or the working directory (or a parent) to be bound to a Harumi project — which `harumi new`/`harumi import`/`harumi clone`/`harumi link` all do. Without either, the command exits with a clear error pointing at those verbs.
+Every `harumi run` (and every command that accepts `--project`) requires either an explicit `--project <ID>`, or the working directory (or a parent) to be bound to a Harumi project — which `harumi new`/`harumi import`/`harumi clone`/`harumi link` all do. Without either, a person at a terminal gets an arrow-key list of their projects; anything without a terminal (a script, CI, an agent) exits with a clear error pointing at those verbs, so always pass `--project` or work inside a bound folder.
 
 ## Onboarding — three journeys, three commands
 
@@ -260,6 +260,8 @@ harumi org members [ORG]                # defaults to the workspace you are in
 harumi org invite <ORG> --email a@b.com --role member   # admin | member | viewer; owner is refused
 harumi org role <ORG> [MEMBER] --role admin             # MEMBER is an email or the start of an id
 harumi org rm-member <ORG> [MEMBER]
+harumi org leave [ORG]                 # not for an owner: transfer ownership in the web app first, or `org rm`
+harumi org invitations                 # who invited you; `accept` / `decline` <ORG> answer one
 harumi org use <ORG>                   # a name or the start of an id; persists the org sent as X-Organization (checked first)
 harumi org use --personal              # back to the personal workspace (no argument at a terminal: a menu)
 

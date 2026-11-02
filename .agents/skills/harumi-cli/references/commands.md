@@ -128,7 +128,7 @@ harumi specs [--json] [--api-url URL] [--org ORG]
 harumi examples [--json] [--api-url URL] [--org ORG]
 ```
 
-`--json` is an array of those three fields. Lists example projects (`slug`, `name`, `description`): finished Harumi projects you can start a copy of. Pass an example's `slug` as `new --example`. They were called blueprints until 1.0.0 and the API still calls them that (`GET /blueprints`), so that is what is asked for. `harumi blueprints` and `new --blueprint` still work, hidden, with a `deprecated:` line on stderr, and are removed in 1.1.0.
+`--json` is an array of those three fields. Lists example projects (`slug`, `name`, `description`): finished Harumi projects you can start a copy of. Pass an example's `slug` as `new --example`. They were called blueprints until 1.0.0 and the API still calls them that (`GET /blueprints`), so that is what is asked for. `harumi blueprints` and `new --blueprint` were removed in 1.1.0: the command exits 2 and the option exits 1, each saying to use `examples` / `--example`, and neither sends a request.
 
 ## `projects`
 
@@ -137,6 +137,8 @@ harumi projects list [--limit N] [--api-url URL] [--org ORG]
 harumi projects get [PROJECT_ID] [--api-url URL] [--org ORG]
 harumi projects rename [PROJECT_ID] [NAME] [--api-url URL] [--org ORG]
 harumi projects rm [PROJECT_ID] [--yes] [--api-url URL] [--org ORG]
+harumi projects trash [--json] [--api-url URL] [--org ORG]
+harumi projects restore [PROJECT] [--api-url URL] [--org ORG]
 ```
 
 With the id omitted, `get`, `rename` and `rm` open the project picker (most recently updated first); `rename` also asks for the new name, offering the current one; `rm` still requires typing the project's name afterwards, because choosing a row is not consent to delete it. With no terminal they fail listing the choices. Creating a project is `harumi new` (`--no-clone` to only create it; see [new](#new)).
@@ -144,7 +146,9 @@ With the id omitted, `get`, `rename` and `rm` open the project picker (most rece
 - **`list`**: the **id is always whole** (it goes to `get`, `clone`, `link` and `--project`). A table needs about 87 columns for that, so on a narrower terminal each project is two lines instead, `<id>  <name>` then `updated: ... kernel_spec: ... role: ...`; `org list` does the same. Nothing is cut at any width, and `--json` is the form for a script. `GET /projects`, following pages (200 at a time) until the server's `total_count` is reached, so accounts with hundreds of projects see all of them. Sorted **most recently updated first** (the server's own order is creation date; the CLI re-sorts). Table of `id`, `name`, `updated` ("3 days ago"), `workspace` (only when the projects span more than one workspace), `kernel_spec`, `role`. `--limit N` shows only the first N; any time rows are left out it says "Showing N of M projects". The project pickers (`clone` and others) use the same order and show age and workspace beside each name.
 - **`get`**: `GET /projects/{id}` → detail view.
 - **`rename`**: `PUT /projects/{id}` with `{name}`.
-- **`rm`**: `DELETE /projects/{id}`, which **moves the project to the Trash; it is not erased**. It stops at once (schedules cancelled, a deployed app shut down) and its share links are removed for good: restoring does not bring them back. It can be restored for **7 days** (harumi-api's `project_trash_retention_days`, default 7), after which a daily sweep deletes it permanently. **The CLI has no restore command**: restore from the Trash page in the web app (or `POST /projects/{id}/restore`). So when asked to undo a `projects rm`, do not say it is gone; point at the Trash and the 7-day window. It shows what will stop, then prompts you to type the exact project name unless `--yes`. With `--yes` the project id is required (no picker), so a slip in a list cannot trash a project. Contrast `org rm`, which really is permanent.
+- **`rm`**: `DELETE /projects/{id}`, which **moves the project to the Trash; it is not erased**. It stops at once (schedules cancelled, a deployed app shut down) and its share links are removed for good: restoring does not bring them back. It can be restored for **7 days** (harumi-api's `project_trash_retention_days`, default 7), after which a daily sweep deletes it permanently. Bring it back with `harumi projects restore` (below). When asked to undo a `projects rm`, do not say it is gone; point at `projects trash` and the 7-day window. It shows what will stop, then prompts you to type the exact project name unless `--yes`. With `--yes` the project id is required (no picker), so a slip in a list cannot trash a project. Contrast `org rm`, which really is permanent.
+- **`trash`**: `GET /projects/trash`. A table of `id` (whole), `name`, when it was moved to the Trash and the time left of the 7 days, **nearest deletion first**; one past the window says "about to be deleted for good" instead of promising a restore. `--json` is an array of `{id, name, deleted_at, deleted_for_good_at}` (`deleted_for_good_at` is `deleted_at` + 7 days, an **estimate**: the window is harumi-api's `project_trash_retention_days` setting, default 7, and the server sends no deadline, so on a server set otherwise the time left and this field are wrong; do not treat it as authoritative until harumi-api#654), and `[]` for an empty Trash.
+- **`restore [PROJECT]`**: `POST /projects/{id}/restore`. `PROJECT` is the id, the start of it, or the name; two matches are refused, not guessed between. With none given a terminal picks from the Trash (nearest deletion first); without a terminal it fails listing the choices. **It never asks first**: it undoes a delete. It re-registers the project's schedules; **share links are not brought back** (`projects rm` removed them for good) and a deployed app stays shut down, and the command says so.
 
 ## Onboarding: `new` / `import` / `clone` / `link` / `start`
 
@@ -234,7 +238,7 @@ Interactive entry point for a confused or new user. It checks that you are logge
 
 ```
 harumi run [--branch B | --tag T] [--commit SHA] [--command C] [--kernel K]
-           [--watch] [--json]
+           [--watch] [--json] [--quiet]
            [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
@@ -249,6 +253,9 @@ Requires the directory (or a parent) to be bound — via `harumi new`, `harumi i
 | `--kernel, -k` | Override the kernel spec (e.g. `or_python_small`, `gurobi_python_medium`). |
 | `--watch, -w` | Block until the run reaches a terminal status. |
 | `--json` | Print the result as one JSON document on stdout; progress and the failure summary go to stderr. See [Scripts and CI](#scripts-and-ci---json). |
+| `--quiet, -q` | Do not list the uploaded files the run will find at `inputs/` (below). |
+
+**Before it starts, `run` lists the files from `harumi files put` that the run will find at `inputs/`**, newest first (name, size, how long ago), or says there are none. They stay in storage and appear in every later run until `harumi files rm`, so a forgotten upload can quietly change what the code does. At most 10 are listed, then "and N more: harumi files ls". It is a courtesy: if listing them fails, the run starts anyway. With `--json` the list goes to stderr, so stdout stays one document.
 
 `run` prints `Running project <id> on branch <ref>` (or `on tag <name>`) and then `Queued run <run-id>` (the run id is the UUID on that line; the internal execution-log id is no longer printed). With `--watch`: at a terminal one live line shows the status and the elapsed time; piped or logged it prints one line each time the status *changes*. Ctrl-C stops watching, never the run: it exits 130 and prints how to follow or cancel it. A succeeded run ends with `Run completed in 1m 12s.` and `harumi runs download <run-id>`; a failed, cancelled or timed-out run exits 1 and prints the cause first (error, exit code, the last 20 lines of stderr and how many were left out) and `harumi runs get <run-id>` for everything. If the server refuses the run for a reason about the project (HTTP 400, 404, 409 or 422), the message ends with `Run harumi check`. (`--output-dir` is deprecated: it still downloads, with a warning.)
 
@@ -539,6 +546,10 @@ harumi org members [ORG] [--api-url URL]
 harumi org invite ORG --email EMAIL [--role ROLE] [--api-url URL]
 harumi org role ORG [MEMBER] --role ROLE [--api-url URL]
 harumi org rm-member ORG [MEMBER] [--yes] [--api-url URL]
+harumi org leave [ORG] [--yes] [--api-url URL]
+harumi org invitations [--json] [--api-url URL]
+harumi org invitations accept [ORG] [--api-url URL]
+harumi org invitations decline [ORG] [--yes] [--api-url URL]
 harumi org use [ORG | --personal]
 ```
 
@@ -554,6 +565,8 @@ harumi org use [ORG | --personal]
 - **`invite`**: `POST /users/organizations/{id}/users` with `{email, role}`.
 - **`role`**: `PUT /users/organizations/{id}/users/{user_id}` with `{role}`.
 - **`rm-member`**: `DELETE /users/organizations/{id}/users/{user_id}`, prompting for confirmation unless `--yes`.
+- **`leave`**: `DELETE /users/organizations/{id}/users/me`, prompting unless `--yes`. `ORG` is a name or the start of an id; **with no name a terminal picks, and `--yes` with no name is refused**, and it never defaults to the workspace you are in (that would leave whatever is selected). **The owner cannot leave**: it is refused up front, with no question asked, and points at transferring ownership in the web app (it needs a second-factor code, so it is not in the CLI) or `org rm`. Leaving the organization you were working in puts you back in your personal workspace.
+- **`invitations`**: `GET /users/invitations`: a table of the first 8 characters of the organization's id, its name and the role you were invited as. `--json` is an array of `{id, name, role}` (`id` is the whole organization id). `accept` is `POST /users/invitations/{id}/accept` and asks nothing; `decline` is `POST .../decline` and asks first (it cannot be undone: they have to invite you again), taking `--yes`. Both take the organization's name or the start of its id; with none, a terminal picks, and without a terminal they exit 1 listing the invitations. After accepting, work in it with `harumi org use <name>`.
 - **`use`**: `ORG` is checked against your organizations first (name or start of an id, saved as the real id), so a name or an organization you do not belong to is refused instead of being saved. With no argument opens a menu of your organizations plus "Personal workspace" (at a terminal; otherwise it lists the choices and fails). `--personal` clears the saved org. Persists `org_id` in `~/.harumi/config.json` (per environment); every later request sends it as `X-Organization`. The header scopes the *read* endpoints (`projects list`); creation reads the workspace from the request body, so `new` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway. It needs the network to check the choice (and a login); if harumi-api cannot be reached at all, a full id is still saved as given, with a note. Replaces `config set-org`.
 
 ## Scripts and CI (`--json`)
@@ -593,7 +606,7 @@ Every command that deletes or removes something follows one rule, from `projects
 | At a terminal, no `--yes` | Asks `[y/N]`. Enter is **No**. Declining prints `Aborted.` and **exits 1**, so `harumi org rm X && deploy` stops. |
 | No terminal (a script, CI, an agent, a pipe), no `--yes` | **Refuses at once**: `Cannot ask here: no interactive terminal. Run it again with --yes to go ahead.` and exits 1. It never prints a prompt into a log and waits, and a `y` piped to stdin is **not** consent (it was not given to this question). |
 
-The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `tags rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 1.0.0.
+The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `tags rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`, `org leave`, `org invitations decline`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 1.0.0.
 
 - **The permanent ones that take other things with them ask you to type the name** instead of `y`: `projects rm` (the project name) and `org rm` (the organization name, exactly: case and spaces count; Enter is a no). An agent passes `--yes` and still must name the project or organization (`--yes` with no name is refused).
 - **The question says which one**, not a UUID: a schedule by its cron, branch and command, a memory by its text, a file by its name and size, a share link by its label.
@@ -606,7 +619,7 @@ The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share upda
 - **Asking for help:** `-h` and `--help` work on every command and group (`harumi projects rm -h`); `harumi help [COMMAND]` is the same. `-v` is `--version`.
 - **The verbs** repeat across groups: `list`, `get`, `add`, `update`, `rm`. Four groups are irregular and are not renamed, because a rename needs a deprecation window: `files` uses `ls`, `put`, `get`, `rm`; `org` uses `create`; `memories` uses `edit`; `secrets` and `profile` use `set`.
 - **A wrong verb is answered, never guessed:** `harumi secrets create` exits 2 with `No such command 'create'. Did you mean 'set'? Commands: list, set, rm.`; `org add` names both `create` (a new organization) and `invite` (a person); `harumi version` points at `--version`. It is a hint, not an alias, so nothing runs. A misspelling (`harumi shar`) gets `Did you mean 'share'?` on every supported Typer version. Hidden deprecated names (`projects delete`, ...) keep working and are not listed.
-- **Removed names:** the 28 names deprecated in 0.11 (`push`, `repo ...`, `outputs`, the `remove`/`delete` verbs, ...) were removed in 1.0.0. Running one exits 2 with the hint (`` `harumi push` was removed in 1.0.0. Use: harumi import ``) instead of a bare "No such command", and sends nothing to the API; a name that never existed gets no such history. `run --output-dir` exits 1 with the same kind of hint, before anything runs. Still working, with a `deprecated:` line on stderr and removed in 1.1.0: `harumi blueprints` and `harumi new --blueprint` (use `examples` and `--example`).
+- **Removed names:** the 28 names deprecated in 0.11 (`push`, `repo ...`, `outputs`, the `remove`/`delete` verbs, ...) were removed in 1.0.0. Running one exits 2 with the hint (`` `harumi push` was removed in 1.0.0. Use: harumi import ``) instead of a bare "No such command", and sends nothing to the API; a name that never existed gets no such history. `run --output-dir` exits 1 with the same kind of hint, before anything runs. `harumi blueprints` and `harumi new --blueprint` followed in 1.1.0 (use `examples` and `--example`). Nothing is deprecated-but-working at the moment.
 - **The help is grouped** into *Get started*, *Run and results*, *Project*, *Account and team* and *Help and updates*. `--api-url`, `--git-url` and `--org` (which point a command at another server or organization) are listed under an **Advanced** heading in every command's help; they are all still there, and still in the contract, only apart. (`usage --org` is the exception: it is what the command is about.)
 - **Examples:** the commands people reach for first (about 30 of them, from `login` to `projects rm`) end their `--help` with an `Examples:` block. Each line is parsed against the real command in the test suite, so none can name a flag that does not exist. Words in capitals (`PROJECT_ID`, `SLUG`) are for you to fill in. A secret is never in an example: those are prompted for.
 - **Completion** (`harumi --install-completion`, once per shell): commands, subcommands, flags, and the fixed-list values `--type` (`postgresql`, `mysql`, `sqlserver`, `oracle`), `--role` and `--mode`. Ids and names are not completed: that would need a login and a request on every TAB.
@@ -648,7 +661,7 @@ Within the active environment, URL/org overrides (highest first): **CLI flags > 
 | `harumi-api returned HTTP 429: ... Try again in 37 seconds.` | A rate limit; the wait is the server's `Retry-After` | Wait that long. Without a usable `Retry-After` it just says so |
 | `Connection trouble. The run keeps going; trying again...` (in `run --watch`) | A poll for the run's status failed (no answer, or a 502/503/504) | Nothing: up to 4 failures in a row are ridden out. After that: `Lost touch with harumi-api ... The run is probably still going` and exit 1; `--json` reports `status: "unknown"`, not a failure |
 | `harumi-api returned HTTP 422: ... Signups not allowed for otp` | New email, no account | Re-run `harumi login --signup` |
-| `Provide --project or run from a directory with a .harumi binding` | No `--project` and `.harumi/config.json` missing in cwd + parents | `harumi new`/`harumi clone <ID>` (nothing/existing project) or `harumi import` (existing folder) or `harumi link --project <ID>` (already checked out), or pass `--project` |
+| `Provide --project or run from a directory bound to a project` | No `--project` and `.harumi/config.json` missing in cwd + parents, and no terminal to ask on (at a terminal the CLI shows an arrow-key list of your projects instead; an agent has no terminal, so it must pass `--project`) | `harumi new`/`harumi clone <ID>` (nothing/existing project) or `harumi import` (existing folder) or `harumi link --project <ID>` (already checked out), or pass `--project` |
 | `No Gitea token found. Run harumi login` | `git_token` absent in credentials | `harumi login` again |
 | `git push failed: ...` | Network (on staging, the VPN not connected) or bad credentials | Check the network (and VPN on staging); re-run `harumi login` to refresh token |
 | `git not found` | git missing from PATH | Install git |
@@ -672,6 +685,7 @@ from harumi.config import ProjectBinding
 
 binding = ProjectBinding.load()        # reads .harumi/config.json
 client = Client()                      # loads ~/.harumi/credentials.json
+# In CI: client = Client(token=os.environ["HARUMI_TOKEN"]) uses that bearer token and nothing stored (see below)
 
 # Queue a git-ref run
 response = client.execute_project(
@@ -735,5 +749,7 @@ links = client.list_share_links(binding.project_id)
 project = client.create_project("New Project")  # project.repo is None if unprovisioned
 ```
 
-`Client(api_url=..., git_url=..., org_id=...)` accepts the same overrides as the CLI flags. Requires the user to have run `harumi login` at least once.
+**`Client(token=...)`** takes a bearer token you already have, for a pipeline with no `harumi login`. It is sent as given. The stored login is not used and neither are the stored settings (a host or organization saved by `harumi login`/`org use` does not apply, so the token only goes where the `Client`'s arguments or the `HARUMI_API_URL`/`HARUMI_ORG` variables say); nothing is saved, and the token is hidden from `repr` and from errors. An empty string is refused, so an unset environment variable cannot fall back to a stored login without a word. There is no session behind it, so a 401 raises `NotAuthenticatedError` at once (no refresh, no retry), and `login`/`logout` raise `HarumiError`. **Harumi does not issue long-lived tokens yet** (harumi-cli#124): a session's access token lasts about an hour. **The library is not a stability promise**: methods, models and fields can change in any release; prefer the CLI's `--json` output for anything a script depends on.
+
+`Client(api_url=..., git_url=..., org_id=...)` accepts the same overrides as the CLI flags. Requires the user to have run `harumi login` at least once, unless you pass `token=` (above).
 

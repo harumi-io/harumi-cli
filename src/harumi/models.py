@@ -72,6 +72,9 @@ class Project(BaseModel):
     role_name: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Set when the project is in the Trash (harumi-api's projects/schemas.py:Project.deleted_at): the moment it was
+    # removed. The server deletes it for good a fixed time later.
+    deleted_at: Optional[datetime] = None
 
 
 class InteractiveResult(BaseModel):
@@ -514,6 +517,16 @@ class Organization(BaseModel):
     business_name: str
     role: Optional[str] = None
     role_name: Optional[str] = None
+
+
+class OrganizationInvitation(BaseModel):
+    """One entry from GET /users/invitations: an organization that invited you, and as what."""
+
+    model_config = ConfigDict(extra="allow")
+
+    customer_id: str
+    business_name: str
+    role: str
 
 
 class OrganizationMember(BaseModel):

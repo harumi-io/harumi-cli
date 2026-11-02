@@ -117,7 +117,7 @@ class Api:
 def api(monkeypatch):
     a = Api()
     monkeypatch.setattr(cli, "_get_client", lambda *x, **k: Client(api_url="https://api.harumi.io/api", transport=httpx.MockTransport(a.handler)))
-    monkeypatch.setattr(cli, "_resolve_project", lambda p: p or P)
+    monkeypatch.setattr(cli, "_resolve_project", lambda p, *a, **k: p or P)
     return a
 
 
@@ -174,7 +174,7 @@ def test_the_option_is_documented_in_help(args):
 
 LISTS = [
     (["projects", "list"], "projects"), (["runs", "list"], "runs"), (["share", "list"], "links"), (["datasources", "list"], "datasources"),
-    (["schedules", "list"], "schedules"), (["memories", "list"], "memories"), (["org", "list"], "orgs"), (["specs"], "specs"), (["blueprints"], "blueprints"),
+    (["schedules", "list"], "schedules"), (["memories", "list"], "memories"), (["org", "list"], "orgs"), (["specs"], "specs"), (["examples"], "examples"),
     (["secrets", "list"], "secrets"),
 ]
 

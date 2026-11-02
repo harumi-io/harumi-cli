@@ -307,7 +307,7 @@ def test_json_keeps_the_values_and_the_winner_as_the_api_sent_them(server, no_te
 def test_wrong_arguments_are_reported_before_asking_for_a_project_or_a_login(ids, said, monkeypatch):
     """Outside a project, or logged out, `compare onlyone` used to say so about the arguments straight
     away. Asking for the project first made someone fix that, and only then learn the arguments were wrong."""
-    monkeypatch.setattr(cli, "_resolve_project", lambda p: (_ for _ in ()).throw(AssertionError("asked for a project")))
+    monkeypatch.setattr(cli, "_resolve_project", lambda p, *a, **k: (_ for _ in ()).throw(AssertionError("asked for a project")))
     monkeypatch.setattr(cli, "_get_client", lambda *a, **k: (_ for _ in ()).throw(AssertionError("built a client")))
 
     result = runner.invoke(cli.app, ["compare", *ids])
