@@ -147,7 +147,7 @@ With the id omitted, `get`, `rename` and `rm` open the project picker (most rece
 - **`get`**: `GET /projects/{id}` → detail view.
 - **`rename`**: `PUT /projects/{id}` with `{name}`.
 - **`rm`**: `DELETE /projects/{id}`, which **moves the project to the Trash; it is not erased**. It stops at once (schedules cancelled, a deployed app shut down) and its share links are removed for good: restoring does not bring them back. It can be restored for **7 days** (harumi-api's `project_trash_retention_days`, default 7), after which a daily sweep deletes it permanently. Bring it back with `harumi projects restore` (below). When asked to undo a `projects rm`, do not say it is gone; point at `projects trash` and the 7-day window. It shows what will stop, then prompts you to type the exact project name unless `--yes`. With `--yes` the project id is required (no picker), so a slip in a list cannot trash a project. Contrast `org rm`, which really is permanent.
-- **`trash`**: `GET /projects/trash`. A table of `id` (whole), `name`, when it was moved to the Trash and the time left of the 7 days, **nearest deletion first**; one past the window says "about to be deleted for good" instead of promising a restore. `--json` is an array of `{id, name, deleted_at, deleted_for_good_at}` (the deadline is `deleted_at` + 7 days), and `[]` for an empty Trash.
+- **`trash`**: `GET /projects/trash`. A table of `id` (whole), `name`, when it was moved to the Trash and the time left of the 7 days, **nearest deletion first**; one past the window says "about to be deleted for good" instead of promising a restore. `--json` is an array of `{id, name, deleted_at, deleted_for_good_at}` (`deleted_for_good_at` is `deleted_at` + 7 days, an **estimate**: the window is harumi-api's `project_trash_retention_days` setting, default 7, and the server sends no deadline, so on a server set otherwise the time left and this field are wrong; do not treat it as authoritative until harumi-api#654), and `[]` for an empty Trash.
 - **`restore [PROJECT]`**: `POST /projects/{id}/restore`. `PROJECT` is the id, the start of it, or the name; two matches are refused, not guessed between. With none given a terminal picks from the Trash (nearest deletion first); without a terminal it fails listing the choices. **It never asks first**: it undoes a delete. It re-registers the project's schedules; **share links are not brought back** (`projects rm` removed them for good) and a deployed app stays shut down, and the command says so.
 
 ## Onboarding: `new` / `import` / `clone` / `link` / `start`
@@ -238,7 +238,7 @@ Interactive entry point for a confused or new user. It checks that you are logge
 
 ```
 harumi run [--branch B | --tag T] [--commit SHA] [--command C] [--kernel K]
-           [--watch] [--json]
+           [--watch] [--json] [--quiet]
            [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
@@ -253,6 +253,9 @@ Requires the directory (or a parent) to be bound — via `harumi new`, `harumi i
 | `--kernel, -k` | Override the kernel spec (e.g. `or_python_small`, `gurobi_python_medium`). |
 | `--watch, -w` | Block until the run reaches a terminal status. |
 | `--json` | Print the result as one JSON document on stdout; progress and the failure summary go to stderr. See [Scripts and CI](#scripts-and-ci---json). |
+| `--quiet, -q` | Do not list the uploaded files the run will find at `inputs/` (below). |
+
+**Before it starts, `run` lists the files from `harumi files put` that the run will find at `inputs/`**, newest first (name, size, how long ago), or says there are none. They stay in storage and appear in every later run until `harumi files rm`, so a forgotten upload can quietly change what the code does. At most 10 are listed, then "and N more: harumi files ls". It is a courtesy: if listing them fails, the run starts anyway. With `--json` the list goes to stderr, so stdout stays one document.
 
 `run` prints `Running project <id> on branch <ref>` (or `on tag <name>`) and then `Queued run <run-id>` (the run id is the UUID on that line; the internal execution-log id is no longer printed). With `--watch`: at a terminal one live line shows the status and the elapsed time; piped or logged it prints one line each time the status *changes*. Ctrl-C stops watching, never the run: it exits 130 and prints how to follow or cancel it. A succeeded run ends with `Run completed in 1m 12s.` and `harumi runs download <run-id>`; a failed, cancelled or timed-out run exits 1 and prints the cause first (error, exit code, the last 20 lines of stderr and how many were left out) and `harumi runs get <run-id>` for everything. If the server refuses the run for a reason about the project (HTTP 400, 404, 409 or 422), the message ends with `Run harumi check`. (`--output-dir` is deprecated: it still downloads, with a warning.)
 
@@ -543,6 +546,10 @@ harumi org members [ORG] [--api-url URL]
 harumi org invite ORG --email EMAIL [--role ROLE] [--api-url URL]
 harumi org role ORG [MEMBER] --role ROLE [--api-url URL]
 harumi org rm-member ORG [MEMBER] [--yes] [--api-url URL]
+harumi org leave [ORG] [--yes] [--api-url URL]
+harumi org invitations [--json] [--api-url URL]
+harumi org invitations accept [ORG] [--api-url URL]
+harumi org invitations decline [ORG] [--yes] [--api-url URL]
 harumi org use [ORG | --personal]
 ```
 
@@ -558,6 +565,8 @@ harumi org use [ORG | --personal]
 - **`invite`**: `POST /users/organizations/{id}/users` with `{email, role}`.
 - **`role`**: `PUT /users/organizations/{id}/users/{user_id}` with `{role}`.
 - **`rm-member`**: `DELETE /users/organizations/{id}/users/{user_id}`, prompting for confirmation unless `--yes`.
+- **`leave`**: `DELETE /users/organizations/{id}/users/me`, prompting unless `--yes`. `ORG` is a name or the start of an id; **with no name a terminal picks, and `--yes` with no name is refused**, and it never defaults to the workspace you are in (that would leave whatever is selected). **The owner cannot leave**: it is refused up front, with no question asked, and points at transferring ownership in the web app (it needs a second-factor code, so it is not in the CLI) or `org rm`. Leaving the organization you were working in puts you back in your personal workspace.
+- **`invitations`**: `GET /users/invitations`: a table of the first 8 characters of the organization's id, its name and the role you were invited as. `--json` is an array of `{id, name, role}` (`id` is the whole organization id). `accept` is `POST /users/invitations/{id}/accept` and asks nothing; `decline` is `POST .../decline` and asks first (it cannot be undone: they have to invite you again), taking `--yes`. Both take the organization's name or the start of its id; with none, a terminal picks, and without a terminal they exit 1 listing the invitations. After accepting, work in it with `harumi org use <name>`.
 - **`use`**: `ORG` is checked against your organizations first (name or start of an id, saved as the real id), so a name or an organization you do not belong to is refused instead of being saved. With no argument opens a menu of your organizations plus "Personal workspace" (at a terminal; otherwise it lists the choices and fails). `--personal` clears the saved org. Persists `org_id` in `~/.harumi/config.json` (per environment); every later request sends it as `X-Organization`. The header scopes the *read* endpoints (`projects list`); creation reads the workspace from the request body, so `new` and `import` default `customer_id` to this org — pass `--personal` to create in your personal workspace anyway. It needs the network to check the choice (and a login); if harumi-api cannot be reached at all, a full id is still saved as given, with a note. Replaces `config set-org`.
 
 ## Scripts and CI (`--json`)
@@ -597,7 +606,7 @@ Every command that deletes or removes something follows one rule, from `projects
 | At a terminal, no `--yes` | Asks `[y/N]`. Enter is **No**. Declining prints `Aborted.` and **exits 1**, so `harumi org rm X && deploy` stops. |
 | No terminal (a script, CI, an agent, a pipe), no `--yes` | **Refuses at once**: `Cannot ask here: no interactive terminal. Run it again with --yes to go ahead.` and exits 1. It never prints a prompt into a log and waits, and a `y` piped to stdin is **not** consent (it was not given to this question). |
 
-The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `tags rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 1.0.0.
+The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `tags rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`, `org leave`, `org invitations decline`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 1.0.0.
 
 - **The permanent ones that take other things with them ask you to type the name** instead of `y`: `projects rm` (the project name) and `org rm` (the organization name, exactly: case and spaces count; Enter is a no). An agent passes `--yes` and still must name the project or organization (`--yes` with no name is refused).
 - **The question says which one**, not a UUID: a schedule by its cron, branch and command, a memory by its text, a file by its name and size, a share link by its label.

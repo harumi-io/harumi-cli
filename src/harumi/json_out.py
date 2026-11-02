@@ -56,7 +56,11 @@ def project(p: Any) -> dict:
 
 
 def trashed_project(p: Any, *, days: int) -> dict:
-    """A project in the Trash: when it was removed, and when the server deletes it for good (`days` later)."""
+    """A project in the Trash: when it was removed, and when the server is expected to delete it for good.
+
+    `deleted_for_good_at` is `deleted_at` plus `days`, an ESTIMATE: harumi-api's window is a setting
+    (`project_trash_retention_days`, default 7) and the trash response does not carry the deadline (asked for in
+    harumi-io/harumi-api#654). It becomes exact when the API sends one; the field name stays."""
     record = _pick(p, TRASHED_PROJECT)
     deleted = p.deleted_at
     if deleted is None:
@@ -106,6 +110,10 @@ def secret(s: Any) -> dict:
 
 def organization(o: Any) -> dict:
     return {"id": o.id, "name": o.business_name, "role": o.role_name or o.role}
+
+
+def invitation(i: Any) -> dict:
+    return {"id": i.customer_id, "name": i.business_name, "role": i.role}
 
 
 def member(m: Any) -> dict:

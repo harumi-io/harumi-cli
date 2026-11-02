@@ -10,6 +10,9 @@ on:
       - main
       - dev
   pull_request:
+  # The Release bump workflow starts CI by hand on the commit it pushes to dev (a push made with the default token
+  # starts no workflows), so the promotion PR gets its `test` check.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
