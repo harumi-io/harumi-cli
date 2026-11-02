@@ -238,7 +238,7 @@ Interactive entry point for a confused or new user. It checks that you are logge
 
 ```
 harumi run [--branch B | --tag T] [--commit SHA] [--command C] [--kernel K]
-           [--watch] [--json]
+           [--watch] [--json] [--quiet]
            [--api-url URL] [--git-url URL] [--org ORG]
 ```
 
@@ -253,6 +253,9 @@ Requires the directory (or a parent) to be bound — via `harumi new`, `harumi i
 | `--kernel, -k` | Override the kernel spec (e.g. `or_python_small`, `gurobi_python_medium`). |
 | `--watch, -w` | Block until the run reaches a terminal status. |
 | `--json` | Print the result as one JSON document on stdout; progress and the failure summary go to stderr. See [Scripts and CI](#scripts-and-ci---json). |
+| `--quiet, -q` | Do not list the uploaded files the run will find at `inputs/` (below). |
+
+**Before it starts, `run` lists the files from `harumi files put` that the run will find at `inputs/`**, newest first (name, size, how long ago), or says there are none. They stay in storage and appear in every later run until `harumi files rm`, so a forgotten upload can quietly change what the code does. At most 10 are listed, then "and N more: harumi files ls". It is a courtesy: if listing them fails, the run starts anyway. With `--json` the list goes to stderr, so stdout stays one document.
 
 `run` prints `Running project <id> on branch <ref>` (or `on tag <name>`) and then `Queued run <run-id>` (the run id is the UUID on that line; the internal execution-log id is no longer printed). With `--watch`: at a terminal one live line shows the status and the elapsed time; piped or logged it prints one line each time the status *changes*. Ctrl-C stops watching, never the run: it exits 130 and prints how to follow or cancel it. A succeeded run ends with `Run completed in 1m 12s.` and `harumi runs download <run-id>`; a failed, cancelled or timed-out run exits 1 and prints the cause first (error, exit code, the last 20 lines of stderr and how many were left out) and `harumi runs get <run-id>` for everything. If the server refuses the run for a reason about the project (HTTP 400, 404, 409 or 422), the message ends with `Run harumi check`. (`--output-dir` is deprecated: it still downloads, with a warning.)
 
