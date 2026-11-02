@@ -98,6 +98,9 @@ TIERS: dict[str, tuple[str, str]] = {
     "org invite": (MANUAL, "sends email to a real person"),
     "org rm-member": (MANUAL, "removes a real member's access"),
     "org role": (MANUAL, "changes a real member's permissions"),
+    "org leave": (MANUAL, "removes the signed-in user from a real organization"),
+    "org invitations accept": (MANUAL, "joins a real organization on someone else's invitation"),
+    "org invitations decline": (MANUAL, "turns down a real invitation, which cannot be undone"),
     # -- projects -------------------------------------------------------------
     "projects list": (READ, ""),
     "projects get": (READ, ""),

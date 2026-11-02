@@ -2238,6 +2238,79 @@
       ]
     },
     {
+      "path": "org invitations accept",
+      "help": "Accept an invitation and join the organization.",
+      "params": [
+        {
+          "opts": [
+            "organization"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Organization name, or the start of its id. A terminal picks if omitted."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        }
+      ]
+    },
+    {
+      "path": "org invitations decline",
+      "help": "Decline an invitation.",
+      "params": [
+        {
+          "opts": [
+            "organization"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Organization name, or the start of its id. A terminal picks if omitted."
+        },
+        {
+          "opts": [
+            "--yes",
+            "-y"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Skip the confirmation prompt."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        }
+      ]
+    },
+    {
       "path": "org invite",
       "help": "Invite a member to an organization.",
       "params": [
@@ -2276,6 +2349,49 @@
           "multiple": false,
           "default": "member",
           "help": "admin | member | viewer"
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        }
+      ]
+    },
+    {
+      "path": "org leave",
+      "help": "Leave an organization you belong to.",
+      "params": [
+        {
+          "opts": [
+            "organization"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Organization name, or the start of its id. A terminal picks from yours if omitted."
+        },
+        {
+          "opts": [
+            "--yes",
+            "-y"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Skip the confirmation prompt."
         },
         {
           "opts": [
