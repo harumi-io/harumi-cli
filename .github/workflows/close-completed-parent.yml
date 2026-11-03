@@ -11,13 +11,58 @@ name: Close completed parent
 #
 # Closed counts as done whatever the reason, so a piece closed as "not planned" does not block its
 # parent. A parent that is already closed, or that still has an open sub-issue, is left alone.
+#
+# Runs for the same parent are serialized. Siblings can close within seconds of each other, and
+# closing a parent with the PAT fires a new `closed` run for that parent, so parallel runs could
+# read the same state and comment twice. A first job reads the closed issue's parent, and the
+# second runs under a concurrency group named after it, one at a time. GitHub keeps one pending run
+# per group and replaces an older pending run with a newer one. That is safe here because every
+# run reads the live state and only ever concerns that one parent: the last run in the queue starts
+# after every close that queued before it, so it sees them all. (A group per tree, or a global one,
+# would let a replaced run belong to a different branch of the tree, and that parent would never
+# be checked.) Groups are scoped to the repository that runs the workflow, and the walk up to the
+# grandparent is not serialized, so two parents finishing at the same moment can still comment
+# twice on theirs: harmless, as the close itself is idempotent.
 on:
   issues:
     types: [closed]
 
 jobs:
-  close-parent:
+  # Read-only: names the closed issue's parent, empty when it has none.
+  find-parent:
     runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      parent: ${{ steps.read.outputs.parent }}
+    steps:
+      - name: Read the parent
+        id: read
+        env:
+          GH_TOKEN: ${{ secrets.ORG_PROJECT_PAT }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+
+          parent=""
+          # 404 means "no parent": the normal end. Anything else is a real error.
+          if out=$(gh api "repos/$REPO/issues/$ISSUE/parent" 2>&1); then
+            parent=$(jq -r '(.repository_url | sub(".*/repos/"; "")) + "#" + (.number | tostring)' <<<"$out")
+          elif ! grep -q "HTTP 404" <<<"$out"; then
+            echo "::error::Could not read the parent of $REPO#$ISSUE: $out"
+            exit 1
+          fi
+
+          echo "parent=$parent" >> "$GITHUB_OUTPUT"
+          echo "Parent: ${parent:-none}"
+
+  close-parent:
+    needs: find-parent
+    if: ${{ needs.find-parent.outputs.parent != '' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: close-completed-parent-${{ needs.find-parent.outputs.parent }}
+      cancel-in-progress: false
     # Never touches GITHUB_TOKEN: every API call uses secrets.ORG_PROJECT_PAT.
     permissions: {}
     steps:
@@ -67,12 +112,15 @@ jobs:
               exit 0
             fi
 
-            gh api -X POST "repos/$parent_repo/issues/$parent_num/comments" \
-              -f body="All $total sub-issues are closed (last one: $trigger). Closing this parent as completed." \
-              >/dev/null
+            # Close first: a failed close must not leave a comment that repeats on every retry. A
+            # failed comment, on the other hand, is not worth stopping the walk for.
             gh api -X PATCH "repos/$parent_repo/issues/$parent_num" \
               -f state=closed -f state_reason=completed >/dev/null
             echo "Closed $parent_repo#$parent_num ($completed of $total sub-issues closed)."
+            gh api -X POST "repos/$parent_repo/issues/$parent_num/comments" \
+              -f body="All $total sub-issues are closed (last one: $trigger). Closed this parent as completed." \
+              >/dev/null \
+              || echo "::warning::Closed $parent_repo#$parent_num but could not comment on it."
 
             repo="$parent_repo"
             num="$parent_num"
