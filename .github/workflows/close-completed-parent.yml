@@ -1,0 +1,79 @@
+name: Close completed parent
+
+# GitHub does not close a parent issue when its sub-issues are done, and the board only moves a
+# card to Done when the issue closes. When the last open sub-issue of a parent closes, this closes
+# the parent as completed (and its parent in turn); the board's "Item closed" workflow then moves
+# the card to Done.
+#
+# This repo is public, so it cannot call the shared workflow in the private harumi-io/.github-private
+# (GitHub forbids it). This is a copy of .github/workflows/close-completed-parent.yml there, with
+# the PAT read from secrets.ORG_PROJECT_PAT. Keep both in sync.
+#
+# Closed counts as done whatever the reason, so a piece closed as "not planned" does not block its
+# parent. A parent that is already closed, or that still has an open sub-issue, is left alone.
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  close-parent:
+    runs-on: ubuntu-latest
+    # Never touches GITHUB_TOKEN: every API call uses secrets.ORG_PROJECT_PAT.
+    permissions: {}
+    steps:
+      - name: Close each ancestor whose sub-issues are all closed
+        env:
+          GH_TOKEN: ${{ secrets.ORG_PROJECT_PAT }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+
+          repo="$REPO"
+          num="$ISSUE"
+          trigger="$REPO#$ISSUE"
+
+          # The depth cap is a guard against a cycle, not a real limit.
+          for _ in 1 2 3 4 5 6 7 8; do
+            # 404 means "no parent": the normal end of the walk. Anything else is a real error.
+            if ! out=$(gh api "repos/$repo/issues/$num/parent" 2>&1); then
+              if grep -q "HTTP 404" <<<"$out"; then
+                echo "$repo#$num has no parent."
+                exit 0
+              fi
+              echo "::error::Could not read the parent of $repo#$num: $out"
+              exit 1
+            fi
+
+            parent_repo=$(jq -r '.repository_url | sub(".*/repos/"; "")' <<<"$out")
+            parent_num=$(jq -r '.number' <<<"$out")
+            parent_state=$(jq -r '.state' <<<"$out")
+            total=$(jq -r '.sub_issues_summary.total' <<<"$out")
+            completed=$(jq -r '.sub_issues_summary.completed' <<<"$out")
+
+            # A missing summary makes jq print "null" for both, and null == null would close the
+            # parent. Closing is hard to undo, so anything but two real counts leaves it open.
+            if ! [[ "$total" =~ ^[0-9]+$ && "$completed" =~ ^[0-9]+$ ]] || [ "$total" -eq 0 ]; then
+              echo "::warning::No usable sub_issues_summary for $parent_repo#$parent_num; leaving it open."
+              exit 0
+            fi
+
+            if [ "$parent_state" != "open" ]; then
+              echo "$parent_repo#$parent_num is already $parent_state; nothing to do."
+              exit 0
+            fi
+            if [ "$completed" != "$total" ]; then
+              echo "$parent_repo#$parent_num has $completed of $total sub-issues closed; leaving it open."
+              exit 0
+            fi
+
+            gh api -X POST "repos/$parent_repo/issues/$parent_num/comments" \
+              -f body="All $total sub-issues are closed (last one: $trigger). Closing this parent as completed." \
+              >/dev/null
+            gh api -X PATCH "repos/$parent_repo/issues/$parent_num" \
+              -f state=closed -f state_reason=completed >/dev/null
+            echo "Closed $parent_repo#$parent_num ($completed of $total sub-issues closed)."
+
+            repo="$parent_repo"
+            num="$parent_num"
+          done
