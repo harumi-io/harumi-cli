@@ -21,6 +21,10 @@ from harumi.models import ProjectRun
 if TYPE_CHECKING:
     from harumi.client import ApiClient
 
+# A small run finishes within seconds, so the first 30 s are polled every second; after that the run
+# is a long one and 5 s is plenty. An explicit `poll_interval` is kept as is.
+_FAST_POLL_INTERVAL = 1.0
+_FAST_POLL_WINDOW = 30.0
 _DEFAULT_POLL_INTERVAL = 5.0
 
 # A watch can last an hour. Over that time one poll in a few thousand meets a dropped connection or a
@@ -67,7 +71,7 @@ def wait_for_run(
     api: "ApiClient",
     project_id: str,
     run_id: str,
-    poll_interval: float = _DEFAULT_POLL_INTERVAL,
+    poll_interval: Optional[float] = None,
     timeout: Optional[float] = None,
     on_poll: Optional[Callable[[ProjectRun], None]] = None,
     max_poll_failures: int = 0,
@@ -78,9 +82,23 @@ def wait_for_run(
     With `max_poll_failures` > 0, that many transient poll failures in a row are ridden out
     (`on_poll_failure` hears each one); the next raises `WatchLostError`. Any other error, and the
     default of 0, raise at once as before.
+
+    Without a `poll_interval` the run is polled every second for the first 30 s *of the watch* (not of
+    the run) and every 5 s after that; a failed poll is always retried after 5 s.
     """
-    deadline = time.monotonic() + timeout if timeout else None
+    started = time.monotonic()
+    deadline = started + timeout if timeout else None
     failures = 0
+
+    def pause(after_failure: bool = False) -> float:
+        if poll_interval is not None:
+            return poll_interval
+        # The fast cadence is for answers, not for outages: riding out `max_poll_failures`
+        # at 1 s would give up in ~4 s and hit an API that is already failing harder.
+        if after_failure:
+            return _DEFAULT_POLL_INTERVAL
+        in_fast_window = time.monotonic() - started < _FAST_POLL_WINDOW
+        return _FAST_POLL_INTERVAL if in_fast_window else _DEFAULT_POLL_INTERVAL
 
     while True:
         try:
@@ -96,7 +114,7 @@ def wait_for_run(
             if deadline is not None and time.monotonic() >= deadline:
                 # Riding out a failure must not outlive the caller's deadline (the `continue` skips the check below).
                 raise HarumiError(f"Timed out after {timeout}s waiting for run {run_id}") from exc
-            time.sleep(poll_interval)
+            time.sleep(pause(after_failure=True))
             continue
         failures = 0
         if on_poll is not None:
@@ -108,7 +126,7 @@ def wait_for_run(
                 f"Timed out after {timeout}s waiting for run {run_id} "
                 f"(last status: {run.status!r})"
             )
-        time.sleep(poll_interval)
+        time.sleep(pause())
 
 
 def get_run_output(api: "ApiClient", project_id: str, run_id: str) -> dict[str, Any]:
