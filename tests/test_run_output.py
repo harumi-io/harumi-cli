@@ -613,3 +613,19 @@ def test_an_explicit_poll_interval_is_kept(monkeypatch):
     execution.wait_for_run(None, "p", "run-1", poll_interval=5.0)
 
     assert sleeps == [5.0, 5.0]
+
+
+def test_a_failed_poll_in_the_first_30_seconds_is_retried_after_5_seconds(monkeypatch):
+    from harumi import execution
+    from harumi.errors import ApiUnreachableError
+    from harumi.execution import WatchLostError
+
+    _clock, sleeps = _fake_clock(monkeypatch)
+    monkeypatch.setattr(
+        execution, "get_run", lambda *a, **k: (_ for _ in ()).throw(ApiUnreachableError("down", kind="refused"))
+    )
+
+    with pytest.raises(WatchLostError):
+        execution.wait_for_run(None, "p", "run-1", max_poll_failures=4)
+
+    assert sleeps == [5.0] * 4

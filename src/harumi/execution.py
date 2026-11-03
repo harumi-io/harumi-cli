@@ -83,16 +83,20 @@ def wait_for_run(
     (`on_poll_failure` hears each one); the next raises `WatchLostError`. Any other error, and the
     default of 0, raise at once as before.
 
-    Without a `poll_interval` the run is polled every second for the first 30 s and every 5 s after
-    that.
+    Without a `poll_interval` the run is polled every second for the first 30 s *of the watch* (not of
+    the run) and every 5 s after that; a failed poll is always retried after 5 s.
     """
     started = time.monotonic()
     deadline = started + timeout if timeout else None
     failures = 0
 
-    def pause() -> float:
+    def pause(after_failure: bool = False) -> float:
         if poll_interval is not None:
             return poll_interval
+        # The fast cadence is for answers, not for outages: riding out `max_poll_failures`
+        # at 1 s would give up in ~4 s and hit an API that is already failing harder.
+        if after_failure:
+            return _DEFAULT_POLL_INTERVAL
         in_fast_window = time.monotonic() - started < _FAST_POLL_WINDOW
         return _FAST_POLL_INTERVAL if in_fast_window else _DEFAULT_POLL_INTERVAL
 
@@ -110,7 +114,7 @@ def wait_for_run(
             if deadline is not None and time.monotonic() >= deadline:
                 # Riding out a failure must not outlive the caller's deadline (the `continue` skips the check below).
                 raise HarumiError(f"Timed out after {timeout}s waiting for run {run_id}") from exc
-            time.sleep(pause())
+            time.sleep(pause(after_failure=True))
             continue
         failures = 0
         if on_poll is not None:
