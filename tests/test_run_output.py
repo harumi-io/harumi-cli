@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -568,3 +569,47 @@ def test_riding_out_failures_does_not_outlive_the_callers_deadline(monkeypatch):
 
     with pytest.raises(HarumiError, match="Timed out after 8.0s"):
         execution.wait_for_run(None, "p", "run-1", poll_interval=5.0, timeout=8.0, max_poll_failures=50)
+
+
+def _fake_clock(monkeypatch):
+    from harumi import execution
+
+    clock = {"now": 0.0}
+    sleeps: list[float] = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock["now"] += seconds
+
+    monkeypatch.setattr(execution.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(execution.time, "sleep", sleep)
+    return clock, sleeps
+
+
+def test_polling_is_fast_for_the_first_30_seconds_then_backs_off(monkeypatch):
+    from harumi import execution
+
+    clock, sleeps = _fake_clock(monkeypatch)
+    polls = {"n": 0}
+
+    def get_run(*_a, **_k):
+        polls["n"] += 1
+        return SimpleNamespace(finished=clock["now"] >= 40)
+
+    monkeypatch.setattr(execution, "get_run", get_run)
+
+    execution.wait_for_run(None, "p", "run-1")
+
+    assert sleeps[:30] == [1.0] * 30
+    assert set(sleeps[30:]) == {5.0}
+
+
+def test_an_explicit_poll_interval_is_kept(monkeypatch):
+    from harumi import execution
+
+    clock, sleeps = _fake_clock(monkeypatch)
+    monkeypatch.setattr(execution, "get_run", lambda *a, **k: SimpleNamespace(finished=clock["now"] >= 10))
+
+    execution.wait_for_run(None, "p", "run-1", poll_interval=5.0)
+
+    assert sleeps == [5.0, 5.0]
