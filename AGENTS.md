@@ -152,8 +152,13 @@ gh issue edit <n> --parent <parent-number-or-url>   # attach an existing issue
 
 - Number the pieces in order (`Billing 1`, `Billing 2a`, `Billing 2b`). A piece may live in another
   repo: pass the parent's URL.
-- Each piece's PR says `Closes #piece`; the last one also closes the parent.
+- Each piece's PR says `Closes #piece`. Writing `Closes #parent` in the last one still works, but is no longer needed.
 - On the board only the parent is meant to show, with its sub-issue progress bar; the board views
   filter pieces out (`no:parent-issue`). Pieces are still on the project, so the collision search sees them.
- A piece's card moves with its PR. The parent has no PR of its own, so it stays **To Do** until it
- closes (**Done**); I may move it by hand meanwhile.
+  A piece's card moves with its PR. The parent has no PR of its own, so it stays **To Do** while the
+  work is under way, and I may move it by hand meanwhile.
+- **The parent closes by itself.** When a piece closes and every sibling is closed too,
+  `.github/workflows/close-completed-parent.yml` closes the parent as completed (and its parent in
+  turn, if it has one), and the board's `Item closed` workflow moves the card to **Done**. A piece
+  closed as "not planned" counts as closed. Add the last piece to the parent before you close the
+  second-to-last one: a parent that has only closed pieces is closed at once. `harumi-cli` is public and carries an inline copy of the shared workflow.
