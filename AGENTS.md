@@ -161,4 +161,5 @@ gh issue edit <n> --parent <parent-number-or-url>   # attach an existing issue
   `.github/workflows/close-completed-parent.yml` closes the parent as completed (and its parent in
   turn, if it has one), and the board's `Item closed` workflow moves the card to **Done**. A piece
   closed as "not planned" counts as closed. Add the last piece to the parent before you close the
-  second-to-last one: a parent that has only closed pieces is closed at once. `harumi-cli` is public and carries an inline copy of the shared workflow.
+  second-to-last one: a parent that has only closed pieces is closed at once.
+- `harumi-cli` is public, so it carries an inline copy of the shared close-completed-parent workflow instead of calling it. Keep both in sync.

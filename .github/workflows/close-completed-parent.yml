@@ -51,6 +51,13 @@ jobs:
             total=$(jq -r '.sub_issues_summary.total' <<<"$out")
             completed=$(jq -r '.sub_issues_summary.completed' <<<"$out")
 
+            # A missing summary makes jq print "null" for both, and null == null would close the
+            # parent. Closing is hard to undo, so anything but two real counts leaves it open.
+            if ! [[ "$total" =~ ^[0-9]+$ && "$completed" =~ ^[0-9]+$ ]] || [ "$total" -eq 0 ]; then
+              echo "::warning::No usable sub_issues_summary for $parent_repo#$parent_num; leaving it open."
+              exit 0
+            fi
+
             if [ "$parent_state" != "open" ]; then
               echo "$parent_repo#$parent_num is already $parent_state; nothing to do."
               exit 0
