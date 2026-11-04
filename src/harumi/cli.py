@@ -4207,7 +4207,7 @@ def compare(
 @app.command("check")
 @_handle_errors
 def check(
-    ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to check (defaults to the default branch)."),
+    ref: Optional[str] = typer.Option(None, "--ref", help="Branch, tag or commit to check (defaults to the default branch)."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
@@ -4566,7 +4566,7 @@ def dashboard_widgets(
 @_handle_errors
 def dashboard_validate(
     path: Optional[Path] = typer.Argument(None, help="A single dashboard spec to validate (default: every ./dashboard/*.toml, else ./dashboard.toml)."),
-    ref: Optional[str] = typer.Option(None, "--ref", help="Validate the repo's specs on this branch/commit instead of local files."),
+    ref: Optional[str] = typer.Option(None, "--ref", help="Validate the repo's specs on this branch, tag or commit instead of local files."),
     against: Optional[Path] = typer.Option(None, "--against", help="Check widget dot-paths against this local output.json."),
     run_id: Optional[str] = typer.Option(None, "--run", help="Check widget dot-paths against this run's output.json."),
     latest: bool = typer.Option(False, "--latest", help="Check widget dot-paths against the most recent run's output.json."),
