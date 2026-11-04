@@ -31,14 +31,8 @@ def saved_default() -> str:
 
 
 @pytest.fixture(autouse=True)
-def home(tmp_path, monkeypatch):
-    monkeypatch.setattr("harumi.config.HARUMI_HOME", tmp_path)
-    monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "config.json")
-    monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "credentials.json")
-    monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
-    monkeypatch.setattr("harumi.config._RESOLVED_API_URL", None)
-    for var in ("HARUMI_ENV", "HARUMI_API_URL", "HARUMI_GIT_URL", "HARUMI_ORG"):
-        monkeypatch.delenv(var, raising=False)
+def home(tmp_path, monkeypatch, isolate_harumi_home):
+    isolate_harumi_home(tmp_path)
     # After login: org lookup and Gitea provisioning are not what is tested here.
     monkeypatch.setattr(cli, "_resolve_and_store_org", lambda config: None)
     monkeypatch.setattr(cli, "_provision_git_token", lambda config: None)

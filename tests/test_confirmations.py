@@ -32,14 +32,8 @@ BO = "22222222-aaaa-4bbb-8ccc-000000000002"
 
 
 @pytest.fixture(autouse=True)
-def home(tmp_path, monkeypatch):
-    monkeypatch.setattr("harumi.config.HARUMI_HOME", tmp_path / "home")
-    monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "home" / "config.json")
-    monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "home" / "credentials.json")
-    monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
-    monkeypatch.setattr("harumi.config._RESOLVED_API_URL", None)
-    for var in ("HARUMI_ENV", "HARUMI_API_URL", "HARUMI_GIT_URL", "HARUMI_ORG", "CI"):
-        monkeypatch.delenv(var, raising=False)
+def home(tmp_path, monkeypatch, isolate_harumi_home):
+    isolate_harumi_home(tmp_path / "home", extra_env=("CI",))
     monkeypatch.setattr(cli.console, "_width", 100)
     config.save_credentials(access_token="a", refresh_token="r", email="ana@example.com")
 

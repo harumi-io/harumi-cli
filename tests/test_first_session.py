@@ -34,15 +34,9 @@ def plain(text: str) -> str:
 
 
 @pytest.fixture(autouse=True)
-def home(tmp_path, monkeypatch):
+def home(tmp_path, monkeypatch, isolate_harumi_home):
     real_home = os.path.expanduser("~/.harumi")
-    monkeypatch.setattr("harumi.config.HARUMI_HOME", tmp_path)
-    monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "config.json")
-    monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "credentials.json")
-    monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
-    monkeypatch.setattr("harumi.config._RESOLVED_API_URL", None)
-    for var in ("HARUMI_ENV", "HARUMI_API_URL", "HARUMI_GIT_URL", "HARUMI_ORG"):
-        monkeypatch.delenv(var, raising=False)
+    isolate_harumi_home(tmp_path)
     monkeypatch.setattr(cli, "_resolve_and_store_org", lambda c: None)
     monkeypatch.setattr(cli, "_provision_git_token", lambda c: None)
     monkeypatch.setattr(cli, "_quickstart", lambda **k: None)
