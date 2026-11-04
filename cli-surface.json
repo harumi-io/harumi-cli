@@ -70,7 +70,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Branch/commit to check (defaults to the default branch)."
+          "help": "Branch, tag or commit to check (defaults to the default branch)."
         },
         {
           "opts": [
@@ -270,7 +270,7 @@
           "required": false,
           "multiple": false,
           "default": null,
-          "help": "Validate the repo's specs on this branch/commit instead of local files."
+          "help": "Validate the repo's specs on this branch, tag or commit instead of local files."
         },
         {
           "opts": [
