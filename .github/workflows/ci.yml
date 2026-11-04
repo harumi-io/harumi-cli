@@ -74,6 +74,13 @@ jobs:
   # Validates the `requires-python = ">=3.9"` floor advertised in
   # pyproject.toml against both ends of the supported range. Not wired into
   # branch protection as required (only `test` is) — see the note above.
+  #
+  # The full suite already runs once, on 3.12, in `test`. Running it again on 3.9 and 3.13 for
+  # every PR tripled the cost for a failure that is almost always a syntax or import problem, so
+  # a pull request runs a smoke subset here (the command tree, the client, JSON output and the
+  # library surface). The full suite runs on push to
+  # main and dev and on a manual dispatch, so a version-specific failure still shows up, just
+  # after the merge instead of before it.
   compat:
     name: compat (${{ matrix.python-version }})
     # 3.9 has no build on ubuntu-latest (Ubuntu 26.04), and is the lowest Python we support.
@@ -100,5 +107,10 @@ jobs:
       - name: Compile check
         run: python -m compileall -q src
 
-      - name: Test
+      - name: Test (smoke subset on pull requests)
+        if: github.event_name == 'pull_request'
+        run: pytest -q tests/test_cli.py tests/test_command_grammar.py tests/test_client.py tests/test_json_output.py tests/test_library_surface.py
+
+      - name: Test (full suite)
+        if: github.event_name != 'pull_request'
         run: pytest -q
