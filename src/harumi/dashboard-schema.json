@@ -1,5 +1,5 @@
 {
-  "version": 14,
+  "version": 15,
   "discovery": {
     "dashboardDir": "dashboard",
     "rootPath": "dashboard.toml"
@@ -316,7 +316,7 @@
   "widgetTypes": [
     {
       "type": "metric",
-      "description": "The one KPI card: a title, a large value, an optional description line and an optional trend (the delta, with an arrow that is green when the change is good and red when it is bad). Use one `metric` per number; consecutive `metric` widgets sit side by side in one row. Put a per-entity breakdown (per machine, per shift) in a `table` or chart, not in a KPI card.",
+      "description": "The one KPI card: a short title (a few words: put units and qualifiers such as \"month to date\" in `description`, not in the title), a large value, an optional description line and an optional trend (the delta, with an arrow that is green when the change is good and red when it is bad). Use one `metric` per number; consecutive `metric` widgets sit side by side in one row. Put a per-entity breakdown (per machine, per shift) in a `table` or chart, not in a KPI card.",
       "fields": [
         {
           "tomlKey": "value_key",
@@ -411,6 +411,14 @@
           "required": true,
           "isOutputPath": false,
           "doc": "One or more `{ key, label? }` entries, in display order. `key` is a top-level field on each row (not a dot-path)."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
@@ -474,6 +482,14 @@
           "required": false,
           "isOutputPath": true,
           "doc": "Dot-path to a total-capacity number (e.g. total yard positions). When the rows' summed value_key is less than this, a synthetic \"Free\" tile fills the remainder, so area doubles as a capacity gauge. Omitted, or at/below the summed value, adds no tile."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
@@ -537,6 +553,14 @@
           "required": false,
           "isOutputPath": false,
           "doc": "Suffix appended to a cell's tooltip value, e.g. \"cycles\"."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
@@ -707,6 +731,14 @@
           "required": false,
           "isOutputPath": false,
           "doc": "Pins a pie/donut slice (by its `x_key` value) or a `group_key` group to a color, e.g. `colors = { \"Late\" = \"red-600\" }`. Every other slice or group still cycles the default grays. Leave color unset unless the user asks for one: unset colors render as neutral grays that adapt to light/dark mode, which is the default look. When the user does ask, use a Tailwind color name (`<family>-<shade>`, e.g. `green-300`, `red-600`, or `black`/`white` — see the schema's `colorNames`), never hex. A single name is used as-is in both themes; prefer a `{ light = \"...\", dark = \"...\" }` pair (e.g. a darker shade for light mode and a lighter one for dark mode) so it reads on both backgrounds."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
@@ -798,6 +830,14 @@
           "required": false,
           "isOutputPath": false,
           "doc": "How start/end/duration values are read: a plain display suffix (e.g. \"min\"), or a wall-clock sentinel — \"epoch\" (seconds since epoch), \"epoch_ms\" (milliseconds), or \"iso\" (an ISO 8601 string) — rendered as a real time instead of a bare number."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
@@ -948,6 +988,14 @@
           "required": false,
           "isOutputPath": false,
           "doc": "How start/end/duration (and region) values are read: a plain display suffix (e.g. \"min\"), or a wall-clock sentinel — \"epoch\" (seconds since epoch), \"epoch_ms\" (milliseconds), or \"iso\" (an ISO 8601 string) — rendered as a real time instead of a bare number."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
@@ -1081,6 +1129,14 @@
           "required": false,
           "isOutputPath": false,
           "doc": "Plain-text attribution shown in the map's corner (HTML is escaped, not rendered). Defaults to OpenStreetMap's, matching the default `tile_url`."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
