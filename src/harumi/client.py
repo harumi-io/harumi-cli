@@ -38,6 +38,9 @@ from harumi.models import (
     FileDownloadUrl,
     FileUploadUrl,
     GitCredentials,
+    Issue,
+    IssueComment,
+    IssueList,
     KernelSpec,
     Memory,
     MemoryList,
@@ -818,6 +821,51 @@ class Client:
             "DELETE", f"/projects/{project_id}/schedules/{schedule_id}"
         )
         return Schedule.model_validate(response.json())
+
+    # -- Issues: the project's work items, kept in its Gitea repo; status is todo | in_progress | done ---
+
+    def list_issues(
+        self,
+        project_id: str,
+        *,
+        status: str = "open",
+        labels: Optional[list[str]] = None,
+        assignee: Optional[str] = None,
+        q: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 30,
+    ) -> IssueList:
+        params: dict[str, Any] = {"status": status, "page": page, "per_page": per_page}
+        if labels:
+            params["label"] = labels  # the API repeats `label` for each one
+        if assignee:
+            params["assignee"] = assignee
+        if q:
+            params["q"] = q
+        response = self.api.request("GET", f"/projects/{project_id}/issues", params=params)
+        return IssueList.model_validate(response.json())
+
+    def get_issue(self, project_id: str, number: int) -> Issue:
+        response = self.api.request("GET", f"/projects/{project_id}/issues/{number}")
+        return Issue.model_validate(response.json())
+
+    def create_issue(self, project_id: str, body: dict[str, Any]) -> Issue:
+        response = self.api.request("POST", f"/projects/{project_id}/issues", json=body)
+        return Issue.model_validate(response.json())
+
+    def update_issue(self, project_id: str, number: int, body: dict[str, Any]) -> Issue:
+        response = self.api.request("PATCH", f"/projects/{project_id}/issues/{number}", json=body)
+        return Issue.model_validate(response.json())
+
+    def list_issue_comments(self, project_id: str, number: int) -> list[IssueComment]:
+        response = self.api.request("GET", f"/projects/{project_id}/issues/{number}/comments")
+        return [IssueComment.model_validate(c) for c in response.json()]
+
+    def create_issue_comment(self, project_id: str, number: int, body: str) -> IssueComment:
+        response = self.api.request(
+            "POST", f"/projects/{project_id}/issues/{number}/comments", json={"body": body}
+        )
+        return IssueComment.model_validate(response.json())
 
     # -- Datasources --------------------------------------------------------
     # Scoped per-project; credentials are write-only (never returned).

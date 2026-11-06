@@ -1686,6 +1686,815 @@
       ]
     },
     {
+      "path": "issues close",
+      "help": "Close an issue: it moves to done.",
+      "params": [
+        {
+          "opts": [
+            "number"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Issue number, for example 12 or #12."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
+        },
+        {
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Print JSON on stdout instead of a table, for scripts."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
+    },
+    {
+      "path": "issues comment",
+      "help": "Add a comment to an issue.",
+      "params": [
+        {
+          "opts": [
+            "number"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Issue number, for example 12 or #12."
+        },
+        {
+          "opts": [
+            "--body",
+            "-b"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "The text, as an argument."
+        },
+        {
+          "opts": [
+            "--body-file",
+            "-F"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Read the text from a file. Use - for standard input."
+        },
+        {
+          "opts": [
+            "--edit",
+            "-e"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Write the text in your editor."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
+        },
+        {
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Print JSON on stdout instead of a table, for scripts."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
+    },
+    {
+      "path": "issues create",
+      "help": "File an issue.",
+      "params": [
+        {
+          "opts": [
+            "--title",
+            "-t"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "One line that stands on its own."
+        },
+        {
+          "opts": [
+            "--body",
+            "-b"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "The text, as an argument."
+        },
+        {
+          "opts": [
+            "--body-file",
+            "-F"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Read the text from a file. Use - for standard input."
+        },
+        {
+          "opts": [
+            "--edit",
+            "-e"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Write the text in your editor."
+        },
+        {
+          "opts": [
+            "--label",
+            "-l"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": true,
+          "default": null,
+          "help": "A label the project has. Repeat for several."
+        },
+        {
+          "opts": [
+            "--assignee",
+            "-a"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": true,
+          "default": null,
+          "help": "A user id. Repeat for several."
+        },
+        {
+          "opts": [
+            "--status",
+            "-s"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": "todo",
+          "help": "Start as todo, in-progress or done."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
+        },
+        {
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Print JSON on stdout instead of a table, for scripts."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
+    },
+    {
+      "path": "issues edit",
+      "help": "Change an issue's title, description, labels or assignees.",
+      "params": [
+        {
+          "opts": [
+            "number"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Issue number, for example 12 or #12."
+        },
+        {
+          "opts": [
+            "--title",
+            "-t"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "The new title."
+        },
+        {
+          "opts": [
+            "--body",
+            "-b"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "The text, as an argument."
+        },
+        {
+          "opts": [
+            "--body-file",
+            "-F"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Read the text from a file. Use - for standard input."
+        },
+        {
+          "opts": [
+            "--edit",
+            "-e"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Write the text in your editor."
+        },
+        {
+          "opts": [
+            "--label",
+            "-l"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": true,
+          "default": null,
+          "help": "Replace the labels with these. Repeat for several; --label '' removes them all."
+        },
+        {
+          "opts": [
+            "--assignee",
+            "-a"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": true,
+          "default": null,
+          "help": "Replace the assignees with these user ids. --assignee '' removes them all."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
+        },
+        {
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Print JSON on stdout instead of a table, for scripts."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
+    },
+    {
+      "path": "issues list",
+      "help": "List a project's issues, newest first.",
+      "params": [
+        {
+          "opts": [
+            "--state",
+            "-s"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": "open",
+          "help": "open (to do and in progress), todo, in-progress, done or all."
+        },
+        {
+          "opts": [
+            "--label",
+            "-l"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": true,
+          "default": null,
+          "help": "Only issues with this label. Repeat to need several."
+        },
+        {
+          "opts": [
+            "--assignee",
+            "-a"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Only issues assigned to this user id."
+        },
+        {
+          "opts": [
+            "--search",
+            "-q"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Words in the title or text."
+        },
+        {
+          "opts": [
+            "--limit"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "int range",
+          "required": false,
+          "multiple": false,
+          "default": 30,
+          "help": "How many to show."
+        },
+        {
+          "opts": [
+            "--page"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "int range",
+          "required": false,
+          "multiple": false,
+          "default": 1,
+          "help": "Which page, of --limit issues each."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
+        },
+        {
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Print JSON on stdout instead of a table, for scripts."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
+    },
+    {
+      "path": "issues move",
+      "help": "Move an issue to another column of the board.",
+      "params": [
+        {
+          "opts": [
+            "number"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Issue number, for example 12 or #12."
+        },
+        {
+          "opts": [
+            "--status",
+            "-s"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "todo, in-progress or done."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
+        },
+        {
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Print JSON on stdout instead of a table, for scripts."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
+    },
+    {
+      "path": "issues reopen",
+      "help": "Reopen a closed issue: it goes back to to do.",
+      "params": [
+        {
+          "opts": [
+            "number"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Issue number, for example 12 or #12."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
+        },
+        {
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Print JSON on stdout instead of a table, for scripts."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
+    },
+    {
+      "path": "issues view",
+      "help": "Show an issue and its comments.",
+      "params": [
+        {
+          "opts": [
+            "number"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Issue number, for example 12 or #12."
+        },
+        {
+          "opts": [
+            "--project",
+            "-p"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."
+        },
+        {
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Print JSON on stdout instead of a table, for scripts."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
+    },
+    {
       "path": "link",
       "help": "Bind the current directory to an existing Harumi project and configure the git remote.",
       "params": [

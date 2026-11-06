@@ -28,6 +28,7 @@
     harumi schedules list|get|add|update|rm [--project <id>]
     harumi secrets list|set|rm [--project <id>]
     harumi memories list|add|edit|rm [--project <id>]
+    harumi issues list|view|create|edit|move|close|reopen|comment [--project <id>]
     harumi org list|create|rename|use|rm|members|invite|role|rm-member|leave
     harumi org invitations [accept|decline]
 
@@ -4002,6 +4003,343 @@ def tags_rm(
 
 
 # ---------------------------------------------------------------------------
+# harumi issues
+# ---------------------------------------------------------------------------
+
+issues_app = _typer(help="The project's issues: its list of work, shared with the web app and the assistant.")
+app.add_typer(issues_app, name="issues")
+
+# What the user types for each status (the API's `in_progress` is spelled with a hyphen on the command line).
+_ISSUE_STATUSES = {"todo": "todo", "in-progress": "in_progress", "in_progress": "in_progress", "done": "done"}
+_ISSUE_STATUS_LABEL = {"todo": "to do", "in_progress": "in progress", "done": "done"}
+_ISSUE_STATES = ("open", "todo", "in-progress", "done", "all")
+_ISSUE_PROJECT = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list.")
+
+
+def _issue_number(typed: str) -> int:
+    """`12` or `#12` as the number it names."""
+    text = typed.strip().lstrip("#")
+    if not text.isdigit() or int(text) < 1:
+        _fail(f"'{escape(_printable(typed))}' is not an issue number. Find it with [bold]harumi issues list[/bold].")
+    return int(text)
+
+
+def _issue_status(typed: str) -> str:
+    status = _ISSUE_STATUSES.get(typed.strip().lower())
+    if status is None:
+        _fail(f"'{escape(_printable(typed))}' is not a status. Use one of: todo, in-progress, done.")
+    return status  # type: ignore[return-value]
+
+
+def _issue_text(
+    text: Optional[str], file: Optional[str], edit: bool, *, noun: str, initial: str = ""
+) -> Optional[str]:
+    """The text for a body or comment from --body, --body-file (`-` is stdin) or --edit; None if none was given."""
+    given = [flag for flag, on in (("--body", text is not None), ("--body-file", file is not None), ("--edit", edit)) if on]
+    if len(given) > 1:
+        _fail(f"Give the {noun} one way only, not {' and '.join(given)}.")
+    if file is not None:
+        if file == "-":
+            return sys.stdin.read()
+        try:
+            return Path(file).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            _fail(f"Cannot read {escape(file)}: {escape(str(exc))}")
+    if edit:
+        if not interactive.is_interactive():
+            _fail(f"--edit needs a terminal. Pass the {noun} with [bold]--body[/bold] or [bold]--body-file[/bold] instead.")
+        edited = typer.edit(initial)
+        if edited is None:
+            _fail(f"No {noun} saved, nothing changed.")
+        return edited.rstrip("\n")
+    return text
+
+
+def _issue_header(issue) -> str:
+    return f"#{issue.number} {_printable(issue.title)}"
+
+
+def _people(users) -> str:
+    return ", ".join(_printable(u.name) for u in users)
+
+
+_ISSUE_BODY = typer.Option(None, "--body", "-b", help="The text, as an argument.")
+_ISSUE_BODY_FILE = typer.Option(None, "--body-file", "-F", help="Read the text from a file. Use - for standard input.")
+_ISSUE_EDIT = typer.Option(False, "--edit", "-e", help="Write the text in your editor.")
+
+
+@issues_app.command("list")
+@_handle_errors
+def issues_list(
+    state: str = typer.Option("open", "--state", "-s", help="open (to do and in progress), todo, in-progress, done or all."),
+    label: Optional[list[str]] = typer.Option(None, "--label", "-l", help="Only issues with this label. Repeat to need several."),
+    assignee: Optional[str] = typer.Option(None, "--assignee", "-a", help="Only issues assigned to this user id."),
+    search: Optional[str] = typer.Option(None, "--search", "-q", help="Words in the title or text."),
+    limit: int = typer.Option(30, "--limit", min=1, max=100, help="How many to show."),
+    page: int = typer.Option(1, "--page", min=1, help="Which page, of --limit issues each."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """List a project's issues, newest first."""
+    state = state.strip().lower().replace("_", "-")
+    if state not in _ISSUE_STATES:
+        _fail(f"'{escape(_printable(state))}' is not a state. Use one of: {', '.join(_ISSUE_STATES)}.")
+    project_id = _resolve_project(project, api_url, org)
+    client = _get_client(api_url=api_url, org=org)
+
+    query = dict(labels=label or None, assignee=assignee, q=search)
+    if state == "todo":
+        # The API cannot ask for "open without the in-progress label", so read the open list and
+        # keep the to-do rows. Paging has to happen after that filter, or a page would come back
+        # short (or empty) while the next one still held to-do issues.
+        todo: list = []
+        fetched, api_page = 0, 1
+        while True:
+            chunk = client.list_issues(project_id, status="open", page=api_page, per_page=100, **query)
+            todo += [i for i in chunk.items if i.status == "todo"]
+            fetched += len(chunk.items)
+            if not chunk.items or fetched >= chunk.total:
+                break
+            api_page += 1
+        issues = todo[(page - 1) * limit : page * limit]
+        found = models.IssueList(items=issues, total=len(todo), page=page, per_page=limit)
+    else:
+        found = client.list_issues(
+            project_id, status={"in-progress": "in_progress"}.get(state, state), page=page, per_page=limit, **query
+        )
+        issues = found.items
+    if as_json:
+        _emit_json({"total": found.total, "page": found.page, "per_page": found.per_page, "items": [json_out.issue(i) for i in issues]})
+        return
+    if not issues:
+        console.print('Nothing here. File one with [bold]harumi issues create --title "..."[/bold].' if state == "open" and not (label or assignee or search) else "No issues match.")
+        return
+
+    table = Table("#", "status", "title", "labels", "assignees", "comments")
+    table.columns[0].no_wrap = True
+    table.columns[1].no_wrap = True
+    for i in issues:
+        title = _printable(i.title) + (" (assistant)" if i.by_assistant else "")
+        table.add_row(
+            _cell(i.number),
+            _cell(_ISSUE_STATUS_LABEL.get(i.status, i.status)),
+            _cell(title),
+            _cell(", ".join(_printable(lb.name) for lb in i.labels)),
+            _cell(_people(i.assignees)),
+            _cell(i.comment_count),
+        )
+    console.print(table)
+    if found.total > found.page * found.per_page:
+        console.print(f"[dim]Showing {len(issues)} of {found.total}. See the next with [bold]--page {found.page + 1}[/bold].[/dim]")
+
+
+@issues_app.command("view")
+@_handle_errors
+def issues_view(
+    number: str = typer.Argument(..., help="Issue number, for example 12 or #12."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Show an issue and its comments."""
+    n = _issue_number(number)
+    project_id = _resolve_project(project, api_url, org)
+    client = _get_client(api_url=api_url, org=org)
+
+    with _pointing_to("harumi issues list"):
+        issue = client.get_issue(project_id, n)
+        comments = client.list_issue_comments(project_id, n)
+    if as_json:
+        _emit_json(json_out.issue(issue, detail=True, comments=comments))
+        return
+
+    console.print(f"[bold]{escape(_issue_header(issue))}[/bold]")
+    facts = [_ISSUE_STATUS_LABEL.get(issue.status, issue.status)]
+    if issue.labels:
+        facts.append("labels: " + ", ".join(_printable(lb.name) for lb in issue.labels))
+    if issue.assignees:
+        facts.append("assigned to " + _people(issue.assignees))
+    if issue.author:
+        facts.append("opened by " + _printable(issue.author.name) + (" via the assistant" if issue.by_assistant else ""))
+    console.print("[dim]" + escape(" · ".join(facts)) + "[/dim]")
+    console.print()
+    console.print(escape(_printable_block(issue.body)) if issue.body.strip() else "[dim]No description.[/dim]")
+    for c in comments:
+        who = _printable(c.author.name) if c.author else "someone"
+        when = c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else ""
+        console.print()
+        console.print(f"[bold]{escape(who)}[/bold] [dim]{escape(when)}{' via the assistant' if c.by_assistant else ''}[/dim]")
+        console.print(escape(_printable_block(c.body)))
+
+
+def _printable_block(text: str) -> str:
+    """Multi-line text with control characters removed but its line breaks kept."""
+    return "\n".join(_printable(line) for line in text.splitlines())
+
+
+@issues_app.command("create")
+@_handle_errors
+def issues_create(
+    title: str = typer.Option(..., "--title", "-t", help="One line that stands on its own."),
+    body: Optional[str] = _ISSUE_BODY,
+    body_file: Optional[str] = _ISSUE_BODY_FILE,
+    edit: bool = _ISSUE_EDIT,
+    label: Optional[list[str]] = typer.Option(None, "--label", "-l", help="A label the project has. Repeat for several."),
+    assignee: Optional[list[str]] = typer.Option(None, "--assignee", "-a", help="A user id. Repeat for several."),
+    status: str = typer.Option("todo", "--status", "-s", help="Start as todo, in-progress or done."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """File an issue."""
+    if not title.strip():
+        _fail("The title can't be empty. Pass [bold]--title[/bold] with a line that stands on its own.")
+    text = _issue_text(body, body_file, edit, noun="description")
+    payload: dict = {"title": title, "body": text or "", "status": _issue_status(status)}
+    if labels := [x for x in label or [] if x]:
+        payload["labels"] = labels
+    if assignees := [x for x in assignee or [] if x]:
+        payload["assignees"] = assignees
+    project_id = _resolve_project(project, api_url, org)
+    client = _get_client(api_url=api_url, org=org)
+
+    issue = client.create_issue(project_id, payload)
+    if as_json:
+        _emit_json(json_out.issue(issue, detail=True))
+        return
+    console.print(f"[bold green]Filed[/bold green] [bold]{escape(_issue_header(issue))}[/bold].")
+
+
+@issues_app.command("edit")
+@_handle_errors
+def issues_edit(
+    number: str = typer.Argument(..., help="Issue number, for example 12 or #12."),
+    title: Optional[str] = typer.Option(None, "--title", "-t", help="The new title."),
+    body: Optional[str] = _ISSUE_BODY,
+    body_file: Optional[str] = _ISSUE_BODY_FILE,
+    edit: bool = _ISSUE_EDIT,
+    label: Optional[list[str]] = typer.Option(None, "--label", "-l", help="Replace the labels with these. Repeat for several; --label '' removes them all."),
+    assignee: Optional[list[str]] = typer.Option(None, "--assignee", "-a", help="Replace the assignees with these user ids. --assignee '' removes them all."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Change an issue's title, description, labels or assignees. Only what you pass changes."""
+    n = _issue_number(number)
+    project_id = _resolve_project(project, api_url, org)
+    client = _get_client(api_url=api_url, org=org)
+
+    initial = ""
+    if edit:
+        with _pointing_to("harumi issues list"):
+            initial = client.get_issue(project_id, n).body
+    text = _issue_text(body, body_file, edit, noun="description", initial=initial)
+    payload: dict = {}
+    if title is not None:
+        payload["title"] = title
+    if text is not None:
+        payload["body"] = text
+    if label is not None:
+        payload["labels"] = [x for x in label if x]
+    if assignee is not None:
+        payload["assignees"] = [x for x in assignee if x]
+    if not payload:
+        _fail("Nothing to change. Pass [bold]--title[/bold], [bold]--body[/bold], [bold]--label[/bold] or [bold]--assignee[/bold].")
+
+    with _pointing_to("harumi issues list"):
+        issue = client.update_issue(project_id, n, payload)
+    if as_json:
+        _emit_json(json_out.issue(issue, detail=True))
+        return
+    console.print(f"[bold green]Updated[/bold green] [bold]{escape(_issue_header(issue))}[/bold].")
+
+
+def _set_issue_status(number: str, status: str, project, as_json, api_url, org, verb: str) -> None:
+    n = _issue_number(number)
+    project_id = _resolve_project(project, api_url, org)
+    client = _get_client(api_url=api_url, org=org)
+    with _pointing_to("harumi issues list"):
+        issue = client.update_issue(project_id, n, {"status": status})
+    if as_json:
+        _emit_json(json_out.issue(issue))
+        return
+    console.print(f"[bold green]{verb}[/bold green] [bold]{escape(_issue_header(issue))}[/bold] ({_ISSUE_STATUS_LABEL.get(issue.status, issue.status)}).")
+
+
+@issues_app.command("move")
+@_handle_errors
+def issues_move(
+    number: str = typer.Argument(..., help="Issue number, for example 12 or #12."),
+    status: str = typer.Option(..., "--status", "-s", help="todo, in-progress or done."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Move an issue to another column of the board."""
+    _set_issue_status(number, _issue_status(status), project, as_json, api_url, org, "Moved")
+
+
+@issues_app.command("close")
+@_handle_errors
+def issues_close(
+    number: str = typer.Argument(..., help="Issue number, for example 12 or #12."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Close an issue: it moves to done."""
+    _set_issue_status(number, "done", project, as_json, api_url, org, "Closed")
+
+
+@issues_app.command("reopen")
+@_handle_errors
+def issues_reopen(
+    number: str = typer.Argument(..., help="Issue number, for example 12 or #12."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Reopen a closed issue: it goes back to to do."""
+    _set_issue_status(number, "todo", project, as_json, api_url, org, "Reopened")
+
+
+@issues_app.command("comment")
+@_handle_errors
+def issues_comment(
+    number: str = typer.Argument(..., help="Issue number, for example 12 or #12."),
+    body: Optional[str] = _ISSUE_BODY,
+    body_file: Optional[str] = _ISSUE_BODY_FILE,
+    edit: bool = _ISSUE_EDIT,
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Add a comment to an issue."""
+    n = _issue_number(number)
+    text = _issue_text(body, body_file, edit, noun="comment")
+    if text is None or not text.strip():
+        _fail("Say what to comment: [bold]--body \"...\"[/bold], [bold]--body-file FILE[/bold] or [bold]--edit[/bold].")
+    project_id = _resolve_project(project, api_url, org)
+    client = _get_client(api_url=api_url, org=org)
+
+    with _pointing_to("harumi issues list"):
+        comment = client.create_issue_comment(project_id, n, text)
+    if as_json:
+        _emit_json({"id": comment.id, "issue": n, "body": comment.body, "created_at": comment.created_at.isoformat() if comment.created_at else None})
+        return
+    console.print(f"[bold green]Commented[/bold green] on [bold]#{n}[/bold].")
+
+
+# ---------------------------------------------------------------------------
 # harumi compare
 # ---------------------------------------------------------------------------
 
@@ -6565,7 +6903,7 @@ _PANELS: dict[str, list[str]] = {
     # `examples` and `specs` are lists you look things up in before `new` and `run`, so they sit with them.
     "Get started": ["login", "start", "new", "import", "clone", "link", "examples"],
     "Run and results": ["run", "runs", "compare", "check", "specs", "usage"],
-    "Project": ["projects", "files", "dashboard", "share", "datasources", "tags", "schedules", "secrets", "memories", "skills"],
+    "Project": ["projects", "issues", "files", "dashboard", "share", "datasources", "tags", "schedules", "secrets", "memories", "skills"],
     "Account and team": ["whoami", "logout", "profile", "org", "agent-skills"],
     "Help and updates": ["status", "whats-new"],
 }
@@ -6618,6 +6956,22 @@ _EXAMPLES: dict[str, list[tuple[str, str]]] = {
         ("harumi tags set prod --to 3f2a9c1e", "label a commit"),
     ],
     "tags rm": [("harumi tags rm prod", "")],
+    "issues list": [
+        ("harumi issues list", "what is open"),
+        ("harumi issues list --state in-progress --label bug", ""),
+        ("harumi issues list --state all --json", "for scripts"),
+    ],
+    "issues view": [("harumi issues view 12", "with its comments")],
+    "issues create": [
+        ('harumi issues create --title "Costs ignore overtime" --label bug', ""),
+        ('harumi issues create --title "Night shift" -F notes.md', "text from a file"),
+        ('harumi issues create --title "Check it" --edit', "use your editor"),
+    ],
+    "issues edit": [('harumi issues edit 12 --title "Costs ignore overtime pay"', ""), ("harumi issues edit 12 --label bug --label urgent", "replaces labels")],
+    "issues move": [("harumi issues move 12 --status in-progress", "")],
+    "issues close": [("harumi issues close 12", "")],
+    "issues reopen": [("harumi issues reopen 12", "")],
+    "issues comment": [('harumi issues comment 12 --body "Fixed in the last push."', ""), ("harumi issues comment 12 --body-file notes.md", "")],
     "runs list": [("harumi runs list", ""), ("harumi runs list --all --limit 50", ""), ("harumi runs list --json", "for scripts")],
     "runs get": [("harumi runs get", "the latest run"), ("harumi runs get 3f2a9c1e", "the first 8 characters are enough")],
     "runs cancel": [("harumi runs cancel 3f2a9c1e", "")],

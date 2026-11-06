@@ -159,6 +159,15 @@ TIERS: dict[str, tuple[str, str]] = {
     "memories add": (CANARY, ""),
     "memories edit": (CANARY, ""),
     "memories rm": (CANARY, ""),
+    # -- issues (the canary project's own Gitea repo) ---------------------------
+    "issues list": (READ, ""),
+    "issues view": (READ, ""),
+    "issues create": (CANARY, ""),
+    "issues edit": (CANARY, ""),
+    "issues move": (CANARY, ""),
+    "issues close": (CANARY, ""),
+    "issues reopen": (CANARY, ""),
+    "issues comment": (CANARY, ""),
     # -- skills ---------------------------------------------------------------
     "skills library": (READ, "lists the platform's preset skills"),
     "skills add": (LOCAL, "fetches a preset (read-only) and writes it only into the throwaway workdir; nothing is pushed"),
@@ -284,6 +293,15 @@ PLAN: tuple[Step, ...] = (
     Step("memories list", ("--project", "{project}")),
     Step("memories edit", ("{memory}", "--mode", "always", "--project", "{project}")),
     Step("memories rm", ("{memory}", "--yes", "--project", "{project}")),
+    # -- issues ---------------------------------------------------------------
+    Step("issues create", ("--title", "livecheck issue", "--project", "{project}"), capture="issue", capture_re=r"Filed #(\d+)"),
+    Step("issues list", ("--project", "{project}")),
+    Step("issues view", ("{issue}", "--project", "{project}")),
+    Step("issues edit", ("{issue}", "--title", "livecheck issue edited", "--project", "{project}")),
+    Step("issues comment", ("{issue}", "--body", "livecheck comment", "--project", "{project}")),
+    Step("issues move", ("{issue}", "--status", "in-progress", "--project", "{project}")),
+    Step("issues close", ("{issue}", "--project", "{project}")),
+    Step("issues reopen", ("{issue}", "--project", "{project}")),
     # -- share links ----------------------------------------------------------
     Step("share add", ("--label", "livecheck", "--project", "{project}"), capture="share"),
     Step("share list", ("--project", "{project}")),

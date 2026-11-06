@@ -30,6 +30,7 @@ SCHEDULE = (
     "id", "cron", "start_at", "git_branch", "git_tag", "git_commit", "command", "kernel_spec", "output_format", "email_to", "status",
     "last_executed_at",
 )
+ISSUE = ("number", "title", "status", "labels", "assignees", "author", "comment_count", "by_assistant", "created_at", "updated_at", "closed_at")
 TAG = ("name", "commit_sha", "message", "created_at")
 MEMORY = ("id", "scope", "content", "retrieval_mode", "source", "updated_at")
 MEMBER = ("user_id", "email", "first_name", "last_name", "role", "pending")
@@ -94,6 +95,27 @@ def datasource(d: Any) -> dict:
 
 def schedule(s: Any) -> dict:
     return _pick(s, SCHEDULE)
+
+
+def issue(i: Any, *, detail: bool = False, comments: Iterable[Any] = ()) -> dict:
+    """An issue with its labels as names and people as `{id, name}`. `detail` adds the body and the comments."""
+    record = _pick(i, ISSUE)
+    record["labels"] = [label.name for label in i.labels]
+    record["assignees"] = [{"id": u.id, "name": u.name} for u in i.assignees]
+    record["author"] = {"id": i.author.id, "name": i.author.name} if i.author else None
+    if detail:
+        record["body"] = i.body
+        record["comments"] = [
+            {
+                "id": c.id,
+                "author": {"id": c.author.id, "name": c.author.name} if c.author else None,
+                "by_assistant": c.by_assistant,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "body": c.body,
+            }
+            for c in comments
+        ]
+    return record
 
 
 def tag(t: Any) -> dict:
