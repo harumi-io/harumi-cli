@@ -4082,24 +4082,34 @@ def issues_list(
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
-    """List a project's issues, most recently active first."""
+    """List a project's issues, newest first."""
     state = state.strip().lower().replace("_", "-")
     if state not in _ISSUE_STATES:
         _fail(f"'{escape(_printable(state))}' is not a state. Use one of: {', '.join(_ISSUE_STATES)}.")
     project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 
-    # The API cannot ask for "open without the in-progress label", so `todo` is the open list, narrowed here.
-    found = client.list_issues(
-        project_id,
-        status={"todo": "open", "in-progress": "in_progress"}.get(state, state),
-        labels=label or None,
-        assignee=assignee,
-        q=search,
-        page=page,
-        per_page=limit,
-    )
-    issues = [i for i in found.items if i.status == "todo"] if state == "todo" else found.items
+    query = dict(labels=label or None, assignee=assignee, q=search)
+    if state == "todo":
+        # The API cannot ask for "open without the in-progress label", so read the open list and
+        # keep the to-do rows. Paging has to happen after that filter, or a page would come back
+        # short (or empty) while the next one still held to-do issues.
+        todo: list = []
+        fetched, api_page = 0, 1
+        while True:
+            chunk = client.list_issues(project_id, status="open", page=api_page, per_page=100, **query)
+            todo += [i for i in chunk.items if i.status == "todo"]
+            fetched += len(chunk.items)
+            if not chunk.items or fetched >= chunk.total:
+                break
+            api_page += 1
+        issues = todo[(page - 1) * limit : page * limit]
+        found = models.IssueList(items=issues, total=len(todo), page=page, per_page=limit)
+    else:
+        found = client.list_issues(
+            project_id, status={"in-progress": "in_progress"}.get(state, state), page=page, per_page=limit, **query
+        )
+        issues = found.items
     if as_json:
         _emit_json({"total": found.total, "page": found.page, "per_page": found.per_page, "items": [json_out.issue(i) for i in issues]})
         return
@@ -4179,19 +4189,21 @@ def issues_create(
     edit: bool = _ISSUE_EDIT,
     label: Optional[list[str]] = typer.Option(None, "--label", "-l", help="A label the project has. Repeat for several."),
     assignee: Optional[list[str]] = typer.Option(None, "--assignee", "-a", help="A user id. Repeat for several."),
-    status: str = typer.Option("todo", "--status", help="Start as todo, in-progress or done."),
+    status: str = typer.Option("todo", "--status", "-s", help="Start as todo, in-progress or done."),
     project: Optional[str] = _ISSUE_PROJECT,
     as_json: bool = _JSON,
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
 ) -> None:
     """File an issue."""
+    if not title.strip():
+        _fail("The title can't be empty. Pass [bold]--title[/bold] with a line that stands on its own.")
     text = _issue_text(body, body_file, edit, noun="description")
     payload: dict = {"title": title, "body": text or "", "status": _issue_status(status)}
-    if label:
-        payload["labels"] = label
-    if assignee:
-        payload["assignees"] = assignee
+    if labels := [x for x in label or [] if x]:
+        payload["labels"] = labels
+    if assignees := [x for x in assignee or [] if x]:
+        payload["assignees"] = assignees
     project_id = _resolve_project(project, api_url, org)
     client = _get_client(api_url=api_url, org=org)
 

@@ -51,7 +51,8 @@ class Api:
             status = params.get("status", ["open"])[0]
             wanted = {"open": ("todo", "in_progress"), "in_progress": ("in_progress",), "done": ("done",), "all": ("todo", "in_progress", "done")}[status]
             items = [i for i in self.issues if i["status"] in wanted]
-            return httpx.Response(200, json={"items": items, "total": len(items), "page": 1, "per_page": 30})
+            page, per_page = int(params.get("page", ["1"])[0]), int(params.get("per_page", ["30"])[0])
+            return httpx.Response(200, json={"items": items[(page - 1) * per_page : page * per_page], "total": len(items), "page": page, "per_page": per_page})
         if path.startswith(base + "/"):
             rest = path[len(base) + 1:].split("/")
             issue = next((i for i in self.issues if str(i["number"]) == rest[0]), None)
@@ -100,6 +101,31 @@ def test_list_shows_open_issues_with_their_column(api):
 def test_list_todo_hides_in_progress_issues(api):
     result = run("list", "--state", "todo")
     assert "Costs ignore overtime" in result.stdout and "Add a night shift" not in result.stdout
+
+
+def test_list_todo_pages_after_filtering(api):
+    # Page 1 of the open list holds only in-progress issues; the to-do ones sit behind them.
+    api.issues = [_issue(n, f"Busy {n}", status="in_progress") for n in range(1, 4)] + [_issue(n, f"Idea {n}") for n in range(4, 9)]
+    first = json.loads(run("list", "--state", "todo", "--limit", "2", "--json").stdout)
+    assert [i["number"] for i in first["items"]] == [4, 5] and first["total"] == 5
+    last = json.loads(run("list", "--state", "todo", "--limit", "2", "--page", "3", "--json").stdout)
+    assert [i["number"] for i in last["items"]] == [8]
+    hint = run("list", "--state", "todo", "--limit", "2").stdout
+    assert "Showing 2 of 5" in hint and "--page 2" in hint
+
+
+def test_list_todo_walks_every_api_page(api):
+    api.issues = [_issue(n, f"Busy {n}", status="in_progress") for n in range(1, 151)] + [_issue(151, "The only idea")]
+    data = json.loads(run("list", "--state", "todo", "--json").stdout)
+    assert [i["number"] for i in data["items"]] == [151] and data["total"] == 1
+
+
+def test_create_rejects_an_empty_title_and_drops_empty_labels(api):
+    assert run("create", "--title", "  ").exit_code == 1
+    assert not [c for c in api.calls if c[0] == "POST"]
+    run("create", "--title", "Real", "--label", "", "-s", "in-progress")
+    _, _, _, body = api.calls[-1]
+    assert "labels" not in body and body["status"] == "in_progress"
 
 
 def test_list_sends_the_state_labels_and_search_to_the_api(api):

@@ -1942,7 +1942,8 @@
         },
         {
           "opts": [
-            "--status"
+            "--status",
+            "-s"
           ],
           "secondary_opts": [],
           "kind": "option",
@@ -2150,7 +2151,7 @@
     },
     {
       "path": "issues list",
-      "help": "List a project's issues, most recently active first.",
+      "help": "List a project's issues, newest first.",
       "params": [
         {
           "opts": [
