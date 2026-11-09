@@ -1,5 +1,5 @@
 {
-  "version": 14,
+  "version": 16,
   "discovery": {
     "dashboardDir": "dashboard",
     "rootPath": "dashboard.toml"
@@ -316,7 +316,7 @@
   "widgetTypes": [
     {
       "type": "metric",
-      "description": "The one KPI card: a title, a large value, an optional description line and an optional trend (the delta, with an arrow that is green when the change is good and red when it is bad). Use one `metric` per number; consecutive `metric` widgets sit side by side in one row. Put a per-entity breakdown (per machine, per shift) in a `table` or chart, not in a KPI card.",
+      "description": "The one KPI card: a short title (a few words: put units and qualifiers such as \"month to date\" in `description`, not in the title), a large value, an optional description line and an optional trend (the delta, with an arrow that is green when the change is good and red when it is bad). Use one `metric` per number; consecutive `metric` widgets sit side by side in one row. Put a per-entity breakdown (per machine, per shift) in a `table` or chart, not in a KPI card.",
       "fields": [
         {
           "tomlKey": "value_key",
@@ -411,6 +411,14 @@
           "required": true,
           "isOutputPath": false,
           "doc": "One or more `{ key, label? }` entries, in display order. `key` is a top-level field on each row (not a dot-path)."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
@@ -474,6 +482,14 @@
           "required": false,
           "isOutputPath": true,
           "doc": "Dot-path to a total-capacity number (e.g. total yard positions). When the rows' summed value_key is less than this, a synthetic \"Free\" tile fills the remainder, so area doubles as a capacity gauge. Omitted, or at/below the summed value, adds no tile."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
@@ -537,6 +553,14 @@
           "required": false,
           "isOutputPath": false,
           "doc": "Suffix appended to a cell's tooltip value, e.g. \"cycles\"."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
@@ -707,6 +731,14 @@
           "required": false,
           "isOutputPath": false,
           "doc": "Pins a pie/donut slice (by its `x_key` value) or a `group_key` group to a color, e.g. `colors = { \"Late\" = \"red-600\" }`. Every other slice or group still cycles the default grays. Leave color unset unless the user asks for one: unset colors render as neutral grays that adapt to light/dark mode, which is the default look. When the user does ask, use a Tailwind color name (`<family>-<shade>`, e.g. `green-300`, `red-600`, or `black`/`white` — see the schema's `colorNames`), never hex. A single name is used as-is in both themes; prefer a `{ light = \"...\", dark = \"...\" }` pair (e.g. a darker shade for light mode and a lighter one for dark mode) so it reads on both backgrounds."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
@@ -798,6 +830,14 @@
           "required": false,
           "isOutputPath": false,
           "doc": "How start/end/duration values are read: a plain display suffix (e.g. \"min\"), or a wall-clock sentinel — \"epoch\" (seconds since epoch), \"epoch_ms\" (milliseconds), or \"iso\" (an ISO 8601 string) — rendered as a real time instead of a bare number."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
@@ -948,6 +988,14 @@
           "required": false,
           "isOutputPath": false,
           "doc": "How start/end/duration (and region) values are read: a plain display suffix (e.g. \"min\"), or a wall-clock sentinel — \"epoch\" (seconds since epoch), \"epoch_ms\" (milliseconds), or \"iso\" (an ISO 8601 string) — rendered as a real time instead of a bare number."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
@@ -1081,6 +1129,14 @@
           "required": false,
           "isOutputPath": false,
           "doc": "Plain-text attribution shown in the map's corner (HTML is escaped, not rendered). Defaults to OpenStreetMap's, matching the default `tile_url`."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
         }
       ],
       "dataExample": {
@@ -1125,6 +1181,182 @@
         ]
       },
       "tomlExample": "[[widgets]]\ntype = \"map\"\nid = \"routes\"\ntitle = \"Delivery routes\"\npoints_key = \"stops\"\nlabel_key = \"label\"\ncolor_key = \"vehicle\"\nroutes_key = \"routes\"\nroute_color_key = \"vehicle\""
+    },
+    {
+      "type": "input-number",
+      "description": "A number box for a `number` or `integer` input, e.g. a fleet size or a price. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label hint, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
+      "fields": [
+        {
+          "tomlKey": "input",
+          "as": "input",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "Name of the `[[inputs]]` entry in `harumi.toml` this control sets. An undeclared name, or one of the wrong type, draws an error tile."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
+        }
+      ],
+      "dataExample": {},
+      "tomlExample": "[[widgets]]\ntype = \"input-number\"\nid = \"number-control\"\ntitle = \"Demand multiplier\"\ninput = \"demand_multiplier\""
+    },
+    {
+      "type": "input-slider",
+      "description": "A slider for a `number` or `integer` input that declares both `min` and `max`, e.g. a demand multiplier from 0.5 to 2. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label hint, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
+      "fields": [
+        {
+          "tomlKey": "input",
+          "as": "input",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "Name of the `[[inputs]]` entry in `harumi.toml` this control sets. An undeclared name, or one of the wrong type, draws an error tile."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
+        }
+      ],
+      "dataExample": {},
+      "tomlExample": "[[widgets]]\ntype = \"input-slider\"\nid = \"slider-control\"\ntitle = \"Demand multiplier\"\ninput = \"demand_multiplier\""
+    },
+    {
+      "type": "input-toggle",
+      "description": "A switch for a `boolean` input, e.g. \"include weekends\". Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label hint, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
+      "fields": [
+        {
+          "tomlKey": "input",
+          "as": "input",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "Name of the `[[inputs]]` entry in `harumi.toml` this control sets. An undeclared name, or one of the wrong type, draws an error tile."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
+        }
+      ],
+      "dataExample": {},
+      "tomlExample": "[[widgets]]\ntype = \"input-toggle\"\nid = \"toggle-control\"\ntitle = \"Demand multiplier\"\ninput = \"demand_multiplier\""
+    },
+    {
+      "type": "input-select",
+      "description": "A dropdown for an `enum` input; the choices are its declared `options`. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label hint, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
+      "fields": [
+        {
+          "tomlKey": "input",
+          "as": "input",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "Name of the `[[inputs]]` entry in `harumi.toml` this control sets. An undeclared name, or one of the wrong type, draws an error tile."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
+        }
+      ],
+      "dataExample": {},
+      "tomlExample": "[[widgets]]\ntype = \"input-select\"\nid = \"select-control\"\ntitle = \"Demand multiplier\"\ninput = \"demand_multiplier\""
+    },
+    {
+      "type": "input-text",
+      "description": "A text field for a `string` input, e.g. a scenario label. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label hint, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
+      "fields": [
+        {
+          "tomlKey": "input",
+          "as": "input",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "Name of the `[[inputs]]` entry in `harumi.toml` this control sets. An undeclared name, or one of the wrong type, draws an error tile."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
+        }
+      ],
+      "dataExample": {},
+      "tomlExample": "[[widgets]]\ntype = \"input-text\"\nid = \"text-control\"\ntitle = \"Demand multiplier\"\ninput = \"demand_multiplier\""
+    },
+    {
+      "type": "input-date",
+      "description": "A date picker for a `date` input (written as YYYY-MM-DD), e.g. the first day of the planning horizon. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label hint, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
+      "fields": [
+        {
+          "tomlKey": "input",
+          "as": "input",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "Name of the `[[inputs]]` entry in `harumi.toml` this control sets. An undeclared name, or one of the wrong type, draws an error tile."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
+        }
+      ],
+      "dataExample": {},
+      "tomlExample": "[[widgets]]\ntype = \"input-date\"\nid = \"date-control\"\ntitle = \"Demand multiplier\"\ninput = \"demand_multiplier\""
+    },
+    {
+      "type": "run-button",
+      "description": "Starts a run with the values of the dashboard's input controls. It shows how many inputs differ from the run on screen, with a Reset button, and explains why it is disabled when it is (a run already in progress, an invalid value, no permission). The results stay those of the run on screen until the new run finishes. Place one beside the `input-*` controls.",
+      "fields": [
+        {
+          "tomlKey": "label",
+          "as": "label",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "The button text. Defaults to \"Run\"."
+        },
+        {
+          "tomlKey": "confirm",
+          "as": "confirm",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "When set, a confirmation dialog shows this text before the run starts. Use it for runs that are slow or expensive."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
+        }
+      ],
+      "dataExample": {},
+      "tomlExample": "[[widgets]]\ntype = \"run-button\"\nid = \"rerun\"\ntitle = \"Re-run the plan\"\nlabel = \"Re-run plan\""
     }
   ]
 }
