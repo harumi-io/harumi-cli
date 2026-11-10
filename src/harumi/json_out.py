@@ -25,6 +25,7 @@ FILE = ("name", "size", "last_modified")
 SHARE = (
     "id", "label", "enabled", "password_set", "app_enabled", "chat_enabled", "run_history_enabled", "run_control_enabled",
 )
+API_KEY = ("id", "name", "scopes", "project_ids", "created_at", "expires_at", "last_used_at", "revoked_at")
 DATASOURCE = ("id", "name", "type", "host", "port", "database", "username", "use_proxy", "proxy_host")
 SCHEDULE = (
     "id", "cron", "start_at", "git_branch", "git_tag", "git_commit", "command", "kernel_spec", "output_format", "email_to", "status",
@@ -87,6 +88,11 @@ def file(f: Any) -> dict:
 
 def share(link: Any) -> dict:
     return _pick(link, SHARE)
+
+
+def api_key(k: Any) -> dict:
+    """No `api_key` field: the masked prefix is not a secret, but a script has no use for it."""
+    return _pick(k, API_KEY)
 
 
 def datasource(d: Any) -> dict:

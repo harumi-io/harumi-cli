@@ -26,6 +26,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [files](#files)
 - [dashboard](#dashboard)
 - [share](#share)
+- [keys](#keys)
 - [datasources](#datasources)
 - [schedules](#schedules)
 - [secrets](#secrets)
@@ -410,6 +411,19 @@ Manages `/projects/{id}/share-links*` — a project's public, unauthenticated da
 `--project` on every subcommand overrides the `.harumi` binding.
 
 
+## `keys`
+
+```
+harumi keys list [--json]
+harumi keys rm KEY [--yes]
+```
+
+Manages the signed-in user's own `pk_` API keys (`/keys`). **There is no `create` or `rotate`**: the API asks for a fresh authenticator code for those, and the CLI signs in by an emailed code and cannot ask for one. Do them in the web app, under Settings > API keys; the CLI says so when there are no keys, and after a revoke. Revoking needs no second factor, so a leaked key can be killed from a terminal or a script.
+
+- **`list`**: `GET /keys`. A table of `id` (first 8), `name`, `scopes` (`outputs:read`, `runs:write`), `projects` (how many the key reaches), `state` (`active`, `expired`, `revoked`), `last used` and `expires`. `--json` has `id`, `name`, `scopes`, `project_ids`, `created_at`, `expires_at`, `last_used_at`, `revoked_at` and `state`. **The key itself is never printed**, not even masked: the API only returns the full secret when a key is created or rotated.
+- **`rm`**: `DELETE /keys/{id}`. `KEY` is the key's id, the start of its id (when it names one key), or its exact name. It lists first to resolve `KEY` and to name the key in the question, then asks (`--yes` skips it). Anything using the key stops working immediately; this cannot be undone. A key that is already revoked is reported and nothing is sent. With no terminal and no `--yes` it is refused, like every confirmation.
+- Keys are for **server-side** use only: anyone holding one acts as its creator on the listed projects. Never put one in browser code or a public repository.
+
 ## `datasources`
 
 Real endpoints, live today (`harumi-api/src/api/datasources/router.py`). Scoped per-project by `(project_id, name)`.
@@ -606,7 +620,7 @@ Every command that deletes or removes something follows one rule, from `projects
 | At a terminal, no `--yes` | Asks `[y/N]`. Enter is **No**. Declining prints `Aborted.` and **exits 1**, so `harumi org rm X && deploy` stops. |
 | No terminal (a script, CI, an agent, a pipe), no `--yes` | **Refuses at once**: `Cannot ask here: no interactive terminal. Run it again with --yes to go ahead.` and exits 1. It never prints a prompt into a log and waits, and a `y` piped to stdin is **not** consent (it was not given to this question). |
 
-The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `tags rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`, `org leave`, `org invitations decline`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 1.0.0.
+The commands: `projects rm`, `files rm`, `keys rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `tags rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`, `org leave`, `org invitations decline`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 1.0.0.
 
 - **The permanent ones that take other things with them ask you to type the name** instead of `y`: `projects rm` (the project name) and `org rm` (the organization name, exactly: case and spaces count; Enter is a no). An agent passes `--yes` and still must name the project or organization (`--yes` with no name is refused).
 - **The question says which one**, not a UUID: a schedule by its cron, branch and command, a memory by its text, a file by its name and size, a share link by its label.

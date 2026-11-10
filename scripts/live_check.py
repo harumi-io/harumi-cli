@@ -178,6 +178,9 @@ TIERS: dict[str, tuple[str, str]] = {
     "share update": (CANARY, ""),
     "share rotate": (CANARY, ""),
     "share rm": (CANARY, ""),
+    # -- api keys -------------------------------------------------------------
+    "keys list": (READ, ""),
+    "keys rm": (MANUAL, "a key can only be created or rotated in the web app (it needs an authenticator code), so there is nothing disposable to revoke"),
     # -- datasources ----------------------------------------------------------
     # The whole group needs a database the backend can actually reach. Creating
     # one against production would also mean putting real credentials in CI.
@@ -311,6 +314,8 @@ PLAN: tuple[Step, ...] = (
     Step("share update", ("{share}", "--no-password", "--project", "{project}")),
     Step("share rotate", ("{share}", "--yes", "--project", "{project}")),
     Step("share rm", ("{share}", "--yes", "--project", "{project}")),
+    # -- api keys (listing only) ----------------------------------------------
+    Step("keys list", ()),
     # -- datasources (read-only half) -----------------------------------------
     Step("datasources list", ("--project", "{project}")),
     # -- runs -----------------------------------------------------------------

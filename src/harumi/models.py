@@ -663,6 +663,23 @@ class ProjectShareLinkList(BaseModel):
     links: list[ProjectShareLink] = Field(default_factory=list)
 
 
+class ApiKeyInfo(BaseModel):
+    """One of the user's `pk_` API keys (`GET /keys`, `DELETE /keys/{id}`). `api_key` is masked: the
+    full secret is only ever returned when a key is created or rotated, and the CLI does neither."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    api_key: str = ""
+    scopes: list[str] = Field(default_factory=list)
+    project_ids: list[str] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+
+
 class ProjectFile(BaseModel):
     """One entry from `GET /projects/{id}/files` — mirrors harumi-api's
     `ProjectFile` schema (`src/api/projects/schemas.py`)."""
