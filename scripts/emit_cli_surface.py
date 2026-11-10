@@ -65,6 +65,22 @@ def _leaves(command: Any, path: list[str]):
         yield path, command
 
 
+def _type_name(param: Any) -> str:
+    """The label the contract records for a parameter's type ("str", "boolean", "path", "int range", ...)."""
+    click_type = getattr(param, "type", None)
+    if click_type is not None:
+        return _TYPE_ALIASES.get(click_type.name, click_type.name)
+    # typer 0.29 dropped click's type objects; the same facts live on `type_descriptor`.
+    desc = param.type_descriptor
+    if desc.is_ranged:
+        return f"{desc.ranged_type_name} range"
+    if desc.is_path:
+        return "path"
+    # `multiple` is recorded on its own, so a repeated option is typed by its element ("list[str]" -> "str").
+    name = param.bare_type().removeprefix("list[").removesuffix("]")
+    return {"bool": "boolean", "Path": "path"}.get(name, name)
+
+
 def _param_info(param: Any) -> dict:
     return {
         "opts": list(param.opts),
@@ -78,7 +94,7 @@ def _param_info(param: Any) -> dict:
         # opts[0].startswith("--") breaks on short-only or positional params,
         # so the click-assigned kind is recorded directly.
         "kind": param.param_type_name,
-        "type": _TYPE_ALIASES.get(param.type.name, param.type.name),
+        "type": _type_name(param),
         "required": bool(param.required),
         "multiple": bool(getattr(param, "multiple", False)),
         "default": param.default if isinstance(param.default, (str, int, float, bool, type(None))) else None,
