@@ -98,10 +98,19 @@ def test_rm_matches_the_start_of_an_id(api):
     assert ("DELETE", "/api/keys/bbbb3333-0000-0000-0000-000000000003") in api.calls
 
 
-def test_rm_declined_changes_nothing(api):
+def test_rm_declined_changes_nothing(api, monkeypatch):
+    monkeypatch.setattr(interactive, "is_interactive", lambda: True)
     result = runner.invoke(cli.app, ["keys", "rm", "moldagem"], input="n\n")
+    assert result.exit_code == 1
+    assert "Aborted" in result.output
     assert not [c for c in api.calls if c[0] == "DELETE"]
-    assert result.exit_code != 0 or "Revoked" not in result.stdout
+
+
+def test_rm_without_yes_and_without_a_terminal_is_refused(api):
+    result = run("rm", "moldagem")
+    assert result.exit_code == 1
+    assert "Cannot ask here" in result.output
+    assert not [c for c in api.calls if c[0] == "DELETE"]
 
 
 def test_rm_an_ambiguous_prefix_is_refused(api):

@@ -5524,7 +5524,7 @@ def keys_list(
         table.add_row(
             escape(key.id[:8]),
             escape(_printable(key.name)),
-            escape(", ".join(key.scopes)),
+            escape(_printable(", ".join(key.scopes))),
             str(len(key.project_ids)),
             state if state == "active" else f"[dim]{state}[/dim]",
             _ago(key.last_used_at) or "[dim]never[/dim]",
