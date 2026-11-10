@@ -107,6 +107,7 @@ _EXPECTED_WIDGET_CONTRACT = {
         "routes_key*",
         "route_path_key",
         "route_color_key",
+        "colors",
         "tile_url",
         "attribution",
         "subtitle",
