@@ -1,5 +1,5 @@
 {
-  "version": 17,
+  "version": 18,
   "discovery": {
     "dashboardDir": "dashboard",
     "rootPath": "dashboard.toml"
@@ -1333,6 +1333,30 @@
       ],
       "dataExample": {},
       "tomlExample": "[[widgets]]\ntype = \"input-date\"\nid = \"date-control\"\ntitle = \"Start date\"\ninput = \"start_date\""
+    },
+    {
+      "type": "input-file",
+      "description": "A drop zone for a `file` input, e.g. an orders spreadsheet. The viewer can upload a file for the next run only, or leave it empty to use the project's own file. The file's accepted extensions, size limit and required columns come from the input's declaration, and it works on share links too when the link allows inputs. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
+      "fields": [
+        {
+          "tomlKey": "input",
+          "as": "input",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "Name of the `[[inputs]]` entry in `harumi.toml` this control sets. An undeclared name, or one of the wrong type, draws an error tile."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
+        }
+      ],
+      "dataExample": {},
+      "tomlExample": "[[widgets]]\ntype = \"input-file\"\nid = \"file-control\"\ntitle = \"Orders file\"\ninput = \"orders\""
     },
     {
       "type": "run-button",

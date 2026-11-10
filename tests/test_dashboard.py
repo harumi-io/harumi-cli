@@ -119,6 +119,7 @@ _EXPECTED_WIDGET_CONTRACT = {
     "input-select": ["input!", "subtitle"],
     "input-text": ["input!", "subtitle"],
     "input-date": ["input!", "subtitle"],
+    "input-file": ["input!", "subtitle"],
     "run-button": ["label", "confirm", "subtitle"],
 }
 
@@ -343,6 +344,7 @@ class TestParseWidgetEntry:
                     "input-select",
                     "input-text",
                     "input-date",
+                    "input-file",
                 )
             },
             "run-button": {"type": "run-button", "id": "rerun", "title": "Re-run"},
