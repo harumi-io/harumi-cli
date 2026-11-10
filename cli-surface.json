@@ -2495,6 +2495,103 @@
       ]
     },
     {
+      "path": "keys list",
+      "help": "List your API keys: what each can do, how many projects it reaches, and when it was last used.",
+      "params": [
+        {
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Print JSON on stdout instead of a table, for scripts."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
+    },
+    {
+      "path": "keys rm",
+      "help": "Revoke an API key.",
+      "params": [
+        {
+          "opts": [
+            "key"
+          ],
+          "secondary_opts": [],
+          "kind": "argument",
+          "type": "str",
+          "required": true,
+          "multiple": false,
+          "default": null,
+          "help": "Key id (or the start of it), or its exact name."
+        },
+        {
+          "opts": [
+            "--yes",
+            "-y"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "boolean",
+          "required": false,
+          "multiple": false,
+          "default": false,
+          "help": "Skip the confirmation prompt."
+        },
+        {
+          "opts": [
+            "--api-url"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Use another harumi-api (self-hosted or local)."
+        },
+        {
+          "opts": [
+            "--org"
+          ],
+          "secondary_opts": [],
+          "kind": "option",
+          "type": "str",
+          "required": false,
+          "multiple": false,
+          "default": null,
+          "help": "Run this command in another organization, by id. `harumi org use` sets the default."
+        }
+      ]
+    },
+    {
       "path": "link",
       "help": "Bind the current directory to an existing Harumi project and configure the git remote.",
       "params": [

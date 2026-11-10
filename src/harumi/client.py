@@ -27,6 +27,7 @@ from harumi.errors import (
     transport_errors_as_api_error,
 )
 from harumi.models import (
+    ApiKeyInfo,
     BranchInfo,
     TagInfo,
     BlueprintSummary,
@@ -1056,6 +1057,17 @@ class Client:
 
     def decline_invitation(self, organization_id: str) -> None:
         self.api.request("POST", f"/users/invitations/{organization_id}/decline")
+
+    # -- API keys ------------------------------------------------------------
+    # /keys -- the signed-in user's own `pk_` keys. Creating and rotating one needs a fresh
+    # authenticator code, which the CLI cannot ask for, so only listing and revoking are here.
+
+    def list_api_keys(self) -> list[ApiKeyInfo]:
+        response = self.api.request("GET", "/keys")
+        return [ApiKeyInfo.model_validate(key) for key in response.json()]
+
+    def revoke_api_key(self, key_id: str) -> None:
+        self.api.request("DELETE", f"/keys/{key_id}")
 
     # -- Project share links -------------------------------------------------
     # /projects/{id}/share-links — a project's public dashboard links (many

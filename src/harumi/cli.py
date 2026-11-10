@@ -228,7 +228,7 @@ from harumi.git import (
     push_scratch,
     repo_root,
 )
-from harumi.models import LoggedUser, ProjectFile, ProjectShareLink
+from harumi.models import ApiKeyInfo, LoggedUser, ProjectFile, ProjectShareLink
 
 # Words people reach for that this CLI spells differently. Renaming `files ls`, `org create`, `memories edit`
 # and `secrets set` to one scheme would need a deprecation window each, so a wrong guess is answered instead:
@@ -5465,6 +5465,97 @@ def share_rotate(
 
 
 # ---------------------------------------------------------------------------
+# harumi keys
+# ---------------------------------------------------------------------------
+
+keys_app = _typer(
+    help="List and revoke your API keys (pk_...); create and rotate them in the web app."
+)
+app.add_typer(keys_app, name="keys")
+
+_KEYS_WEB_HINT = "Create or rotate a key in the web app, under Settings > API keys: it asks for your authenticator code, which the CLI can't."
+
+
+def _key_state(key: ApiKeyInfo) -> str:
+    if key.revoked_at is not None:
+        return "revoked"
+    expires = key.expires_at
+    if expires is not None:
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if expires <= datetime.now(timezone.utc):
+            return "expired"
+    return "active"
+
+
+def _match_api_key(keys: list[ApiKeyInfo], typed: str) -> ApiKeyInfo:
+    """The one key `typed` names: its id, the start of its id, or its exact name."""
+    exact = [k for k in keys if k.id == typed or k.name == typed]
+    if len(exact) == 1:
+        return exact[0]
+    starts = exact or [k for k in keys if typed and k.id.startswith(typed)]
+    if len(starts) == 1:
+        return starts[0]
+    if starts:
+        _fail(f"'{escape(typed)}' matches more than one key. Give more of the id (see [bold]harumi keys list[/bold]).")
+    _fail(f"No key '{escape(typed)}'. See your keys with [bold]harumi keys list[/bold].")
+
+
+@keys_app.command("list")
+@_handle_errors
+def keys_list(
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """List your API keys: what each can do, how many projects it reaches, and when it was last used."""
+    client = _get_client(api_url=api_url, org=org)
+    keys = client.list_api_keys()
+    if as_json:
+        _emit_json([{**json_out.api_key(k), "state": _key_state(k)} for k in keys])
+        return
+    if not keys:
+        console.print(f"No API keys yet. {_KEYS_WEB_HINT}")
+        return
+    table = Table("id", "name", "scopes", "projects", "state", "last used", "expires")
+    table.columns[0].no_wrap = True
+    for key in keys:
+        state = _key_state(key)
+        table.add_row(
+            escape(key.id[:8]),
+            escape(_printable(key.name)),
+            escape(_printable(", ".join(key.scopes))),
+            str(len(key.project_ids)),
+            state if state == "active" else f"[dim]{state}[/dim]",
+            _ago(key.last_used_at) or "[dim]never[/dim]",
+            key.expires_at.strftime("%Y-%m-%d") if key.expires_at else "",
+        )
+    console.print(table)
+    console.print("[dim]Revoke one with harumi keys rm <id>.[/dim]")
+
+
+@keys_app.command("rm")
+@_handle_errors
+def keys_rm(
+    key: str = typer.Argument(..., help="Key id (or the start of it), or its exact name."),
+    yes: bool = _YES,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Revoke an API key. Anything using it stops working immediately, and this can't be undone."""
+    client = _get_client(api_url=api_url, org=org)
+    target = _match_api_key(client.list_api_keys(), key)
+    if target.revoked_at is not None:
+        console.print(f"Key [bold]{escape(_printable(target.name))}[/bold] is already revoked.")
+        return
+    # Name the key, not just the id: a prefix that matched the wrong one is then easy to spot.
+    _confirm(f"Revoke key '{_printable(target.name)}' ({target.id})? Anything using it stops working immediately.", yes=yes)
+    with _pointing_to("harumi keys list"):
+        client.revoke_api_key(target.id)
+    console.print(f"[bold red]Revoked[/bold red] key [bold]{escape(_printable(target.name))}[/bold]. {_KEYS_WEB_HINT}")
+
+
+# ---------------------------------------------------------------------------
 # harumi datasources
 
 # ---------------------------------------------------------------------------
@@ -6904,7 +6995,7 @@ _PANELS: dict[str, list[str]] = {
     "Get started": ["login", "start", "new", "import", "clone", "link", "examples"],
     "Run and results": ["run", "runs", "compare", "check", "specs", "usage"],
     "Project": ["projects", "issues", "files", "dashboard", "share", "datasources", "tags", "schedules", "secrets", "memories", "skills"],
-    "Account and team": ["whoami", "logout", "profile", "org", "agent-skills"],
+    "Account and team": ["whoami", "logout", "profile", "keys", "org", "agent-skills"],
     "Help and updates": ["status", "whats-new"],
 }
 
