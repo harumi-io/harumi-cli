@@ -40,14 +40,15 @@ _EXPECTED_WIDGET_CONTRACT = {
         "format[number|currency|percent]",
         "unit",
     ],
-    "table": ["rows_key!*", "columns!"],
-    "treemap": ["items_key!*", "value_key!", "name_key!", "color_key", "colors", "capacity_key*"],
+    "table": ["rows_key!*", "columns!", "subtitle"],
+    "treemap": ["items_key!*", "value_key!", "name_key!", "color_key", "colors", "capacity_key*", "subtitle"],
     "heatmap": [
         "items_key!*",
         "resource_key",
         "bucket_key",
         "value_key",
         "unit",
+        "subtitle",
     ],
     "chart": [
         "variant![line|bar|area|scatter|pie|donut]",
@@ -64,6 +65,7 @@ _EXPECTED_WIDGET_CONTRACT = {
         "x_label",
         "y_label",
         "colors",
+        "subtitle",
     ],
     "gantt-chart": [
         "tasks_key!*",
@@ -75,6 +77,7 @@ _EXPECTED_WIDGET_CONTRACT = {
         "color_key",
         "colors",
         "time_unit",
+        "subtitle",
     ],
     "timeline": [
         "items_key!*",
@@ -92,6 +95,7 @@ _EXPECTED_WIDGET_CONTRACT = {
         "region_label_key",
         "region_resource_key",
         "time_unit",
+        "subtitle",
     ],
     "map": [
         "points_key*",
@@ -103,9 +107,19 @@ _EXPECTED_WIDGET_CONTRACT = {
         "routes_key*",
         "route_path_key",
         "route_color_key",
+        "colors",
         "tile_url",
         "attribution",
+        "subtitle",
     ],
+    # Controls read nothing from output.json: `input` names an [[inputs]] entry of harumi.toml.
+    "input-number": ["input!", "subtitle"],
+    "input-slider": ["input!", "subtitle"],
+    "input-toggle": ["input!", "subtitle"],
+    "input-select": ["input!", "subtitle"],
+    "input-text": ["input!", "subtitle"],
+    "input-date": ["input!", "subtitle"],
+    "run-button": ["label", "confirm", "subtitle"],
 }
 
 
@@ -320,6 +334,18 @@ class TestParseWidgetEntry:
             "gantt-chart": {"type": "gantt-chart", "id": "g", "title": "G", "tasks_key": "schedule"},
             "timeline": {"type": "timeline", "id": "tl", "title": "TL", "items_key": "schedule"},
             "map": {"type": "map", "id": "mp", "title": "MP", "points_key": "stops"},
+            **{
+                control: {"type": control, "id": control, "title": "C", "input": "demand_multiplier"}
+                for control in (
+                    "input-number",
+                    "input-slider",
+                    "input-toggle",
+                    "input-select",
+                    "input-text",
+                    "input-date",
+                )
+            },
+            "run-button": {"type": "run-button", "id": "rerun", "title": "Re-run"},
         }
         for type_, entry in entries.items():
             widget, issue = parse_widget_entry(entry)
@@ -330,6 +356,11 @@ class TestParseWidgetEntry:
         # covering a type without anyone noticing, the same drift the
         # re-vendor step above exists to catch.
         assert set(entries) == set(widget_schemas())
+
+    def test_an_input_control_without_its_input_is_rejected(self):
+        widget, issue = parse_widget_entry({"type": "input-slider", "id": "s", "title": "S"})
+        assert widget is None
+        assert issue is not None and "input" in issue.message
 
     def test_rejects_unknown_widget_type(self):
         widget, issue = parse_widget_entry({"type": "pie-chart", "id": "p", "title": "P"})
