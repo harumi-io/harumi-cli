@@ -1,5 +1,5 @@
 {
-  "version": 16,
+  "version": 17,
   "discovery": {
     "dashboardDir": "dashboard",
     "rootPath": "dashboard.toml"
@@ -1115,6 +1115,14 @@
           "doc": "Route row field naming a categorical group, colored from a stable palette — e.g. which vehicle drove the route."
         },
         {
+          "tomlKey": "colors",
+          "as": "colorMap",
+          "type": "colorMap",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Pins specific `color_key` / `route_color_key` values to specific colors, e.g. `colors = { \"V1\" = \"sky-600\", \"V2\" = { light = \"orange-500\", dark = \"orange-400\" } }`. A value keeps one color on its stops and its route. Every other value still cycles through the default grays (skipping any color pinned here). Leave color unset unless the user asks for one: unset colors render as neutral grays that adapt to light/dark mode, which is the default look. When the user does ask, use a Tailwind color name (`<family>-<shade>`, e.g. `green-300`, `red-600`, or `black`/`white` — see the schema's `colorNames`), never hex. A single name is used as-is in both themes; prefer a `{ light = \"...\", dark = \"...\" }` pair (e.g. a darker shade for light mode and a lighter one for dark mode) so it reads on both backgrounds."
+        },
+        {
           "tomlKey": "tile_url",
           "as": "tileUrl",
           "type": "string",
@@ -1184,7 +1192,7 @@
     },
     {
       "type": "input-number",
-      "description": "A number box for a `number` or `integer` input, e.g. a fleet size or a price. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label hint, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
+      "description": "A number box for a `number` or `integer` input, e.g. a fleet size or a price. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
       "fields": [
         {
           "tomlKey": "input",
@@ -1204,11 +1212,11 @@
         }
       ],
       "dataExample": {},
-      "tomlExample": "[[widgets]]\ntype = \"input-number\"\nid = \"number-control\"\ntitle = \"Demand multiplier\"\ninput = \"demand_multiplier\""
+      "tomlExample": "[[widgets]]\ntype = \"input-number\"\nid = \"number-control\"\ntitle = \"Machines available\"\ninput = \"machines_available\""
     },
     {
       "type": "input-slider",
-      "description": "A slider for a `number` or `integer` input that declares both `min` and `max`, e.g. a demand multiplier from 0.5 to 2. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label hint, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
+      "description": "A slider for a `number` or `integer` input that declares both `min` and `max`, e.g. a demand multiplier from 0.5 to 2. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
       "fields": [
         {
           "tomlKey": "input",
@@ -1232,7 +1240,7 @@
     },
     {
       "type": "input-toggle",
-      "description": "A switch for a `boolean` input, e.g. \"include weekends\". Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label hint, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
+      "description": "A switch for a `boolean` input, e.g. \"include weekends\". Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
       "fields": [
         {
           "tomlKey": "input",
@@ -1252,11 +1260,11 @@
         }
       ],
       "dataExample": {},
-      "tomlExample": "[[widgets]]\ntype = \"input-toggle\"\nid = \"toggle-control\"\ntitle = \"Demand multiplier\"\ninput = \"demand_multiplier\""
+      "tomlExample": "[[widgets]]\ntype = \"input-toggle\"\nid = \"toggle-control\"\ntitle = \"Allow overtime\"\ninput = \"overtime\""
     },
     {
       "type": "input-select",
-      "description": "A dropdown for an `enum` input; the choices are its declared `options`. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label hint, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
+      "description": "A dropdown for an `enum` input; the choices are its declared `options`. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
       "fields": [
         {
           "tomlKey": "input",
@@ -1276,11 +1284,11 @@
         }
       ],
       "dataExample": {},
-      "tomlExample": "[[widgets]]\ntype = \"input-select\"\nid = \"select-control\"\ntitle = \"Demand multiplier\"\ninput = \"demand_multiplier\""
+      "tomlExample": "[[widgets]]\ntype = \"input-select\"\nid = \"select-control\"\ntitle = \"Shift\"\ninput = \"shift\""
     },
     {
       "type": "input-text",
-      "description": "A text field for a `string` input, e.g. a scenario label. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label hint, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
+      "description": "A text field for a `string` input, e.g. a scenario label. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
       "fields": [
         {
           "tomlKey": "input",
@@ -1300,11 +1308,11 @@
         }
       ],
       "dataExample": {},
-      "tomlExample": "[[widgets]]\ntype = \"input-text\"\nid = \"text-control\"\ntitle = \"Demand multiplier\"\ninput = \"demand_multiplier\""
+      "tomlExample": "[[widgets]]\ntype = \"input-text\"\nid = \"text-control\"\ntitle = \"Scenario note\"\ninput = \"scenario_note\""
     },
     {
       "type": "input-date",
-      "description": "A date picker for a `date` input (written as YYYY-MM-DD), e.g. the first day of the planning horizon. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label hint, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
+      "description": "A date picker for a `date` input (written as YYYY-MM-DD), e.g. the first day of the planning horizon. Binds by name to an `[[inputs]]` entry in the project's `harumi.toml`; its label, bounds, options and default come from there, so the dashboard cannot offer a value the solver refuses. The control starts from the values of the run on screen. It reads nothing from the run output. Pair it with a `run-button` widget, which starts the run.",
       "fields": [
         {
           "tomlKey": "input",
@@ -1324,7 +1332,7 @@
         }
       ],
       "dataExample": {},
-      "tomlExample": "[[widgets]]\ntype = \"input-date\"\nid = \"date-control\"\ntitle = \"Demand multiplier\"\ninput = \"demand_multiplier\""
+      "tomlExample": "[[widgets]]\ntype = \"input-date\"\nid = \"date-control\"\ntitle = \"Start date\"\ninput = \"start_date\""
     },
     {
       "type": "run-button",
