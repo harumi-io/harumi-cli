@@ -4932,13 +4932,17 @@ def dashboard_validate(
         project_id = _resolve_project(project, api_url, org)
         client = _get_client(api_url=api_url, org=org)
 
+    # Whether a repo-sourced custom widget's file exists: in the repo at --ref, else on disk.
+    repo_paths: Optional[set[str]] = None
     # name -> raw TOML, in picker order.
     specs: list[tuple[str, str]] = []
     if path is not None:
         specs.append((str(path), path.read_text()))
     elif ref:
         assert client is not None and project_id is not None
-        found = pick_dashboard_paths(f.path for f in client.list_repo_files(project_id, ref=ref))
+        repo_listing = [f.path for f in client.list_repo_files(project_id, ref=ref)]
+        repo_paths = set(repo_listing)
+        found = pick_dashboard_paths(repo_listing)
         if not found:
             _fail(f"No dashboard specs (dashboard/*.toml or dashboard.toml) on {ref!r}.")
         for repo_path in found:
@@ -4983,7 +4987,11 @@ def dashboard_validate(
         if len(specs) > 1:
             console.print(f"[bold]{escape(name)}[/bold]")
         try:
-            widgets, issues = validate_dashboard_toml(raw, output)
+            widgets, issues = validate_dashboard_toml(
+                raw,
+                output,
+                repo_file_exists=(lambda p: p in repo_paths) if repo_paths is not None else (lambda p: Path(p).is_file()),
+            )
         except DashboardTomlError as exc:
             console.print(f"[bold red]invalid[/bold red] {name} is not valid TOML: {exc}")
             failed = True

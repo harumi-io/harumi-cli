@@ -121,6 +121,7 @@ _EXPECTED_WIDGET_CONTRACT = {
     "input-date": ["input!", "subtitle"],
     "input-file": ["input!", "subtitle"],
     "run-button": ["label", "confirm", "subtitle"],
+    "custom": ["source!", "height", "width[half|full]", "capabilities[inputs|run]", "props", "subtitle"],
 }
 
 
@@ -131,7 +132,7 @@ def test_widget_contract_matches_the_vendored_schema_artifact():
             field.toml_key
             + ("!" if field.required else "")
             + ("*" if field.is_output_path else "")
-            + (f"[{'|'.join(field.values)}]" if field.kind == "enum" else "")
+            + (f"[{'|'.join(field.values)}]" if field.kind in ("enum", "stringList") else "")
             for field in fields
         ]
         for type_, fields in widget_schemas().items()
@@ -298,6 +299,50 @@ def test_importing_the_cli_does_not_read_the_artifact():
     assert dashboard_module.pick_dashboard_paths(["dashboard.toml"]) == ["dashboard.toml"]
 
 
+class TestCustomWidget:
+    @staticmethod
+    def _entry(**extra):
+        return {"type": "custom", "id": "cw", "title": "CW", "source": "widgets/board.html", **extra}
+
+    def test_keeps_props_and_known_capabilities(self):
+        widget, issue = parse_widget_entry(
+            self._entry(capabilities=["inputs", "run", "teleport", "inputs"], props={"key": "m.x", "n": [1, 2]}, width="half")
+        )
+        assert issue is None and widget is not None
+        assert widget["capabilities"] == ["inputs", "run"]
+        assert widget["props"] == {"key": "m.x", "n": [1, 2]}
+        assert widget["width"] == "half"
+
+    def test_an_empty_capabilities_list_is_kept(self):
+        widget, _ = parse_widget_entry(self._entry(capabilities=[]))
+        assert widget is not None and widget["capabilities"] == []
+
+    @pytest.mark.parametrize(
+        "source",
+        ["", "output:", "/etc/passwd", "../x.html", "widgets/../x.html", "a//b.html", "widgets/board.js", "output:../x.html"],
+    )
+    def test_a_bad_source_is_rejected(self, source):
+        widget, issue = parse_widget_entry(self._entry(source=source))
+        assert widget is None and issue is not None and "custom" in issue.message
+
+    def test_an_output_source_is_accepted(self):
+        widget, issue = parse_widget_entry(self._entry(source="output:plots/shifts.html"))
+        assert issue is None and widget is not None
+
+    def test_a_missing_repo_file_is_reported_but_the_widget_is_kept(self):
+        body = "[[widgets]]\ntype = 'custom'\nid = 'cw'\ntitle = 'CW'\nsource = 'widgets/board.html'\n"
+        widgets, issues = validate_dashboard_toml(body, repo_file_exists=lambda p: False)
+        assert len(widgets) == 1
+        assert [i.label for i in issues] == ["missing"] and not issues[0].dropped
+        _, ok = validate_dashboard_toml(body, repo_file_exists=lambda p: p == "widgets/board.html")
+        assert ok == []
+
+    def test_output_sources_are_never_checked_against_the_repo(self):
+        body = "[[widgets]]\ntype = 'custom'\nid = 'cw'\ntitle = 'CW'\nsource = 'output:a.html'\n"
+        _, issues = validate_dashboard_toml(body, repo_file_exists=lambda p: False)
+        assert issues == []
+
+
 class TestParseWidgetEntry:
     def test_parses_a_minimal_valid_entry_for_every_type(self):
         entries = {
@@ -348,6 +393,7 @@ class TestParseWidgetEntry:
                 )
             },
             "run-button": {"type": "run-button", "id": "rerun", "title": "Re-run"},
+            "custom": {"type": "custom", "id": "cw", "title": "CW", "source": "widgets/board.html"},
         }
         for type_, entry in entries.items():
             widget, issue = parse_widget_entry(entry)
@@ -924,7 +970,7 @@ def test_every_color_bearing_field_kind_is_checked_for_ignored_values():
     from harumi.dashboard import _KNOWN_FIELD_KINDS
 
     checked = {"series", "colorMap"}
-    carries_no_color = {"string", "number", "enum", "columns"}
+    carries_no_color = {"string", "number", "enum", "columns", "stringList", "table"}
     assert _KNOWN_FIELD_KINDS == checked | carries_no_color, (
         "a new field kind was added to the schema: decide whether it carries colors and, if so, "
         "teach widget_warnings to check it"

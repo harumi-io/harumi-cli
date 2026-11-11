@@ -1,5 +1,5 @@
 {
-  "version": 18,
+  "version": 19,
   "discovery": {
     "dashboardDir": "dashboard",
     "rootPath": "dashboard.toml"
@@ -1389,6 +1389,70 @@
       ],
       "dataExample": {},
       "tomlExample": "[[widgets]]\ntype = \"run-button\"\nid = \"rerun\"\ntitle = \"Re-run the plan\"\nlabel = \"Re-run plan\""
+    },
+    {
+      "type": "custom",
+      "description": "Your own code, drawn in a sandboxed frame inside the grid: one HTML file that reads the run through the `window.harumi` SDK (`harumi.context`, `harumi.getOutput(path?)`, `harumi.getRuns()`, `harumi.onChange(cb)`, `harumi.resize(height)`). Use it for anything the other widgets cannot draw: a bespoke chart (Plotly, D3, Vega from a CDN), a domain-specific board, a custom control. `source` is a repo path read at the dashboard's ref, or `output:<path>` for a file the solver wrote into the run's output directory (Plotly `to_html`, Altair `save`). The frame has no credentials and cannot navigate the page. It is read-only unless `capabilities` opts in to `inputs` and `run`.",
+      "fields": [
+        {
+          "tomlKey": "source",
+          "as": "source",
+          "type": "string",
+          "required": true,
+          "isOutputPath": false,
+          "doc": "The HTML file to draw: a repo path such as `widgets/board.html` (no leading slash, no `..`), or `output:<path>` for a file the run wrote into its output directory."
+        },
+        {
+          "tomlKey": "height",
+          "as": "height",
+          "type": "number",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Frame height in pixels. Defaults to 360. The code can change it with `harumi.resize(height)`."
+        },
+        {
+          "tomlKey": "width",
+          "as": "width",
+          "type": "enum",
+          "required": false,
+          "values": [
+            "half",
+            "full"
+          ],
+          "isOutputPath": false,
+          "doc": "`half` pairs with a neighbouring half-width widget; `full` (the default) takes a row of its own."
+        },
+        {
+          "tomlKey": "capabilities",
+          "as": "capabilities",
+          "type": "stringList",
+          "required": false,
+          "values": [
+            "inputs",
+            "run"
+          ],
+          "isOutputPath": false,
+          "doc": "What the code may do beyond reading the run: `inputs` (read and set the run inputs) and `run` (start a run). Omit it for a read-only widget. The host still validates every value and enforces the share link."
+        },
+        {
+          "tomlKey": "props",
+          "as": "props",
+          "type": "table",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Free-form settings passed to the code as `harumi.context.props`, e.g. `props = { machines_key = \"metrics.per_machine\" }`."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
+        }
+      ],
+      "dataExample": {},
+      "tomlExample": "[[widgets]]\ntype = \"custom\"\nid = \"shift-board\"\ntitle = \"Shift board\"\nsource = \"widgets/shift-board.html\""
     }
   ]
 }
