@@ -4,7 +4,8 @@ Precedence for every setting: explicit constructor arg > environment
 variable > ~/.harumi/config.json > hardcoded default.
 
 Project binding (.harumi/config.json in the working directory) stores the
-project_id and Gitea repo metadata written by `harumi new`/`harumi import`/
+project_id, the environment and owning workspace (customer_id) of the project,
+and Gitea repo metadata, written by `harumi new`/`harumi import`/
 `harumi clone`/`harumi link`. It is searched from the cwd upward so it works
 from subdirectories of the project.
 """
@@ -21,7 +22,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 try:  # POSIX
     import fcntl
@@ -425,14 +426,58 @@ class RepoBinding:
         }
 
 
+def _host(url: str) -> str:
+    """The lowercased host of `url`, without credentials or port; "" if it has none."""
+    from urllib.parse import urlsplit
+
+    try:
+        return (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def environment_for_git_url(url: str) -> Optional[str]:
+    """The environment whose git host serves `url`, or `None` if no known one does.
+
+    Checks each environment's saved `git_url` override first (a local or self-hosted stack),
+    then the built-in hosts. Used to place a binding written before bindings recorded their
+    environment: its clone URL still says which Gitea it came from."""
+    host = _host(url)
+    if not host:
+        return None
+    for name in ENVIRONMENTS:
+        override = _str_setting(_read_json(env_config_path(name)), "git_url")
+        if override and _host(override) == host:
+            return name
+    for name, env in ENVIRONMENTS.items():
+        if _host(env.git_url) == host:
+            return name
+    return None
+
+
 @dataclass
 class ProjectBinding:
-    """Contents of .harumi/config.json in the working directory."""
+    """Contents of .harumi/config.json in the working directory.
+
+    Besides the project and its repo, a binding records where the project lives, so the
+    folder can say which environment and workspace a command is about:
+
+    - `environment`: the Harumi environment the project is in (`production`, `staging`).
+      A binding written by an older CLI has none; `effective_environment` falls back to
+      the one its clone URL points at.
+    - `customer_id`: the organization that owns the project, `None` for a personal one.
+      Only meaningful when `workspace_known`: an older binding has no `customer_id` key at
+      all, which is different from a personal project's `null`. `ensure_workspace` fills
+      it in.
+    """
 
     project_id: str
     repo: RepoBinding
     # Absolute path of the .harumi/config.json that was loaded.
     config_path: Path = field(default_factory=Path)
+    environment: Optional[str] = None
+    customer_id: Optional[str] = None
+    workspace_known: bool = False
 
     @classmethod
     def load(cls, start: Optional[Path] = None) -> Optional["ProjectBinding"]:
@@ -443,22 +488,93 @@ class ProjectBinding:
         if not data.get("project_id") or not data.get("repo"):
             return None
         try:
+            customer_id = data.get("customer_id")
+            environment = data.get("environment")
             return cls(
                 project_id=data["project_id"],
                 repo=RepoBinding.from_dict(data["repo"]),
                 config_path=path,
+                # A hand-edited value of the wrong type counts as not recorded, never as a crash.
+                environment=environment if isinstance(environment, str) and environment in ENVIRONMENTS else None,
+                customer_id=customer_id if isinstance(customer_id, str) and customer_id else None,
+                workspace_known="customer_id" in data and (customer_id is None or isinstance(customer_id, str)),
             )
         except (KeyError, TypeError):
             return None
 
+    @property
+    def effective_environment(self) -> Optional[str]:
+        """The recorded environment, else the one the clone URL's host belongs to, else `None`."""
+        return self.environment or environment_for_git_url(self.repo.clone_url)
+
     @classmethod
-    def write(cls, directory: Path, project_id: str, repo: RepoBinding) -> "ProjectBinding":
+    def write(
+        cls,
+        directory: Path,
+        project_id: str,
+        repo: RepoBinding,
+        *,
+        environment: Optional[str] = None,
+        customer_id: Optional[str] = None,
+        workspace_known: bool = False,
+    ) -> "ProjectBinding":
+        """Write the binding. `customer_id` is recorded only when `workspace_known` (a `None` then means personal).
+
+        Keys this version does not know about are kept when the folder is re-bound to the same
+        project, so a newer CLI's additions survive an older one re-linking; binding another
+        project starts from a clean file."""
         path = directory / PROJECT_CONFIG_NAME
-        _write_json(
-            path,
-            {"project_id": project_id, "repo": repo.to_dict()},
+        existing = _read_json(path)
+        data: dict[str, Any] = existing if existing.get("project_id") == project_id else {}
+        data.update({"project_id": project_id, "repo": repo.to_dict()})
+        if environment:
+            data["environment"] = environment
+        if workspace_known:
+            data["customer_id"] = customer_id
+        else:
+            data.pop("customer_id", None)
+        _write_json(path, data)
+        return cls(
+            project_id=project_id,
+            repo=repo,
+            config_path=path,
+            environment=environment or None,
+            customer_id=customer_id if workspace_known else None,
+            workspace_known=workspace_known,
         )
-        return cls(project_id=project_id, repo=repo, config_path=path)
+
+    def ensure_workspace(self, fetch_customer_id: Callable[[str], Optional[str]]) -> "ProjectBinding":
+        """Fill in the workspace (and environment) of a binding written before they were recorded.
+
+        `fetch_customer_id(project_id)` asks the server who owns the project (`None` = personal)
+        and may raise. Any failure (offline, no access, a read-only folder) leaves the file as it
+        was and returns the binding unchanged: a binding that can't be completed still works the
+        way it always did. A binding that already knows its workspace is returned without a call."""
+        if self.workspace_known:
+            return self
+        try:
+            customer_id = fetch_customer_id(self.project_id)
+        except Exception:  # noqa: BLE001 - best effort by design; the caller carries on without it
+            return self
+        environment = self.effective_environment
+        data = _read_json(self.config_path)
+        if data.get("project_id") != self.project_id:
+            return self  # the file changed under us (re-linked); don't write the old project's owner into it
+        data["customer_id"] = customer_id
+        if environment and not data.get("environment"):
+            data["environment"] = environment
+        try:
+            _write_json(self.config_path, data)
+        except OSError:
+            pass  # still use what we learned for this command
+        return ProjectBinding(
+            project_id=self.project_id,
+            repo=self.repo,
+            config_path=self.config_path,
+            environment=environment,
+            customer_id=customer_id,
+            workspace_known=True,
+        )
 
 
 @dataclass

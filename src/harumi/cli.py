@@ -2293,13 +2293,34 @@ def examples(
 # Shared binding/remote helper
 # ---------------------------------------------------------------------------
 
-def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None) -> bool:
+def _owner_of(project) -> tuple[Optional[str], bool]:
+    """(the organization that owns `project`, whether the server said so).
+
+    `customer_id` is `None` both for a personal project and for a response that left the field
+    out; only the first may be written down as personal, or the folder would claim a workspace
+    nobody told us about."""
+    known = "customer_id" in getattr(project, "model_fields_set", ())
+    return (project.customer_id if known else None), known
+
+
+def _bind_and_configure_remote(
+    project_id: str,
+    repo,
+    cwd: Optional[Path] = None,
+    *,
+    environment: str,
+    customer_id: Optional[str],
+    workspace_known: bool,
+) -> bool:
     """Write .harumi/config.json for `project_id`/`repo` and configure the
     `harumi` git remote in the target directory (defaults to cwd), if possible.
 
     Shared by `link` (binding an existing checkout) and `new`/`push` (binding
     a just-created project after cloning/pushing its repo). `repo` is a
     `RepoInfo`-shaped object (owner/name/clone_url/default_branch).
+    `environment` and `customer_id` (the owning organization, `None` for a
+    personal project) are recorded so the folder can later say whose project
+    it is; they are keyword-only so no caller can forget them.
 
     Returns whether the remote was actually configured — callers use this to
     decide whether it's safe to print a "you're ready to go" message.
@@ -2316,6 +2337,9 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
             clone_url=repo.clone_url,
             default_branch=repo.default_branch,
         ),
+        environment=environment,
+        customer_id=customer_id,
+        workspace_known=workspace_known,
     )
     console.print(
         f"Wrote [bold]{binding.config_path}[/bold] "
@@ -2415,8 +2439,16 @@ def link(
 
     console.print(f"Fetching repo for project [bold]{project}[/bold]...")
     repo = client.get_project_repo(project)
+    try:
+        owner, known = _owner_of(client.get_project(project))
+    except ApiError:
+        # The repo answered, so the project is there; only its owner is unknown. Bind anyway:
+        # a binding without a workspace is filled in the first time it is used.
+        owner, known = None, False
 
-    _bind_and_configure_remote(project, repo)
+    _bind_and_configure_remote(
+        project, repo, environment=client.config.environment, customer_id=owner, workspace_known=known
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2733,7 +2765,10 @@ def _push_impl(
         console.print(f"View project: {active_platform_url()}/projects/{project.id}")
         return
 
-    if _bind_and_configure_remote(project.id, repo, cwd=folder):
+    owner, known = _owner_of(project)
+    if _bind_and_configure_remote(
+        project.id, repo, cwd=folder, environment=client.config.environment, customer_id=owner, workspace_known=known
+    ):
         _next_steps(folder)
 
 
@@ -2911,14 +2946,20 @@ def _new_impl(
     if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
         _fail(f"{dest} already exists and isn't empty. Pass --dir to clone somewhere else.")
 
-    _clone_and_bind(project.id, project.repo, dest)
+    owner, known = _owner_of(project)
+    _clone_and_bind(
+        project.id, project.repo, dest,
+        environment=client.config.environment, customer_id=owner, workspace_known=known,
+    )
 
 
 # ---------------------------------------------------------------------------
 # harumi clone — fetch an existing Harumi project's code locally
 # ---------------------------------------------------------------------------
 
-def _clone_and_bind(project_id: str, repo, dest: Path) -> None:
+def _clone_and_bind(
+    project_id: str, repo, dest: Path, *, environment: str, customer_id: Optional[str], workspace_known: bool
+) -> None:
     """Clone `repo` into `dest`, then bind `dest` to `project_id`.
 
     Shared by `new` (a repo it just created) and `clone` (a repo that
@@ -2950,7 +2991,9 @@ def _clone_and_bind(project_id: str, repo, dest: Path) -> None:
     console.print(f"Cloning into [bold]{dest}[/bold]...", soft_wrap=True)
     clone_repo(clone_url=repo.clone_url, dest=dest)
 
-    if _bind_and_configure_remote(project_id, repo, cwd=dest):
+    if _bind_and_configure_remote(
+        project_id, repo, cwd=dest, environment=environment, customer_id=customer_id, workspace_known=workspace_known
+    ):
         _next_steps(dest)
 
 
@@ -3002,7 +3045,10 @@ def _clone_impl(
     if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
         _fail(f"{dest} already exists and isn't empty. Pass --dir to clone somewhere else.")
 
-    _clone_and_bind(project, repo, dest)
+    owner, known = _owner_of(proj)
+    _clone_and_bind(
+        project, repo, dest, environment=client.config.environment, customer_id=owner, workspace_known=known
+    )
 
 
 # ---------------------------------------------------------------------------

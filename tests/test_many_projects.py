@@ -283,7 +283,7 @@ def test_a_project_beyond_the_old_first_hundred_can_now_be_chosen(server, monkey
     monkeypatch.setattr(interactive, "select", lambda msg, options, **k: "proj-0042")
     chosen = {}
     monkeypatch.setattr(
-        cli, "_clone_and_bind", lambda project, repo, dest: chosen.setdefault("p", project)
+        cli, "_clone_and_bind", lambda project, repo, dest, **_owner: chosen.setdefault("p", project)
     )
 
     class Repo:

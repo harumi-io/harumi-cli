@@ -1170,6 +1170,75 @@ def test_link_binds_an_already_checked_out_directory(api, git_ops, tmp_path, mon
     assert git_ops["ensure_remote"][0]["cwd"] == tmp_path
     # `link` never fetches code — only `new`/`push`/`clone` do.
     assert git_ops["clone"] == []
+    # The project lookup was not answered (no route), so the owner is left for later, not guessed.
+    assert "customer_id" not in json.loads((tmp_path / ".harumi" / "config.json").read_text())
+
+
+_ORG_ID = "0b9c2f3e-1111-4222-8333-444455556666"
+
+
+def _binding_file(folder: Path) -> dict:
+    return json.loads((folder / ".harumi" / "config.json").read_text())
+
+
+def test_link_records_the_projects_environment_and_owner(api, git_ops, tmp_path, monkeypatch):
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    api.route("GET", "/api/projects/proj-1", {"id": "proj-1", "name": "Solver", "customer_id": _ORG_ID})
+    _route_project_repo(api, "proj-1", "solver")
+
+    result = runner.invoke(cli.app, ["link", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    data = _binding_file(tmp_path)
+    assert (data["environment"], data["customer_id"]) == ("production", _ORG_ID)
+
+
+def test_clone_records_a_personal_project_as_null(api, git_ops, tmp_path, monkeypatch):
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    api.route("GET", "/api/projects/proj-1", {"id": "proj-1", "name": "Solver", "customer_id": None})
+    _route_project_repo(api, "proj-1", "solver")
+
+    result = runner.invoke(cli.app, ["clone", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    data = _binding_file(tmp_path / "solver")
+    assert data["environment"] == "production"
+    assert "customer_id" in data and data["customer_id"] is None
+
+
+def test_new_records_the_organization_the_server_put_the_project_in(api, git_ops, tmp_path, monkeypatch):
+    """What the server answered, not what was asked: the owner is the project's, not the CLI's default."""
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    api.route("POST", "/api/projects", {"id": "proj-new", "name": "Widget", "customer_id": _ORG_ID})
+    _route_project_repo(api, "proj-new", "widget")
+
+    result = runner.invoke(cli.app, ["new", "Widget", "--personal"])
+
+    assert result.exit_code == 0, result.output
+    assert _binding_file(tmp_path / "widget")["customer_id"] == _ORG_ID
+
+
+def test_a_response_without_an_owner_is_not_written_down_as_personal(api, git_ops, tmp_path, monkeypatch):
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    api.route("POST", "/api/projects", {"id": "proj-new", "name": "Widget"})  # no customer_id at all
+    _route_project_repo(api, "proj-new", "widget")
+
+    result = runner.invoke(cli.app, ["new", "Widget"])
+
+    assert result.exit_code == 0, result.output
+    assert "customer_id" not in _binding_file(tmp_path / "widget")
 
 
 def test_new_without_a_gitea_token_warns_but_does_not_fail(api, git_ops, tmp_path, monkeypatch):
