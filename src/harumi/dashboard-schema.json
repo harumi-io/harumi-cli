@@ -1,5 +1,5 @@
 {
-  "version": 19,
+  "version": 20,
   "discovery": {
     "dashboardDir": "dashboard",
     "rootPath": "dashboard.toml"
@@ -312,6 +312,68 @@
         "variant": "bar"
       }
     }
+  },
+  "deprecated": {
+    "widgetTypes": [
+      {
+        "type": "treemap",
+        "replacement": "custom"
+      },
+      {
+        "type": "heatmap",
+        "replacement": "custom"
+      },
+      {
+        "type": "gantt-chart",
+        "replacement": "timeline"
+      },
+      {
+        "type": "input-number",
+        "replacement": "inputs"
+      },
+      {
+        "type": "input-slider",
+        "replacement": "inputs"
+      },
+      {
+        "type": "input-toggle",
+        "replacement": "inputs"
+      },
+      {
+        "type": "input-select",
+        "replacement": "inputs"
+      },
+      {
+        "type": "input-text",
+        "replacement": "inputs"
+      },
+      {
+        "type": "input-date",
+        "replacement": "inputs"
+      },
+      {
+        "type": "input-file",
+        "replacement": "inputs"
+      }
+    ],
+    "sections": [
+      {
+        "section": "datasets",
+        "advice": "Let each widget name its own data keys; a custom widget reads the run output directly."
+      },
+      {
+        "section": "metrics",
+        "advice": "Have the solver write derived numbers into output.json, or compute them in a custom widget."
+      },
+      {
+        "section": "clock",
+        "advice": "Playback is going away; build it as a custom widget if a dashboard needs it."
+      },
+      {
+        "section": "layout",
+        "advice": "Widget spans decide the layout; this table is going away."
+      }
+    ]
   },
   "widgetTypes": [
     {
@@ -1391,8 +1453,48 @@
       "tomlExample": "[[widgets]]\ntype = \"run-button\"\nid = \"rerun\"\ntitle = \"Re-run the plan\"\nlabel = \"Re-run plan\""
     },
     {
+      "type": "inputs",
+      "description": "One form for the project's inputs: every `[[inputs]]` entry in `harumi.toml`, each drawn with the control its type calls for (a number field or slider, a switch, a select or radio group, a text field or textarea, a date picker, a JSON editor for `json` inputs, a drop zone for `file` inputs), followed by the run button. The author's `ui` hint on the input picks between the variants. Prefer it over a column of `input-*` widgets. It reads nothing from the run output, and values are checked against the declaration before a run can start.",
+      "fields": [
+        {
+          "tomlKey": "only",
+          "as": "only",
+          "type": "stringList",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Names of the `[[inputs]]` entries to show, in this order. Omit it to show all of them in the order `harumi.toml` declares them. A name the project does not declare is skipped."
+        },
+        {
+          "tomlKey": "label",
+          "as": "label",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "The run button text. Defaults to \"Run\"."
+        },
+        {
+          "tomlKey": "confirm",
+          "as": "confirm",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "When set, a confirmation dialog shows this text before the run starts."
+        },
+        {
+          "tomlKey": "subtitle",
+          "as": "subtitle",
+          "type": "string",
+          "required": false,
+          "isOutputPath": false,
+          "doc": "Optional one-line explanation shown under the title in the card header, e.g. \"Daily operational schedule\". Keep the title short and put the detail here."
+        }
+      ],
+      "dataExample": {},
+      "tomlExample": "[[widgets]]\ntype = \"inputs\"\nid = \"scenario\"\ntitle = \"Scenario\""
+    },
+    {
       "type": "custom",
-      "description": "Your own code, drawn in a sandboxed frame inside the grid: one HTML file that reads the run through the `window.harumi` SDK (`harumi.context`, `harumi.getOutput(path?)`, `harumi.getRuns()`, `harumi.onChange(cb)`, `harumi.resize(height)`). Use it for anything the other widgets cannot draw: a bespoke chart (Plotly, D3, Vega from a CDN), a domain-specific board, a custom control. `source` is a repo path read at the dashboard's ref, or `output:<path>` for a file the solver wrote into the run's output directory (Plotly `to_html`, Altair `save`). The frame has no credentials and cannot navigate the page. It is read-only unless `capabilities` opts in to `inputs` and `run`.",
+      "description": "Your own code, drawn in a sandboxed frame inside the grid: one HTML file that reads the run through the `window.harumi` SDK (`harumi.context`, `harumi.getOutput(path?)`, `harumi.getRuns()`, `harumi.onChange(cb)`, `harumi.resize(height)`). With `capabilities = [\"inputs\"]` it can read and set the project's inputs (`harumi.inputs.contract()`, `.get()`, `.set(name, value)`, `.upload(name, file)`, `.onChange(cb)`), and with `\"run\"` it can start a run (`harumi.run({ inputs })`; overriding inputs needs both). Every value is checked against `[[inputs]]` first. Use it for anything the other widgets cannot draw: a bespoke chart (Plotly, D3, Vega from a CDN), a domain-specific board, a custom control. `source` is a repo path read at the dashboard's ref, or `output:<path>` for a file the solver wrote into the run's output directory (Plotly `to_html`, Altair `save`), or `app` to draw the project's deployed app (Streamlit) in the grid, which receives `run_id` and `ref` as query parameters. The frame has no credentials and cannot navigate the page. It is read-only unless `capabilities` opts in to `inputs` and `run`.",
       "fields": [
         {
           "tomlKey": "source",
@@ -1400,7 +1502,7 @@
           "type": "string",
           "required": true,
           "isOutputPath": false,
-          "doc": "The HTML file to draw: a repo path such as `widgets/board.html` (no leading slash, no `..`), or `output:<path>` for a file the run wrote into its output directory."
+          "doc": "The HTML file to draw: a repo path such as `widgets/board.html` (no leading slash, no `..`), `output:<path>` for a file the run wrote into its output directory, or `app` for the project's deployed app."
         },
         {
           "tomlKey": "height",

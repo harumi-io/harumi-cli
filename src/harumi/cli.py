@@ -197,6 +197,8 @@ from harumi.config import (
 from harumi.dashboard import (
     DashboardSchemaError,
     DASHBOARD_DIR,
+    DEPRECATED_LABEL,
+    deprecation_warnings,
     DashboardTomlError,
     ROOT_DASHBOARD_PATH,
     local_dashboard_paths,
@@ -5012,6 +5014,7 @@ def dashboard_validate(
             file_exists = lambda p, _root=root: (_root / p).is_file()  # noqa: E731
         try:
             widgets, issues = validate_dashboard_toml(raw, output, repo_file_exists=file_exists)
+            issues = [*issues, *deprecation_warnings(raw)]
         except DashboardTomlError as exc:
             console.print(f"[bold red]invalid[/bold red] {name} is not valid TOML: {exc}")
             failed = True
@@ -5036,7 +5039,9 @@ def dashboard_validate(
             style = "red" if issue.dropped else "yellow"
             prefix = "dropped" if issue.dropped else issue.label
             console.print(f"[bold {style}]{prefix}[/bold {style}] {issue.message}")
-        failed = True
+        # A deprecation is a heads-up, not a defect: the widget still renders.
+        if any(issue.label != DEPRECATED_LABEL or issue.dropped for issue in issues):
+            failed = True
 
     if failed:
         raise typer.Exit(code=1)

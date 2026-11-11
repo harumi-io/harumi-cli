@@ -196,6 +196,82 @@ def widget_aliases() -> Dict[str, Dict[str, Any]]:
     return aliases
 
 
+@lru_cache(maxsize=1)
+def deprecations() -> Tuple[Dict[str, str], Dict[str, str]]:
+    """The artifact's optional ``deprecated`` block: ``({widget type: replacement
+    type}, {top-level section: advice})``. Both are empty for an artifact that
+    predates it, so an older vendored copy just has nothing to warn about."""
+    raw = _artifact().get("deprecated")
+    if raw is None:
+        return {}, {}
+    if not isinstance(raw, dict):
+        raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name}: deprecated must be an object")
+    types: Dict[str, str] = {}
+    for item in raw.get("widgetTypes") or []:
+        if not isinstance(item, dict) or not isinstance(item.get("type"), str) or not isinstance(item.get("replacement"), str):
+            raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name}: a deprecated widget type needs a string type and replacement")
+        types[item["type"]] = item["replacement"]
+    sections: Dict[str, str] = {}
+    for item in raw.get("sections") or []:
+        if not isinstance(item, dict) or not isinstance(item.get("section"), str) or not isinstance(item.get("advice"), str):
+            raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name}: a deprecated section needs a string section and advice")
+        sections[item["section"]] = item["advice"]
+    return types, sections
+
+
+# `WidgetIssue.label` of a deprecation. Unlike the other non-dropped labels it is
+# not a defect: the widget renders as before, so `harumi dashboard validate`
+# lists it without failing (a CI check must not turn red the day a release
+# deprecates something a dashboard still uses).
+DEPRECATED_LABEL = "deprecated"
+
+
+def deprecation_warnings(raw: str) -> List[WidgetIssue]:
+    """Notices for the deprecated widget types and top-level sections a
+    ``dashboard.toml`` uses, read from the artifact's ``deprecated`` block.
+
+    Separate from `validate_dashboard_toml` on purpose: that returns what is
+    wrong with a spec, and a deprecated widget is not wrong, it still renders.
+    Raises `DashboardTomlError` for invalid TOML, like the validator."""
+    try:
+        parsed = tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as exc:
+        raise DashboardTomlError(str(exc)) from exc
+    types, sections = deprecations()
+    notices: List[WidgetIssue] = []
+    raw_widgets = parsed.get("widgets")
+    for entry in raw_widgets if isinstance(raw_widgets, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        type_ = entry.get("type")
+        if not isinstance(type_, str) or type_ not in types:
+            continue
+        id_ = entry.get("id") if isinstance(entry.get("id"), str) else None
+        replacement = types[type_]
+        use = "a custom widget" if replacement == "custom" else f'"{replacement}"'
+        notices.append(
+            WidgetIssue(
+                id_,
+                f'widget "{id_}" ({type_}): "{type_}" is deprecated and will be removed; use {use} instead',
+                dropped=False,
+                label=DEPRECATED_LABEL,
+            )
+        )
+    for section, advice in sections.items():
+        value = parsed.get(section)
+        if value in (None, [], {}):
+            continue
+        notices.append(
+            WidgetIssue(
+                None,
+                f"[{section}] is deprecated and will be removed. {advice}",
+                dropped=False,
+                label=DEPRECATED_LABEL,
+            )
+        )
+    return notices
+
+
 def resolve_alias(entry: Dict[str, Any]) -> Dict[str, Any]:
     """``entry`` with a retired ``type`` rewritten to its target. Keys the entry
     sets itself win over the ones the old name implied, mirroring the platform's
@@ -878,8 +954,8 @@ def validate_dashboard_toml(
         for widget in widgets:
             if widget["type"] != "custom":
                 continue
-            parsed, _ = parse_custom_source(widget["source"])
-            if parsed is not None and parsed[0] == "repo" and not repo_file_exists(parsed[1]):
+            located, _ = parse_custom_source(widget["source"])
+            if located is not None and located[0] == "repo" and not repo_file_exists(located[1]):
                 issues.append(
                     WidgetIssue(
                         widget["id"],

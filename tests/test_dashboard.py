@@ -19,6 +19,7 @@ from harumi.dashboard import (
     parse_metric_entry,
     parse_widget_entry,
     pick_dashboard_paths,
+    deprecation_warnings,
     resolve_path,
     validate_dashboard_toml,
     widget_schemas,
@@ -121,6 +122,8 @@ _EXPECTED_WIDGET_CONTRACT = {
     "input-date": ["input!", "subtitle"],
     "input-file": ["input!", "subtitle"],
     "run-button": ["label", "confirm", "subtitle"],
+    # One form for every [[inputs]] entry of harumi.toml: `only` is free-form names, not an enum.
+    "inputs": ["only", "label", "confirm", "subtitle"],
     "custom": ["source!", "height", "width[half|full]", "capabilities[inputs|run]", "props", "subtitle"],
 }
 
@@ -132,7 +135,7 @@ def test_widget_contract_matches_the_vendored_schema_artifact():
             field.toml_key
             + ("!" if field.required else "")
             + ("*" if field.is_output_path else "")
-            + (f"[{'|'.join(field.values)}]" if field.kind in ("enum", "stringList") else "")
+            + (f"[{'|'.join(field.values)}]" if field.kind in ("enum", "stringList") and field.values else "")
             for field in fields
         ]
         for type_, fields in widget_schemas().items()
@@ -393,6 +396,7 @@ class TestParseWidgetEntry:
                 )
             },
             "run-button": {"type": "run-button", "id": "rerun", "title": "Re-run"},
+            "inputs": {"type": "inputs", "id": "form", "title": "Scenario", "only": ["demand_multiplier"]},
             "custom": {"type": "custom", "id": "cw", "title": "CW", "source": "widgets/board.html"},
         }
         for type_, entry in entries.items():
@@ -1332,3 +1336,33 @@ def test_widget_warnings_receives_the_alias_resolved_entry():
             with mock.patch.object(dash, "widget_warnings", side_effect=spy):
                 dash.validate_dashboard_toml(raw)
     assert seen["type"] == "chart"
+
+
+class TestDeprecations:
+    """The artifact's `deprecated` block, surfaced as notices that never drop a widget."""
+
+    def test_a_deprecated_widget_type_names_its_replacement(self):
+        raw = "[[widgets]]\ntype = 'gantt-chart'\nid = 'g'\ntitle = 'G'\ntasks_key = 'schedule'\n"
+        issues = deprecation_warnings(raw)
+        assert len(issues) == 1
+        notice = issues[0]
+        assert notice.label == "deprecated" and not notice.dropped
+        assert 'use "timeline"' in notice.message
+
+    def test_a_widget_replaced_by_custom_points_at_custom_widgets(self):
+        raw = "[[widgets]]\ntype = 'treemap'\nid = 't'\ntitle = 'T'\nitems_key = 'a'\nvalue_key = 'v'\nname_key = 'n'\n"
+        issues = deprecation_warnings(raw)
+        assert [i.label for i in issues] == ["deprecated"]
+        assert "a custom widget" in issues[0].message
+
+    def test_a_deprecated_section_carries_the_artifacts_advice(self):
+        raw = "[clock]\ndataset = 'x'\n\n[layout]\ncolumns = 2\n"
+        issues = deprecation_warnings(raw)
+        messages = [i.message for i in issues if i.label == "deprecated"]
+        assert any(m.startswith("[layout] is deprecated") for m in messages)
+        assert any(m.startswith("[clock] is deprecated") for m in messages)
+
+    def test_current_widgets_and_sections_raise_nothing(self):
+        raw = "[[widgets]]\ntype = 'inputs'\nid = 'f'\ntitle = 'F'\n"
+        issues = deprecation_warnings(raw)
+        assert issues == []
