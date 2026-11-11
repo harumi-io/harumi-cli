@@ -159,7 +159,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, NoReturn, Optional
+from typing import Any, Callable, NoReturn, Optional
 
 import httpx
 import pydantic
@@ -196,7 +196,9 @@ from harumi.config import (
 )
 from harumi.dashboard import (
     DashboardSchemaError,
+    DASHBOARD_DIR,
     DashboardTomlError,
+    ROOT_DASHBOARD_PATH,
     local_dashboard_paths,
     pick_dashboard_paths,
     validate_dashboard_toml,
@@ -4900,6 +4902,18 @@ def dashboard_widgets(
         console.print(table)
 
 
+def _dashboard_repo_root(spec: Path) -> Optional[Path]:
+    """The repo root a local dashboard spec sits in: the parent of its `dashboard/` folder,
+    or the folder holding a root `dashboard.toml`. None for any other path, where a
+    repo-relative `source` cannot be resolved."""
+    spec = spec.resolve()
+    if spec.parent.name == DASHBOARD_DIR:
+        return spec.parent.parent
+    if spec.name == ROOT_DASHBOARD_PATH:
+        return spec.parent
+    return None
+
+
 @dashboard_app.command("validate")
 @_handle_errors
 def dashboard_validate(
@@ -4932,13 +4946,18 @@ def dashboard_validate(
         project_id = _resolve_project(project, api_url, org)
         client = _get_client(api_url=api_url, org=org)
 
-    # name -> raw TOML, in picker order.
-    specs: list[tuple[str, str]] = []
+    # Whether a repo-sourced custom widget's file exists: in the repo at --ref, else on disk.
+    repo_paths: Optional[set[str]] = None
+    # name -> raw TOML, in picker order. `root` is the repo root a local spec belongs to
+    # (None when it can't be told, and for --ref specs, which use `repo_paths` instead).
+    specs: list[tuple[str, str, Optional[Path]]] = []
     if path is not None:
-        specs.append((str(path), path.read_text()))
+        specs.append((str(path), path.read_text(), _dashboard_repo_root(path)))
     elif ref:
         assert client is not None and project_id is not None
-        found = pick_dashboard_paths(f.path for f in client.list_repo_files(project_id, ref=ref))
+        repo_listing = [f.path for f in client.list_repo_files(project_id, ref=ref)]
+        repo_paths = set(repo_listing)
+        found = pick_dashboard_paths(repo_listing)
         if not found:
             _fail(f"No dashboard specs (dashboard/*.toml or dashboard.toml) on {ref!r}.")
         for repo_path in found:
@@ -4949,6 +4968,7 @@ def dashboard_validate(
                     base64.b64decode(file_content.content).decode("utf-8")
                     if file_content.content
                     else "",
+                    None,
                 )
             )
     else:
@@ -4958,7 +4978,7 @@ def dashboard_validate(
                 "No dashboard specs found. Add dashboard/<name>.toml (or dashboard.toml), "
                 "pass a path, or use --ref to check the repo's copies."
             )
-        specs.extend((local_path, Path(local_path).read_text()) for local_path in found)
+        specs.extend((local_path, Path(local_path).read_text(), Path(".")) for local_path in found)
 
     output: Optional[dict] = None
     if against:
@@ -4979,11 +4999,19 @@ def dashboard_validate(
             _fail(f"Run {run.id!r} has no output.json to check against.")
 
     failed = False
-    for name, raw in specs:
+    for name, raw, root in specs:
         if len(specs) > 1:
             console.print(f"[bold]{escape(name)}[/bold]")
+        # Whether a repo-sourced custom widget's file exists: in the repo listing at --ref,
+        # else under this spec's repo root. No root, no check: better silent than a false
+        # "missing" for a file we looked for in the wrong place.
+        file_exists: Optional[Callable[[str], bool]] = None
+        if repo_paths is not None:
+            file_exists = repo_paths.__contains__
+        elif root is not None:
+            file_exists = lambda p, _root=root: (_root / p).is_file()  # noqa: E731
         try:
-            widgets, issues = validate_dashboard_toml(raw, output)
+            widgets, issues = validate_dashboard_toml(raw, output, repo_file_exists=file_exists)
         except DashboardTomlError as exc:
             console.print(f"[bold red]invalid[/bold red] {name} is not valid TOML: {exc}")
             failed = True

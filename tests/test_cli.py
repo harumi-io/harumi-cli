@@ -3458,3 +3458,52 @@ def test_memories_add_reads_standard_input_when_given_a_dash(api):
 
     assert result.exit_code == 0, result.output
     assert api.body_for("POST", "/api/projects/proj-1/memories")["content"] == "From a pipe"
+
+
+CUSTOM_SPEC = """
+[[widgets]]
+type = "custom"
+id = "board"
+title = "Board"
+source = "widgets/board.html"
+"""
+
+
+def test_dashboard_validate_finds_a_widget_file_from_another_directory(api, tmp_path, monkeypatch):
+    """The file check resolves against the repo, not the directory the command runs in."""
+    repo = tmp_path / "repo"
+    (repo / "dashboard").mkdir(parents=True)
+    (repo / "widgets").mkdir()
+    (repo / "dashboard" / "main.toml").write_text(CUSTOM_SPEC)
+    (repo / "widgets" / "board.html").write_text("<html></html>")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate", str(repo / "dashboard" / "main.toml")])
+
+    assert result.exit_code == 0, result.output
+    assert "missing" not in result.output
+
+
+def test_dashboard_validate_reports_a_widget_file_missing_from_its_repo(api, tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "dashboard").mkdir(parents=True)
+    (repo / "dashboard" / "main.toml").write_text(CUSTOM_SPEC)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate", str(repo / "dashboard" / "main.toml")])
+
+    assert result.exit_code == 1
+    assert "missing" in result.output
+
+
+def test_dashboard_validate_skips_the_file_check_when_the_repo_root_is_unknown(api, tmp_path, monkeypatch):
+    spec = tmp_path / "scratch.toml"
+    spec.write_text(CUSTOM_SPEC)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate", str(spec)])
+
+    assert result.exit_code == 0, result.output
+    assert "missing" not in result.output
