@@ -99,7 +99,7 @@ def at_terminal(monkeypatch):
 @pytest.fixture
 def git_stubs(monkeypatch, tmp_path):
     bound = []
-    monkeypatch.setattr(cli, "_bind_and_configure_remote", lambda pid, repo, cwd=None: bound.append(pid) or True)
+    monkeypatch.setattr(cli, "_bind_and_configure_remote", lambda pid, repo, cwd=None, **_owner: bound.append(pid) or True)
     monkeypatch.chdir(tmp_path)
     return bound
 
