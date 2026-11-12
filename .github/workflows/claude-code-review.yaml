@@ -6,10 +6,13 @@
 # shared workflow lived in a private repo (GitHub forbids a public repo calling a private one). The
 # shared workflow is public now, so this calls it like every other repo and cannot drift from it.
 #
-# Pinned to a commit (the `# v1` comment names the tag it was resolved from), never @main or a
-# moving tag: this job holds `id-token: write`, and a bad or hostile edit upstream would otherwise
-# reach every repo's review pipeline at once. Bump the pin deliberately, like a dependency upgrade:
-#   gh api repos/harumi-io/workflows/git/ref/tags/v1 --jq .object.sha
+# Pinned to a commit, never @main or a moving tag: this job holds `id-token: write`, and a bad or
+# hostile edit upstream would otherwise reach every repo's review pipeline at once. The tag `v1`
+# predates the review-done markers the local watcher reads, so the pin is an untagged main commit
+# and the trailing comment says so. Do not "refresh" it from `v1`: that rolls the markers back.
+# Bump the pin deliberately, like a dependency upgrade: read the compare, then take the SHA:
+#   gh api repos/harumi-io/workflows/compare/<current-sha>...main --jq '.files[].filename'
+#   gh api repos/harumi-io/workflows/commits/main --jq .sha
 name: Claude Code Review
 
 on:
@@ -29,7 +32,7 @@ jobs:
       # The shared workflow reads the PR's CI results, so it needs these two.
       actions: read
       checks: read
-    uses: harumi-io/workflows/.github/workflows/claude-code-review.yml@17a9d865f43d1481f0be763cc3da6003f05206b9 # v1
+    uses: harumi-io/workflows/.github/workflows/claude-code-review.yml@f2f902eac04681266544ade9e540d52c3c9c1ea5 # main, untagged: v1 predates the review-done markers
     with:
       # harumi-cli is public: the shared workflow skips fork PRs, which run with a read-only token and
       # no access to the AWS role, rather than failing on every outside contribution.
