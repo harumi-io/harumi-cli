@@ -29,7 +29,7 @@ jobs:
       # The shared workflow reads the PR's CI results, so it needs these two.
       actions: read
       checks: read
-    uses: harumi-io/workflows/.github/workflows/claude-code-review.yml@f2f902eac04681266544ade9e540d52c3c9c1ea5 # v1
+    uses: harumi-io/workflows/.github/workflows/claude-code-review.yml@f2f902eac04681266544ade9e540d52c3c9c1ea5 # main, untagged: v1 predates the review-done markers
     with:
       # harumi-cli is public: the shared workflow skips fork PRs, which run with a read-only token and
       # no access to the AWS role, rather than failing on every outside contribution.
