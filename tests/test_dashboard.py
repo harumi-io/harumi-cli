@@ -124,7 +124,7 @@ _EXPECTED_WIDGET_CONTRACT = {
     "run-button": ["label", "confirm", "subtitle"],
     # One form for every [[inputs]] entry of harumi.toml: `only` is free-form names, not an enum.
     "inputs": ["only", "label", "confirm", "subtitle"],
-    "custom": ["source!", "height", "width[half|full]", "capabilities[inputs|run]", "props", "subtitle"],
+    "custom": ["source!", "height", "width[half|full]", "chrome[card|none]", "capabilities[inputs|run]", "props", "subtitle"],
 }
 
 
