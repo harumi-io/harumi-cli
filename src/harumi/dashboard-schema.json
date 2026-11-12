@@ -1,5 +1,5 @@
 {
-  "version": 20,
+  "version": 21,
   "discovery": {
     "dashboardDir": "dashboard",
     "rootPath": "dashboard.toml"
@@ -1534,7 +1534,7 @@
             "none"
           ],
           "isOutputPath": false,
-          "doc": "`card` (the default) wraps the frame in the shared widget card: the `title` and `subtitle` as a header, and padding. `none` draws the frame alone, with no card, header or padding, so it sits in the grid like a native control. Use `none` when the HTML is already a panel of its own (a controls strip, a form), and keep `card` for a chart or board that wants a heading. With `none` the `title` and `subtitle` are not shown (the title still names the frame for screen readers), so put any heading inside the HTML. It also drops the action bar of the card, so `actions: \"expand\"` has no effect on a `none` widget. While the widget is loading, or if it cannot load or run, the card and its title are shown so the failure names the widget."
+          "doc": "`card` (the default) wraps the frame in the shared widget card: the `title` and `subtitle` as a header, and padding. `none` draws the frame alone, with no card, header or padding, so it sits in the grid like a native control. Use `none` when the HTML is already a panel of its own (a controls strip, a form), and keep `card` for a chart or board that wants a heading. With `none` the `title` and `subtitle` are not shown (the title still names the frame for screen readers), so put any heading inside the HTML. It also drops the action bar of the card (such as expand), so those actions are unavailable on a `none` widget. While the widget is loading, or if it cannot load or run, the card and its title are shown so the failure names the widget."
         },
         {
           "tomlKey": "capabilities",
