@@ -125,6 +125,6 @@ jobs:
     needs: [test, wheel, compat]
     if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && github.event_name == 'pull_request' && github.event.pull_request.draft }}
     permissions: {}
-    uses: harumi-io/workflows/.github/workflows/undraft-when-green.yml@bb0d421c0f1736347ca3a408ba505b3292c7bcec
+    uses: harumi-io/workflows/.github/workflows/undraft-when-green.yml@65fe724ecdcd0bb5a2936e7669550f03511caf0f
     secrets:
       token: ${{ secrets.UNDRAFT_TOKEN }}
