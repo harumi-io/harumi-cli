@@ -114,3 +114,17 @@ jobs:
       - name: Test (full suite)
         if: github.event_name != 'pull_request'
         run: pytest -q
+
+  # Marks a draft PR ready once the jobs above pass, which starts the Claude review and the board
+  # sync. Needs a PAT (UNDRAFT_TOKEN), not GITHUB_TOKEN: a ready event made with GITHUB_TOKEN starts
+  # no other workflow. Add new jobs to this job's needs.
+  # Skipped jobs count as passing (docs-only changes skip the heavy ones). Pinned to a commit like the
+  # review workflow: bump it like a dependency.
+  undraft:
+    name: Mark ready for review
+    needs: [test, wheel, compat]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && github.event_name == 'pull_request' && github.event.pull_request.draft }}
+    permissions: {}
+    uses: harumi-io/workflows/.github/workflows/undraft-when-green.yml@bb0d421c0f1736347ca3a408ba505b3292c7bcec
+    secrets:
+      token: ${{ secrets.UNDRAFT_TOKEN }}
