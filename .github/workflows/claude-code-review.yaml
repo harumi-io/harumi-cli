@@ -7,12 +7,13 @@
 # shared workflow is public now, so this calls it like every other repo and cannot drift from it.
 #
 # Pinned to a commit, never @main or a moving tag: this job holds `id-token: write`, and a bad or
-# hostile edit upstream would otherwise reach every repo's review pipeline at once. The tag `v1`
-# predates the review-done markers the local watcher reads, so the pin is an untagged main commit
-# and the trailing comment says so. Do not "refresh" it from `v1`: that rolls the markers back.
-# Bump the pin deliberately, like a dependency upgrade: read the compare, then take the SHA:
-#   gh api repos/harumi-io/workflows/compare/<current-sha>...main --jq '.files[].filename'
-#   gh api repos/harumi-io/workflows/commits/main --jq .sha
+# hostile edit upstream would otherwise reach every repo's review pipeline at once. Tags can move,
+# so the SHA is the pin; the trailing comment names the release tag it matched when it was bumped
+# (`v1.1` is the first to carry the review-done markers the local watcher reads).
+# Bump the pin deliberately, like a dependency upgrade: resolve the SHA first, then read exactly
+# that diff, so a push upstream in between cannot slip in unreviewed:
+#   NEW=$(gh api repos/harumi-io/workflows/commits/<tag> --jq .sha)
+#   gh api repos/harumi-io/workflows/compare/<current-sha>...$NEW --jq '.files[] | .filename, .patch'
 name: Claude Code Review
 
 on:
@@ -32,7 +33,7 @@ jobs:
       # The shared workflow reads the PR's CI results, so it needs these two.
       actions: read
       checks: read
-    uses: harumi-io/workflows/.github/workflows/claude-code-review.yml@f2f902eac04681266544ade9e540d52c3c9c1ea5 # main, untagged: v1 predates the review-done markers
+    uses: harumi-io/workflows/.github/workflows/claude-code-review.yml@f2f902eac04681266544ade9e540d52c3c9c1ea5 # v1.1
     with:
       # harumi-cli is public: the shared workflow skips fork PRs, which run with a read-only token and
       # no access to the AWS role, rather than failing on every outside contribution.
