@@ -1494,7 +1494,7 @@
     },
     {
       "type": "custom",
-      "description": "Your own code, drawn in a sandboxed frame inside the grid: one HTML file that reads the run through the `window.harumi` SDK (`harumi.context`, `harumi.getOutput(path?)`, `harumi.getRuns()`, `harumi.onChange(cb)`, `harumi.resize(height)`). With `capabilities = [\"inputs\"]` it can read and set the project's inputs (`harumi.inputs.contract()`, `.get()`, `.set(name, value)`, `.upload(name, file)`, `.onChange(cb)`), and with `\"run\"` it can start a run (`harumi.run({ inputs })`; overriding inputs needs both). Every value is checked against `[[inputs]]` first. Use it for anything the other widgets cannot draw: a bespoke chart (Plotly, D3, Vega from a CDN), a domain-specific board, a custom control. `source` is a repo path read at the dashboard's ref, or `output:<path>` for a file the solver wrote into the run's output directory (Plotly `to_html`, Altair `save`), or `app` to draw the project's deployed app (Streamlit) in the grid, which receives `run_id` and `ref` as query parameters. The frame has no credentials and cannot navigate the page. It is read-only unless `capabilities` opts in to `inputs` and `run`.",
+      "description": "Your own code, drawn in a sandboxed frame inside the grid: one HTML file that reads the run through the `window.harumi` SDK (`harumi.context`, `harumi.getOutput(path?)`, `harumi.getRuns()`, `harumi.onChange(cb)`, `harumi.resize(height)`). With `capabilities = [\"inputs\"]` it can read and set the project's inputs (`harumi.inputs.contract()`, `.get()`, `.set(name, value)`, `.upload(name, file)`, `.onChange(cb)`), and with `\"run\"` it can start a run (`harumi.run({ inputs })`; overriding inputs needs both). Every value is checked against `[[inputs]]` first. Use it for anything the other widgets cannot draw: a bespoke chart (Plotly, D3, Vega from a CDN), a domain-specific board, a custom control. `source` is a repo path read at the dashboard's ref, or `output:<path>` for a file the solver wrote into the run's output directory (Plotly `to_html`, Altair `save`), or `app` to draw the project's deployed app (Streamlit) in the grid, which receives `run_id` and `ref` as query parameters. The frame is transparent and follows the dashboard theme: `color-scheme`, a default text color and the app's color variables (`var(--foreground)`, `--muted`, `--muted-foreground`, `--border`, `--input`, `--primary`, `--primary-foreground`, `--radius`, ...) switch between light and dark by themselves, and `<html data-harumi-theme>` is `light` or `dark` for CSS (`html[data-harumi-theme=\"dark\"] .x { ... }`) -- style with those variables instead of fixed colors and the widget looks native in both. For controls and panels, use the dashboard's own look through starter classes instead of inventing styles: `h-panel` (bordered box), `h-row` (wrapping flex row), `h-field` (a label, hint and control stacked), `h-label` (14px label), `h-hint` (12px muted hint), `h-value` (a number readout), `h-input` (text/number input), `h-slider` (on an `<input type=\"range\">`), `h-button` (primary; `h-button-secondary`, `h-button-outline`, `h-button-destructive` for the others) and `h-note` (a muted status line), e.g. `<div class=\"h-panel\"><div class=\"h-row\"><div class=\"h-field\"><span class=\"h-label\">Time limit (s)</span><span class=\"h-hint\">1 to 60</span><input class=\"h-input\" type=\"number\"></div><button class=\"h-button\">Re-solve</button></div></div>`. Add your own CSS only for layout the classes do not cover. The frame has no credentials and cannot navigate the page. It is read-only unless `capabilities` opts in to `inputs` and `run`.",
       "fields": [
         {
           "tomlKey": "source",
@@ -1523,6 +1523,18 @@
           ],
           "isOutputPath": false,
           "doc": "`half` pairs with a neighbouring half-width widget; `full` (the default) takes a row of its own."
+        },
+        {
+          "tomlKey": "chrome",
+          "as": "chrome",
+          "type": "enum",
+          "required": false,
+          "values": [
+            "card",
+            "none"
+          ],
+          "isOutputPath": false,
+          "doc": "`card` (the default) wraps the frame in the shared widget card: the `title` and `subtitle` as a header, and padding. `none` draws the frame alone, with no card, header or padding, so it sits in the grid like a native control. Use `none` when the HTML is already a panel of its own (a controls strip, a form), and keep `card` for a chart or board that wants a heading. With `none` the `title` and `subtitle` are not shown (the title still names the frame for screen readers), so put any heading inside the HTML. It also drops the action bar of the card, so `actions: \"expand\"` has no effect on a `none` widget. While the widget is loading, or if it cannot load or run, the card and its title are shown so the failure names the widget."
         },
         {
           "tomlKey": "capabilities",
