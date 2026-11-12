@@ -6,10 +6,13 @@
 # shared workflow lived in a private repo (GitHub forbids a public repo calling a private one). The
 # shared workflow is public now, so this calls it like every other repo and cannot drift from it.
 #
-# Pinned to a commit (the `# v1` comment names the tag it was resolved from), never @main or a
-# moving tag: this job holds `id-token: write`, and a bad or hostile edit upstream would otherwise
-# reach every repo's review pipeline at once. Bump the pin deliberately, like a dependency upgrade:
-#   gh api repos/harumi-io/workflows/git/ref/tags/v1 --jq .object.sha
+# Pinned to a commit, never @main or a moving tag: this job holds `id-token: write`, and a bad or
+# hostile edit upstream would otherwise reach every repo's review pipeline at once. The tag `v1`
+# predates the review-done markers the local watcher reads, so the pin is an untagged main commit
+# and the trailing comment says so. Do not "refresh" it from `v1`: that rolls the markers back.
+# Bump the pin deliberately, like a dependency upgrade: read the compare, then take the SHA:
+#   gh api repos/harumi-io/workflows/compare/<current-sha>...main --jq '.files[].filename'
+#   gh api repos/harumi-io/workflows/commits/main --jq .sha
 name: Claude Code Review
 
 on:
