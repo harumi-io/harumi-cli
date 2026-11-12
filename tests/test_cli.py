@@ -2453,6 +2453,21 @@ def test_dashboard_validate_fails_when_any_spec_drops_a_widget(api, tmp_path, mo
     assert "dashboard/ok.toml" in result.output
 
 
+def test_dashboard_validate_lists_a_deprecation_without_failing(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dashboard").mkdir()
+    (tmp_path / "dashboard" / "old.toml").write_text(
+        "[[widgets]]\ntype = 'gantt-chart'\nid = 'g'\ntitle = 'G'\ntasks_key = 'schedule'\n"
+    )
+
+    result = runner.invoke(cli.app, ["dashboard", "validate"])
+
+    # The widget still renders, so a CI check must not turn red over a deprecation.
+    assert result.exit_code == 0, result.output
+    assert "deprecated" in result.output
+    assert "timeline" in result.output
+
+
 def test_dashboard_validate_still_finds_the_legacy_root_file(api, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "dashboard.toml").write_text(VALID_SPEC)
