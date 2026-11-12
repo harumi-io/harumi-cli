@@ -73,8 +73,11 @@ git fetch origin --prune && git branch -r | rg -i '<keyword>'
  board at `To Do`, and the rest follows from its PR.
 - GraphQL exhausted (`gh api rate_limit --jq .resources.graphql`)? `gh issue create` and
  `gh pr create` fail, but REST works: `gh api -X POST repos/{owner}/{repo}/issues -f title=... -f type=Task`
- and `gh api -X POST repos/{owner}/{repo}/pulls -F draft=true ...`. `gh pr ready` has no REST form:
- wait for the reset (`reset` in the same output) instead of retrying in a loop.
+ and `gh api -X POST repos/{owner}/{repo}/pulls -F draft=true ...`. To mark the work complete, add the
+ label over REST (`gh pr edit --add-label` is GraphQL):
+ `gh api -X POST repos/{owner}/{repo}/issues/<n>/labels -f 'labels[]=ready-when-green'`.
+ `gh pr ready` has no REST form: wait for the reset (`reset` in the same output) instead of
+ retrying in a loop.
 
 ### How cards move
 
@@ -119,11 +122,15 @@ What you do: create the issue, open the PR as a **draft** with `Closes #N` in th
   push, or later and re-run the `undraft` job). The `undraft` job, the last job of CI, then marks the
   PR ready once CI is green, which starts the review bot and moves the issue to In review, so the bot
   reviews once, on the final state, and nobody needs to subscribe to CI. Without the label a draft
-  stays a draft: never add it earlier. The job only acts on PRs by the `UNDRAFT_TOKEN` owner from a
-  branch in this repo. For any other PR, or if the job fails (expired token, missing secret), run
-  `gh pr ready <n>` yourself once CI is green. Do not wait for a person to do it. One concern per PR, about 400 changed lines or
-  fewer (lockfiles and generated files do not count); say why if it is larger. UI changes get a
-  screenshot. Do not force-push after review starts.
+  stays a draft: never add it earlier. If you move a PR back to draft to keep working, remove the
+  label first (`gh api -X DELETE repos/{owner}/{repo}/issues/<n>/labels/ready-when-green`) and add it
+  again on the new final push, or the next green push undrafts it. The job only acts on PRs by the
+  `UNDRAFT_TOKEN` owner from a branch in this repo. It exits green without undrafting when the secret
+  is missing, the label is absent or the PR is someone else's, so once the job has finished check that
+  the PR is no longer a draft. If it still is, or the job failed (expired token), run `gh pr ready <n>`
+  yourself once CI is green. Do not wait for a person to do it. One concern per PR, about 400 changed
+  lines or fewer (lockfiles and generated files do not count); say why if it is larger. UI changes get
+  a screenshot. Do not force-push after review starts.
 - **Issue:** title `Area: short description`, in English. Set the issue type (`Feature`, `Bug`, `Task`
   or `Chore`) instead of a type label, and use the matching template. One problem per issue; name its
   blockers.
