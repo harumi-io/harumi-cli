@@ -73,8 +73,11 @@ git fetch origin --prune && git branch -r | rg -i '<keyword>'
  board at `To Do`, and the rest follows from its PR.
 - GraphQL exhausted (`gh api rate_limit --jq .resources.graphql`)? `gh issue create` and
  `gh pr create` fail, but REST works: `gh api -X POST repos/{owner}/{repo}/issues -f title=... -f type=Task`
- and `gh api -X POST repos/{owner}/{repo}/pulls -F draft=true ...`. `gh pr ready` has no REST form:
- wait for the reset (`reset` in the same output) instead of retrying in a loop.
+ and `gh api -X POST repos/{owner}/{repo}/pulls -F draft=true ...`. To mark the work complete, add the
+ label over REST (`gh pr edit --add-label` is GraphQL):
+ `gh api -X POST repos/{owner}/{repo}/issues/<n>/labels -f 'labels[]=ready-when-green'`.
+ `gh pr ready` has no REST form: wait for the reset (`reset` in the same output) instead of
+ retrying in a loop.
 
 ### How cards move
 
@@ -87,8 +90,9 @@ Nobody sets Status, agents included. The board does, from the PR:
 | `In review` | The PR that closes the issue is out of draft: the code is meant to be complete, not yet reviewed or shown to work. | `pr-status.yml`, when the PR is marked ready. |
 | `Done` | Merged, or the issue closed. | The board's `Pull request merged` and `Item closed`. |
 
-What you do: create the issue, open the PR as a **draft** with `Closes #N` in the body, and run
-`gh pr ready <n>` when the work is complete. The card follows.
+What you do: create the issue, open the PR as a **draft** with `Closes #N` in the body, and add the
+`ready-when-green` label on your final push when the work is complete. CI then marks the PR ready
+(see "PR body" below) and the card follows.
 
 - `Refs #N` does **not** link the issue, so a PR that only `Refs` it leaves the card alone. That
  is right for partial work.
@@ -114,11 +118,19 @@ What you do: create the issue, open the PR as a **draft** with `Closes #N` in th
 - **PR body:** use the PR template: `What`, `Why`, `Testing`, `Issue` (`Closes #N`, or `Refs #N` if the
   PR is partial) and, only for auth, billing, data, deploy or infra changes, `Risk`. Open as a draft
   and push every change to it while it is a draft (the review bot skips drafts). When the work is
-  complete, CI is green and you have read your own diff, mark it ready yourself (`gh pr ready <n>`)
-  and the board moves the issue to In review, so the bot reviews once, on the final state. Do not mark it ready
-  earlier, and do not wait for a person to do it. One concern per PR, about 400 changed lines or
-  fewer (lockfiles and generated files do not count); say why if it is larger. UI changes get a
-  screenshot. Do not force-push after review starts.
+  complete and you have read your own diff, add the `ready-when-green` label (before your final
+  push, or later and re-run the `undraft` job). The `undraft` job, the last job of CI, then marks the
+  PR ready once CI is green, which starts the review bot and moves the issue to In review, so the bot
+  reviews once, on the final state, and nobody needs to subscribe to CI. Without the label a draft
+  stays a draft: never add it earlier. If you move a PR back to draft to keep working, remove the
+  label first (`gh api -X DELETE repos/{owner}/{repo}/issues/<n>/labels/ready-when-green`) and add it
+  again on the new final push, or the next green push undrafts it. The job only acts on PRs by the
+  `UNDRAFT_TOKEN` owner from a branch in this repo. It exits green without undrafting when the secret
+  is missing, the label is absent or the PR is someone else's, so once the job has finished check that
+  the PR is no longer a draft. If it still is, or the job failed (expired token), run `gh pr ready <n>`
+  yourself once CI is green. Do not wait for a person to do it. One concern per PR, about 400 changed
+  lines or fewer (lockfiles and generated files do not count); say why if it is larger. UI changes get
+  a screenshot. Do not force-push after review starts.
 - **Issue:** title `Area: short description`, in English. Set the issue type (`Feature`, `Bug`, `Task`
   or `Chore`) instead of a type label, and use the matching template. One problem per issue; name its
   blockers.

@@ -45,7 +45,7 @@ import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from harumi.dashboard_sql_guard import SqlGuardError, ensure_read_only_select
 
@@ -62,7 +62,7 @@ SCHEMA_ARTIFACT_PATH = Path(__file__).with_name("dashboard-schema.json")
 class WidgetField:
     toml_key: str
     required: bool = False
-    kind: str = "string"  # "string" | "number" | "enum" | "columns" | "series" | "colorMap"
+    kind: str = "string"  # "string" | "number" | "enum" | "columns" | "series" | "colorMap" | "stringList" | "table"
     values: Optional[Tuple[str, ...]] = None
     # True for fields that are a dot-path into the run's output.json (as
     # opposed to a field name *within* an already-resolved array item, e.g.
@@ -85,7 +85,7 @@ class DashboardSchemaError(RuntimeError):
 # set would fall through to "no value is ever valid", quietly making a required
 # field impossible to satisfy and an optional one impossible to use — so a typo
 # in the artifact is rejected at load rather than silently weakening validation.
-_KNOWN_FIELD_KINDS = frozenset({"string", "number", "enum", "columns", "series", "colorMap"})
+_KNOWN_FIELD_KINDS = frozenset({"string", "number", "enum", "columns", "series", "colorMap", "stringList", "table"})
 
 
 @lru_cache(maxsize=1)
@@ -196,6 +196,82 @@ def widget_aliases() -> Dict[str, Dict[str, Any]]:
     return aliases
 
 
+@lru_cache(maxsize=1)
+def deprecations() -> Tuple[Dict[str, str], Dict[str, str]]:
+    """The artifact's optional ``deprecated`` block: ``({widget type: replacement
+    type}, {top-level section: advice})``. Both are empty for an artifact that
+    predates it, so an older vendored copy just has nothing to warn about."""
+    raw = _artifact().get("deprecated")
+    if raw is None:
+        return {}, {}
+    if not isinstance(raw, dict):
+        raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name}: deprecated must be an object")
+    types: Dict[str, str] = {}
+    for item in raw.get("widgetTypes") or []:
+        if not isinstance(item, dict) or not isinstance(item.get("type"), str) or not isinstance(item.get("replacement"), str):
+            raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name}: a deprecated widget type needs a string type and replacement")
+        types[item["type"]] = item["replacement"]
+    sections: Dict[str, str] = {}
+    for item in raw.get("sections") or []:
+        if not isinstance(item, dict) or not isinstance(item.get("section"), str) or not isinstance(item.get("advice"), str):
+            raise DashboardSchemaError(f"{SCHEMA_ARTIFACT_PATH.name}: a deprecated section needs a string section and advice")
+        sections[item["section"]] = item["advice"]
+    return types, sections
+
+
+# `WidgetIssue.label` of a deprecation. Unlike the other non-dropped labels it is
+# not a defect: the widget renders as before, so `harumi dashboard validate`
+# lists it without failing (a CI check must not turn red the day a release
+# deprecates something a dashboard still uses).
+DEPRECATED_LABEL = "deprecated"
+
+
+def deprecation_warnings(raw: str) -> List[WidgetIssue]:
+    """Notices for the deprecated widget types and top-level sections a
+    ``dashboard.toml`` uses, read from the artifact's ``deprecated`` block.
+
+    Separate from `validate_dashboard_toml` on purpose: that returns what is
+    wrong with a spec, and a deprecated widget is not wrong, it still renders.
+    Raises `DashboardTomlError` for invalid TOML, like the validator."""
+    try:
+        parsed = tomllib.loads(raw)
+    except tomllib.TOMLDecodeError as exc:
+        raise DashboardTomlError(str(exc)) from exc
+    types, sections = deprecations()
+    notices: List[WidgetIssue] = []
+    raw_widgets = parsed.get("widgets")
+    for entry in raw_widgets if isinstance(raw_widgets, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        type_ = entry.get("type")
+        if not isinstance(type_, str) or type_ not in types:
+            continue
+        id_ = entry.get("id") if isinstance(entry.get("id"), str) else None
+        replacement = types[type_]
+        use = "a custom widget" if replacement == "custom" else f'"{replacement}"'
+        notices.append(
+            WidgetIssue(
+                id_,
+                f'widget "{id_}" ({type_}): "{type_}" is deprecated and will be removed; use {use} instead',
+                dropped=False,
+                label=DEPRECATED_LABEL,
+            )
+        )
+    for section, advice in sections.items():
+        value = parsed.get(section)
+        if value in (None, [], {}):
+            continue
+        notices.append(
+            WidgetIssue(
+                None,
+                f"[{section}] is deprecated and will be removed. {advice}",
+                dropped=False,
+                label=DEPRECATED_LABEL,
+            )
+        )
+    return notices
+
+
 def resolve_alias(entry: Dict[str, Any]) -> Dict[str, Any]:
     """``entry`` with a retired ``type`` rewritten to its target. Keys the entry
     sets itself win over the ones the old name implied, mirroring the platform's
@@ -274,6 +350,41 @@ def _coerce_color_map(value: Any) -> Optional[Dict[str, Any]]:
     return color_map or None
 
 
+def _coerce_string_list(value: Any, allowed: Optional[Tuple[str, ...]]) -> Optional[List[str]]:
+    """Mirrors `coerceStringList`: a member outside `allowed` (when the field
+    lists any) is dropped rather than failing the widget, and duplicates
+    collapse. An empty result is kept (``[]`` is "none of these"), so a
+    ``capabilities = []`` stays distinguishable from a missing key."""
+    if not isinstance(value, list):
+        return None
+    kept: List[str] = []
+    for item in value:
+        if isinstance(item, str) and (not allowed or item in allowed) and item not in kept:
+            kept.append(item)
+    return kept
+
+
+def _is_plain_value(value: Any, depth: int = 0) -> bool:
+    """Mirrors `isPlainValue`: strings, numbers, booleans, and lists/tables of
+    them. TOML nulls do not exist, and dates are not plain data here."""
+    if depth > 8:
+        return False
+    if isinstance(value, (str, bool, int, float)):
+        return True
+    if isinstance(value, list):
+        return all(_is_plain_value(v, depth + 1) for v in value)
+    if isinstance(value, dict):
+        return all(_is_plain_value(v, depth + 1) for v in value.values())
+    return False
+
+
+def _coerce_table(value: Any) -> Optional[Dict[str, Any]]:
+    """Mirrors `coerceTable`: a free-form table of plain values, else dropped."""
+    if not isinstance(value, dict) or not _is_plain_value(value):
+        return None
+    return value
+
+
 def _coerce_field(value: Any, field: WidgetField) -> Any:
     if value is None:
         return None
@@ -290,7 +401,37 @@ def _coerce_field(value: Any, field: WidgetField) -> Any:
         return _coerce_series(value)
     if field.kind == "colorMap":
         return _coerce_color_map(value)
+    if field.kind == "stringList":
+        return _coerce_string_list(value, field.values)
+    if field.kind == "table":
+        return _coerce_table(value)
     return None
+
+
+# Where a `custom` widget's code comes from. Mirrors `parseCustomSource` in
+# harumi-platform's custom-source.ts: a repo path read at the dashboard's ref,
+# or `output:<path>` for a file the run wrote into its output directory.
+OUTPUT_SOURCE_PREFIX = "output:"
+
+
+def parse_custom_source(source: str) -> Tuple[Optional[Tuple[str, str]], Optional[str]]:
+    """``((kind, path), None)`` for a well-formed `source`, else ``(None, why)``.
+
+    ``kind`` is ``"repo"`` or ``"output"``. A path is relative and stays inside
+    its root, and names one ``.html`` file, so the host is never asked to fetch
+    whatever the spec says.
+    """
+    is_output = source.startswith(OUTPUT_SOURCE_PREFIX)
+    path = source[len(OUTPUT_SOURCE_PREFIX) :] if is_output else source
+    if path == "":
+        return None, "source is empty"
+    if path.startswith("/") or "\\" in path:
+        return None, "source must be a relative path"
+    if any(segment in ("", ".", "..") for segment in path.split("/")):
+        return None, 'source must not contain empty, "." or ".." segments'
+    if not path.lower().endswith((".html", ".htm")):
+        return None, "source must be an .html file"
+    return ("output" if is_output else "repo", path), None
 
 
 @dataclass(frozen=True)
@@ -443,6 +584,11 @@ def parse_widget_entry(entry: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]],
             widget[field.toml_key] = coerced
         elif field.required:
             return None, WidgetIssue(id_, f'widget "{id_}" ({type_}): missing or invalid "{field.toml_key}"')
+
+    if type_ == "custom":
+        _, why = parse_custom_source(widget["source"])
+        if why is not None:
+            return None, WidgetIssue(id_, f'widget "{id_}" (custom): {why}')
 
     return widget, None
 
@@ -691,7 +837,9 @@ def local_dashboard_paths(root: Path) -> List[str]:
 
 
 def validate_dashboard_toml(
-    raw: str, output: Optional[Dict[str, Any]] = None
+    raw: str,
+    output: Optional[Dict[str, Any]] = None,
+    repo_file_exists: Optional[Callable[[str], bool]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[WidgetIssue]]:
     """Parses and validates a dashboard spec, mirroring
     `parseDashboardConfig` + `parseWidgetEntry` + `parseDatasetEntry` +
@@ -700,6 +848,11 @@ def validate_dashboard_toml(
     `[[datasets]]`, `[[metrics]]`, and `[clock]` (dropped entries first, then
     — only when `output` is given — output.json dot-paths that won't resolve,
     which the platform itself can't check ahead of time).
+
+    ``repo_file_exists``, when given, is asked about each repo-sourced `custom`
+    widget's ``source``; a file it cannot find is reported (``dropped=False``:
+    the platform draws a "could not load" card, not nothing). ``output:``
+    sources are written by a run, so they are never checked here.
 
     A top-level `title` (the picker label when a project has several
     dashboards) and a `[layout]` table are both accepted and ignored here —
@@ -796,6 +949,22 @@ def validate_dashboard_toml(
                     "there is no time to evaluate it at otherwise",
                 )
             )
+
+    if repo_file_exists is not None:
+        for widget in widgets:
+            if widget["type"] != "custom":
+                continue
+            located, _ = parse_custom_source(widget["source"])
+            if located is not None and located[0] == "repo" and not repo_file_exists(located[1]):
+                issues.append(
+                    WidgetIssue(
+                        widget["id"],
+                        f'widget "{widget["id"]}" (custom): "{widget["source"]}" is not in the repo — '
+                        "the widget will show a load error",
+                        dropped=False,
+                        label="missing",
+                    )
+                )
 
     if output is not None:
         for widget in widgets:

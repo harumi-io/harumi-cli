@@ -19,6 +19,7 @@ from harumi.dashboard import (
     parse_metric_entry,
     parse_widget_entry,
     pick_dashboard_paths,
+    deprecation_warnings,
     resolve_path,
     validate_dashboard_toml,
     widget_schemas,
@@ -40,14 +41,15 @@ _EXPECTED_WIDGET_CONTRACT = {
         "format[number|currency|percent]",
         "unit",
     ],
-    "table": ["rows_key!*", "columns!"],
-    "treemap": ["items_key!*", "value_key!", "name_key!", "color_key", "colors", "capacity_key*"],
+    "table": ["rows_key!*", "columns!", "subtitle"],
+    "treemap": ["items_key!*", "value_key!", "name_key!", "color_key", "colors", "capacity_key*", "subtitle"],
     "heatmap": [
         "items_key!*",
         "resource_key",
         "bucket_key",
         "value_key",
         "unit",
+        "subtitle",
     ],
     "chart": [
         "variant![line|bar|area|scatter|pie|donut]",
@@ -64,6 +66,7 @@ _EXPECTED_WIDGET_CONTRACT = {
         "x_label",
         "y_label",
         "colors",
+        "subtitle",
     ],
     "gantt-chart": [
         "tasks_key!*",
@@ -75,6 +78,7 @@ _EXPECTED_WIDGET_CONTRACT = {
         "color_key",
         "colors",
         "time_unit",
+        "subtitle",
     ],
     "timeline": [
         "items_key!*",
@@ -92,6 +96,7 @@ _EXPECTED_WIDGET_CONTRACT = {
         "region_label_key",
         "region_resource_key",
         "time_unit",
+        "subtitle",
     ],
     "map": [
         "points_key*",
@@ -103,9 +108,23 @@ _EXPECTED_WIDGET_CONTRACT = {
         "routes_key*",
         "route_path_key",
         "route_color_key",
+        "colors",
         "tile_url",
         "attribution",
+        "subtitle",
     ],
+    # Controls read nothing from output.json: `input` names an [[inputs]] entry of harumi.toml.
+    "input-number": ["input!", "subtitle"],
+    "input-slider": ["input!", "subtitle"],
+    "input-toggle": ["input!", "subtitle"],
+    "input-select": ["input!", "subtitle"],
+    "input-text": ["input!", "subtitle"],
+    "input-date": ["input!", "subtitle"],
+    "input-file": ["input!", "subtitle"],
+    "run-button": ["label", "confirm", "subtitle"],
+    # One form for every [[inputs]] entry of harumi.toml: `only` is free-form names, not an enum.
+    "inputs": ["only", "label", "confirm", "subtitle"],
+    "custom": ["source!", "height", "width[half|full]", "chrome[card|none]", "capabilities[inputs|run]", "props", "subtitle"],
 }
 
 
@@ -116,7 +135,7 @@ def test_widget_contract_matches_the_vendored_schema_artifact():
             field.toml_key
             + ("!" if field.required else "")
             + ("*" if field.is_output_path else "")
-            + (f"[{'|'.join(field.values)}]" if field.kind == "enum" else "")
+            + (f"[{'|'.join(field.values)}]" if field.kind in ("enum", "stringList") and field.values else "")
             for field in fields
         ]
         for type_, fields in widget_schemas().items()
@@ -283,6 +302,50 @@ def test_importing_the_cli_does_not_read_the_artifact():
     assert dashboard_module.pick_dashboard_paths(["dashboard.toml"]) == ["dashboard.toml"]
 
 
+class TestCustomWidget:
+    @staticmethod
+    def _entry(**extra):
+        return {"type": "custom", "id": "cw", "title": "CW", "source": "widgets/board.html", **extra}
+
+    def test_keeps_props_and_known_capabilities(self):
+        widget, issue = parse_widget_entry(
+            self._entry(capabilities=["inputs", "run", "teleport", "inputs"], props={"key": "m.x", "n": [1, 2]}, width="half")
+        )
+        assert issue is None and widget is not None
+        assert widget["capabilities"] == ["inputs", "run"]
+        assert widget["props"] == {"key": "m.x", "n": [1, 2]}
+        assert widget["width"] == "half"
+
+    def test_an_empty_capabilities_list_is_kept(self):
+        widget, _ = parse_widget_entry(self._entry(capabilities=[]))
+        assert widget is not None and widget["capabilities"] == []
+
+    @pytest.mark.parametrize(
+        "source",
+        ["", "output:", "/etc/passwd", "../x.html", "widgets/../x.html", "a//b.html", "widgets/board.js", "output:../x.html"],
+    )
+    def test_a_bad_source_is_rejected(self, source):
+        widget, issue = parse_widget_entry(self._entry(source=source))
+        assert widget is None and issue is not None and "custom" in issue.message
+
+    def test_an_output_source_is_accepted(self):
+        widget, issue = parse_widget_entry(self._entry(source="output:plots/shifts.html"))
+        assert issue is None and widget is not None
+
+    def test_a_missing_repo_file_is_reported_but_the_widget_is_kept(self):
+        body = "[[widgets]]\ntype = 'custom'\nid = 'cw'\ntitle = 'CW'\nsource = 'widgets/board.html'\n"
+        widgets, issues = validate_dashboard_toml(body, repo_file_exists=lambda p: False)
+        assert len(widgets) == 1
+        assert [i.label for i in issues] == ["missing"] and not issues[0].dropped
+        _, ok = validate_dashboard_toml(body, repo_file_exists=lambda p: p == "widgets/board.html")
+        assert ok == []
+
+    def test_output_sources_are_never_checked_against_the_repo(self):
+        body = "[[widgets]]\ntype = 'custom'\nid = 'cw'\ntitle = 'CW'\nsource = 'output:a.html'\n"
+        _, issues = validate_dashboard_toml(body, repo_file_exists=lambda p: False)
+        assert issues == []
+
+
 class TestParseWidgetEntry:
     def test_parses_a_minimal_valid_entry_for_every_type(self):
         entries = {
@@ -320,6 +383,21 @@ class TestParseWidgetEntry:
             "gantt-chart": {"type": "gantt-chart", "id": "g", "title": "G", "tasks_key": "schedule"},
             "timeline": {"type": "timeline", "id": "tl", "title": "TL", "items_key": "schedule"},
             "map": {"type": "map", "id": "mp", "title": "MP", "points_key": "stops"},
+            **{
+                control: {"type": control, "id": control, "title": "C", "input": "demand_multiplier"}
+                for control in (
+                    "input-number",
+                    "input-slider",
+                    "input-toggle",
+                    "input-select",
+                    "input-text",
+                    "input-date",
+                    "input-file",
+                )
+            },
+            "run-button": {"type": "run-button", "id": "rerun", "title": "Re-run"},
+            "inputs": {"type": "inputs", "id": "form", "title": "Scenario", "only": ["demand_multiplier"]},
+            "custom": {"type": "custom", "id": "cw", "title": "CW", "source": "widgets/board.html"},
         }
         for type_, entry in entries.items():
             widget, issue = parse_widget_entry(entry)
@@ -330,6 +408,11 @@ class TestParseWidgetEntry:
         # covering a type without anyone noticing, the same drift the
         # re-vendor step above exists to catch.
         assert set(entries) == set(widget_schemas())
+
+    def test_an_input_control_without_its_input_is_rejected(self):
+        widget, issue = parse_widget_entry({"type": "input-slider", "id": "s", "title": "S"})
+        assert widget is None
+        assert issue is not None and "input" in issue.message
 
     def test_rejects_unknown_widget_type(self):
         widget, issue = parse_widget_entry({"type": "pie-chart", "id": "p", "title": "P"})
@@ -891,7 +974,7 @@ def test_every_color_bearing_field_kind_is_checked_for_ignored_values():
     from harumi.dashboard import _KNOWN_FIELD_KINDS
 
     checked = {"series", "colorMap"}
-    carries_no_color = {"string", "number", "enum", "columns"}
+    carries_no_color = {"string", "number", "enum", "columns", "stringList", "table"}
     assert _KNOWN_FIELD_KINDS == checked | carries_no_color, (
         "a new field kind was added to the schema: decide whether it carries colors and, if so, "
         "teach widget_warnings to check it"
@@ -1253,3 +1336,33 @@ def test_widget_warnings_receives_the_alias_resolved_entry():
             with mock.patch.object(dash, "widget_warnings", side_effect=spy):
                 dash.validate_dashboard_toml(raw)
     assert seen["type"] == "chart"
+
+
+class TestDeprecations:
+    """The artifact's `deprecated` block, surfaced as notices that never drop a widget."""
+
+    def test_a_deprecated_widget_type_names_its_replacement(self):
+        raw = "[[widgets]]\ntype = 'gantt-chart'\nid = 'g'\ntitle = 'G'\ntasks_key = 'schedule'\n"
+        issues = deprecation_warnings(raw)
+        assert len(issues) == 1
+        notice = issues[0]
+        assert notice.label == "deprecated" and not notice.dropped
+        assert 'use "timeline"' in notice.message
+
+    def test_a_widget_replaced_by_custom_points_at_custom_widgets(self):
+        raw = "[[widgets]]\ntype = 'treemap'\nid = 't'\ntitle = 'T'\nitems_key = 'a'\nvalue_key = 'v'\nname_key = 'n'\n"
+        issues = deprecation_warnings(raw)
+        assert [i.label for i in issues] == ["deprecated"]
+        assert "a custom widget" in issues[0].message
+
+    def test_a_deprecated_section_carries_the_artifacts_advice(self):
+        raw = "[clock]\ndataset = 'x'\n\n[layout]\ncolumns = 2\n"
+        issues = deprecation_warnings(raw)
+        messages = [i.message for i in issues if i.label == "deprecated"]
+        assert any(m.startswith("[layout] is deprecated") for m in messages)
+        assert any(m.startswith("[clock] is deprecated") for m in messages)
+
+    def test_current_widgets_and_sections_raise_nothing(self):
+        raw = "[[widgets]]\ntype = 'inputs'\nid = 'f'\ntitle = 'F'\n"
+        issues = deprecation_warnings(raw)
+        assert issues == []

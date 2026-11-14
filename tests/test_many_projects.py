@@ -18,14 +18,8 @@ NOW = datetime(2026, 10, 15, 12, 0, tzinfo=timezone.utc)
 
 
 @pytest.fixture(autouse=True)
-def home(tmp_path, monkeypatch):
-    monkeypatch.setattr("harumi.config.HARUMI_HOME", tmp_path)
-    monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "config.json")
-    monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "credentials.json")
-    monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
-    monkeypatch.setattr("harumi.config._RESOLVED_API_URL", None)
-    for var in ("HARUMI_ENV", "HARUMI_API_URL", "HARUMI_GIT_URL", "HARUMI_ORG"):
-        monkeypatch.delenv(var, raising=False)
+def home(tmp_path, monkeypatch, isolate_harumi_home):
+    isolate_harumi_home(tmp_path)
     config.save_credentials(access_token="a", refresh_token="r", email="ana@example.com")
 
 
@@ -289,7 +283,7 @@ def test_a_project_beyond_the_old_first_hundred_can_now_be_chosen(server, monkey
     monkeypatch.setattr(interactive, "select", lambda msg, options, **k: "proj-0042")
     chosen = {}
     monkeypatch.setattr(
-        cli, "_clone_and_bind", lambda project, repo, dest: chosen.setdefault("p", project)
+        cli, "_clone_and_bind", lambda project, repo, dest, **_owner: chosen.setdefault("p", project)
     )
 
     class Repo:

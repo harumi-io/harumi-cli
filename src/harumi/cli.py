@@ -28,6 +28,7 @@
     harumi schedules list|get|add|update|rm [--project <id>]
     harumi secrets list|set|rm [--project <id>]
     harumi memories list|add|edit|rm [--project <id>]
+    harumi issues list|view|create|edit|move|close|reopen|comment [--project <id>]
     harumi org list|create|rename|use|rm|members|invite|role|rm-member|leave
     harumi org invitations [accept|decline]
 
@@ -158,7 +159,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, NoReturn, Optional
+from typing import Any, Callable, NoReturn, Optional
 
 import httpx
 import pydantic
@@ -195,7 +196,11 @@ from harumi.config import (
 )
 from harumi.dashboard import (
     DashboardSchemaError,
+    DASHBOARD_DIR,
+    DEPRECATED_LABEL,
+    deprecation_warnings,
     DashboardTomlError,
+    ROOT_DASHBOARD_PATH,
     local_dashboard_paths,
     pick_dashboard_paths,
     validate_dashboard_toml,
@@ -227,7 +232,7 @@ from harumi.git import (
     push_scratch,
     repo_root,
 )
-from harumi.models import LoggedUser, ProjectFile, ProjectShareLink
+from harumi.models import ApiKeyInfo, LoggedUser, ProjectFile, ProjectShareLink
 
 # Words people reach for that this CLI spells differently. Renaming `files ls`, `org create`, `memories edit`
 # and `secrets set` to one scheme would need a deprecation window each, so a wrong guess is answered instead:
@@ -2290,13 +2295,34 @@ def examples(
 # Shared binding/remote helper
 # ---------------------------------------------------------------------------
 
-def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None) -> bool:
+def _owner_of(project) -> tuple[Optional[str], bool]:
+    """(the organization that owns `project`, whether the server said so).
+
+    `customer_id` is `None` both for a personal project and for a response that left the field
+    out; only the first may be written down as personal, or the folder would claim a workspace
+    nobody told us about."""
+    known = "customer_id" in getattr(project, "model_fields_set", ())
+    return (project.customer_id if known else None), known
+
+
+def _bind_and_configure_remote(
+    project_id: str,
+    repo,
+    cwd: Optional[Path] = None,
+    *,
+    environment: str,
+    customer_id: Optional[str],
+    workspace_known: bool,
+) -> bool:
     """Write .harumi/config.json for `project_id`/`repo` and configure the
     `harumi` git remote in the target directory (defaults to cwd), if possible.
 
     Shared by `link` (binding an existing checkout) and `new`/`push` (binding
     a just-created project after cloning/pushing its repo). `repo` is a
     `RepoInfo`-shaped object (owner/name/clone_url/default_branch).
+    `environment` and `customer_id` (the owning organization, `None` for a
+    personal project) are recorded so the folder can later say whose project
+    it is; they are keyword-only so no caller can forget them.
 
     Returns whether the remote was actually configured — callers use this to
     decide whether it's safe to print a "you're ready to go" message.
@@ -2313,6 +2339,9 @@ def _bind_and_configure_remote(project_id: str, repo, cwd: Optional[Path] = None
             clone_url=repo.clone_url,
             default_branch=repo.default_branch,
         ),
+        environment=environment,
+        customer_id=customer_id,
+        workspace_known=workspace_known,
     )
     console.print(
         f"Wrote [bold]{binding.config_path}[/bold] "
@@ -2412,8 +2441,16 @@ def link(
 
     console.print(f"Fetching repo for project [bold]{project}[/bold]...")
     repo = client.get_project_repo(project)
+    try:
+        owner, known = _owner_of(client.get_project(project))
+    except ApiError:
+        # The repo answered, so the project is there; only its owner is unknown. Bind anyway:
+        # a binding without a workspace is filled in the first time it is used.
+        owner, known = None, False
 
-    _bind_and_configure_remote(project, repo)
+    _bind_and_configure_remote(
+        project, repo, environment=client.config.environment, customer_id=owner, workspace_known=known
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2730,7 +2767,10 @@ def _push_impl(
         console.print(f"View project: {active_platform_url()}/projects/{project.id}")
         return
 
-    if _bind_and_configure_remote(project.id, repo, cwd=folder):
+    owner, known = _owner_of(project)
+    if _bind_and_configure_remote(
+        project.id, repo, cwd=folder, environment=client.config.environment, customer_id=owner, workspace_known=known
+    ):
         _next_steps(folder)
 
 
@@ -2908,14 +2948,20 @@ def _new_impl(
     if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
         _fail(f"{dest} already exists and isn't empty. Pass --dir to clone somewhere else.")
 
-    _clone_and_bind(project.id, project.repo, dest)
+    owner, known = _owner_of(project)
+    _clone_and_bind(
+        project.id, project.repo, dest,
+        environment=client.config.environment, customer_id=owner, workspace_known=known,
+    )
 
 
 # ---------------------------------------------------------------------------
 # harumi clone — fetch an existing Harumi project's code locally
 # ---------------------------------------------------------------------------
 
-def _clone_and_bind(project_id: str, repo, dest: Path) -> None:
+def _clone_and_bind(
+    project_id: str, repo, dest: Path, *, environment: str, customer_id: Optional[str], workspace_known: bool
+) -> None:
     """Clone `repo` into `dest`, then bind `dest` to `project_id`.
 
     Shared by `new` (a repo it just created) and `clone` (a repo that
@@ -2947,7 +2993,9 @@ def _clone_and_bind(project_id: str, repo, dest: Path) -> None:
     console.print(f"Cloning into [bold]{dest}[/bold]...", soft_wrap=True)
     clone_repo(clone_url=repo.clone_url, dest=dest)
 
-    if _bind_and_configure_remote(project_id, repo, cwd=dest):
+    if _bind_and_configure_remote(
+        project_id, repo, cwd=dest, environment=environment, customer_id=customer_id, workspace_known=workspace_known
+    ):
         _next_steps(dest)
 
 
@@ -2999,7 +3047,10 @@ def _clone_impl(
     if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
         _fail(f"{dest} already exists and isn't empty. Pass --dir to clone somewhere else.")
 
-    _clone_and_bind(project, repo, dest)
+    owner, known = _owner_of(proj)
+    _clone_and_bind(
+        project, repo, dest, environment=client.config.environment, customer_id=owner, workspace_known=known
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -4002,6 +4053,343 @@ def tags_rm(
 
 
 # ---------------------------------------------------------------------------
+# harumi issues
+# ---------------------------------------------------------------------------
+
+issues_app = _typer(help="The project's issues: its list of work, shared with the web app and the assistant.")
+app.add_typer(issues_app, name="issues")
+
+# What the user types for each status (the API's `in_progress` is spelled with a hyphen on the command line).
+_ISSUE_STATUSES = {"todo": "todo", "in-progress": "in_progress", "in_progress": "in_progress", "done": "done"}
+_ISSUE_STATUS_LABEL = {"todo": "to do", "in_progress": "in progress", "done": "done"}
+_ISSUE_STATES = ("open", "todo", "in-progress", "done", "all")
+_ISSUE_PROJECT = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list.")
+
+
+def _issue_number(typed: str) -> int:
+    """`12` or `#12` as the number it names."""
+    text = typed.strip().lstrip("#")
+    if not text.isdigit() or int(text) < 1:
+        _fail(f"'{escape(_printable(typed))}' is not an issue number. Find it with [bold]harumi issues list[/bold].")
+    return int(text)
+
+
+def _issue_status(typed: str) -> str:
+    status = _ISSUE_STATUSES.get(typed.strip().lower())
+    if status is None:
+        _fail(f"'{escape(_printable(typed))}' is not a status. Use one of: todo, in-progress, done.")
+    return status  # type: ignore[return-value]
+
+
+def _issue_text(
+    text: Optional[str], file: Optional[str], edit: bool, *, noun: str, initial: str = ""
+) -> Optional[str]:
+    """The text for a body or comment from --body, --body-file (`-` is stdin) or --edit; None if none was given."""
+    given = [flag for flag, on in (("--body", text is not None), ("--body-file", file is not None), ("--edit", edit)) if on]
+    if len(given) > 1:
+        _fail(f"Give the {noun} one way only, not {' and '.join(given)}.")
+    if file is not None:
+        if file == "-":
+            return sys.stdin.read()
+        try:
+            return Path(file).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            _fail(f"Cannot read {escape(file)}: {escape(str(exc))}")
+    if edit:
+        if not interactive.is_interactive():
+            _fail(f"--edit needs a terminal. Pass the {noun} with [bold]--body[/bold] or [bold]--body-file[/bold] instead.")
+        edited = typer.edit(initial)
+        if edited is None:
+            _fail(f"No {noun} saved, nothing changed.")
+        return edited.rstrip("\n")
+    return text
+
+
+def _issue_header(issue) -> str:
+    return f"#{issue.number} {_printable(issue.title)}"
+
+
+def _people(users) -> str:
+    return ", ".join(_printable(u.name) for u in users)
+
+
+_ISSUE_BODY = typer.Option(None, "--body", "-b", help="The text, as an argument.")
+_ISSUE_BODY_FILE = typer.Option(None, "--body-file", "-F", help="Read the text from a file. Use - for standard input.")
+_ISSUE_EDIT = typer.Option(False, "--edit", "-e", help="Write the text in your editor.")
+
+
+@issues_app.command("list")
+@_handle_errors
+def issues_list(
+    state: str = typer.Option("open", "--state", "-s", help="open (to do and in progress), todo, in-progress, done or all."),
+    label: Optional[list[str]] = typer.Option(None, "--label", "-l", help="Only issues with this label. Repeat to need several."),
+    assignee: Optional[str] = typer.Option(None, "--assignee", "-a", help="Only issues assigned to this user id."),
+    search: Optional[str] = typer.Option(None, "--search", "-q", help="Words in the title or text."),
+    limit: int = typer.Option(30, "--limit", min=1, max=100, help="How many to show."),
+    page: int = typer.Option(1, "--page", min=1, help="Which page, of --limit issues each."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """List a project's issues, newest first."""
+    state = state.strip().lower().replace("_", "-")
+    if state not in _ISSUE_STATES:
+        _fail(f"'{escape(_printable(state))}' is not a state. Use one of: {', '.join(_ISSUE_STATES)}.")
+    project_id = _resolve_project(project, api_url, org)
+    client = _get_client(api_url=api_url, org=org)
+
+    query = dict(labels=label or None, assignee=assignee, q=search)
+    if state == "todo":
+        # The API cannot ask for "open without the in-progress label", so read the open list and
+        # keep the to-do rows. Paging has to happen after that filter, or a page would come back
+        # short (or empty) while the next one still held to-do issues.
+        todo: list = []
+        fetched, api_page = 0, 1
+        while True:
+            chunk = client.list_issues(project_id, status="open", page=api_page, per_page=100, **query)
+            todo += [i for i in chunk.items if i.status == "todo"]
+            fetched += len(chunk.items)
+            if not chunk.items or fetched >= chunk.total:
+                break
+            api_page += 1
+        issues = todo[(page - 1) * limit : page * limit]
+        found = models.IssueList(items=issues, total=len(todo), page=page, per_page=limit)
+    else:
+        found = client.list_issues(
+            project_id, status={"in-progress": "in_progress"}.get(state, state), page=page, per_page=limit, **query
+        )
+        issues = found.items
+    if as_json:
+        _emit_json({"total": found.total, "page": found.page, "per_page": found.per_page, "items": [json_out.issue(i) for i in issues]})
+        return
+    if not issues:
+        console.print('Nothing here. File one with [bold]harumi issues create --title "..."[/bold].' if state == "open" and not (label or assignee or search) else "No issues match.")
+        return
+
+    table = Table("#", "status", "title", "labels", "assignees", "comments")
+    table.columns[0].no_wrap = True
+    table.columns[1].no_wrap = True
+    for i in issues:
+        title = _printable(i.title) + (" (assistant)" if i.by_assistant else "")
+        table.add_row(
+            _cell(i.number),
+            _cell(_ISSUE_STATUS_LABEL.get(i.status, i.status)),
+            _cell(title),
+            _cell(", ".join(_printable(lb.name) for lb in i.labels)),
+            _cell(_people(i.assignees)),
+            _cell(i.comment_count),
+        )
+    console.print(table)
+    if found.total > found.page * found.per_page:
+        console.print(f"[dim]Showing {len(issues)} of {found.total}. See the next with [bold]--page {found.page + 1}[/bold].[/dim]")
+
+
+@issues_app.command("view")
+@_handle_errors
+def issues_view(
+    number: str = typer.Argument(..., help="Issue number, for example 12 or #12."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Show an issue and its comments."""
+    n = _issue_number(number)
+    project_id = _resolve_project(project, api_url, org)
+    client = _get_client(api_url=api_url, org=org)
+
+    with _pointing_to("harumi issues list"):
+        issue = client.get_issue(project_id, n)
+        comments = client.list_issue_comments(project_id, n)
+    if as_json:
+        _emit_json(json_out.issue(issue, detail=True, comments=comments))
+        return
+
+    console.print(f"[bold]{escape(_issue_header(issue))}[/bold]")
+    facts = [_ISSUE_STATUS_LABEL.get(issue.status, issue.status)]
+    if issue.labels:
+        facts.append("labels: " + ", ".join(_printable(lb.name) for lb in issue.labels))
+    if issue.assignees:
+        facts.append("assigned to " + _people(issue.assignees))
+    if issue.author:
+        facts.append("opened by " + _printable(issue.author.name) + (" via the assistant" if issue.by_assistant else ""))
+    console.print("[dim]" + escape(" · ".join(facts)) + "[/dim]")
+    console.print()
+    console.print(escape(_printable_block(issue.body)) if issue.body.strip() else "[dim]No description.[/dim]")
+    for c in comments:
+        who = _printable(c.author.name) if c.author else "someone"
+        when = c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else ""
+        console.print()
+        console.print(f"[bold]{escape(who)}[/bold] [dim]{escape(when)}{' via the assistant' if c.by_assistant else ''}[/dim]")
+        console.print(escape(_printable_block(c.body)))
+
+
+def _printable_block(text: str) -> str:
+    """Multi-line text with control characters removed but its line breaks kept."""
+    return "\n".join(_printable(line) for line in text.splitlines())
+
+
+@issues_app.command("create")
+@_handle_errors
+def issues_create(
+    title: str = typer.Option(..., "--title", "-t", help="One line that stands on its own."),
+    body: Optional[str] = _ISSUE_BODY,
+    body_file: Optional[str] = _ISSUE_BODY_FILE,
+    edit: bool = _ISSUE_EDIT,
+    label: Optional[list[str]] = typer.Option(None, "--label", "-l", help="A label the project has. Repeat for several."),
+    assignee: Optional[list[str]] = typer.Option(None, "--assignee", "-a", help="A user id. Repeat for several."),
+    status: str = typer.Option("todo", "--status", "-s", help="Start as todo, in-progress or done."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """File an issue."""
+    if not title.strip():
+        _fail("The title can't be empty. Pass [bold]--title[/bold] with a line that stands on its own.")
+    text = _issue_text(body, body_file, edit, noun="description")
+    payload: dict = {"title": title, "body": text or "", "status": _issue_status(status)}
+    if labels := [x for x in label or [] if x]:
+        payload["labels"] = labels
+    if assignees := [x for x in assignee or [] if x]:
+        payload["assignees"] = assignees
+    project_id = _resolve_project(project, api_url, org)
+    client = _get_client(api_url=api_url, org=org)
+
+    issue = client.create_issue(project_id, payload)
+    if as_json:
+        _emit_json(json_out.issue(issue, detail=True))
+        return
+    console.print(f"[bold green]Filed[/bold green] [bold]{escape(_issue_header(issue))}[/bold].")
+
+
+@issues_app.command("edit")
+@_handle_errors
+def issues_edit(
+    number: str = typer.Argument(..., help="Issue number, for example 12 or #12."),
+    title: Optional[str] = typer.Option(None, "--title", "-t", help="The new title."),
+    body: Optional[str] = _ISSUE_BODY,
+    body_file: Optional[str] = _ISSUE_BODY_FILE,
+    edit: bool = _ISSUE_EDIT,
+    label: Optional[list[str]] = typer.Option(None, "--label", "-l", help="Replace the labels with these. Repeat for several; --label '' removes them all."),
+    assignee: Optional[list[str]] = typer.Option(None, "--assignee", "-a", help="Replace the assignees with these user ids. --assignee '' removes them all."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Change an issue's title, description, labels or assignees. Only what you pass changes."""
+    n = _issue_number(number)
+    project_id = _resolve_project(project, api_url, org)
+    client = _get_client(api_url=api_url, org=org)
+
+    initial = ""
+    if edit:
+        with _pointing_to("harumi issues list"):
+            initial = client.get_issue(project_id, n).body
+    text = _issue_text(body, body_file, edit, noun="description", initial=initial)
+    payload: dict = {}
+    if title is not None:
+        payload["title"] = title
+    if text is not None:
+        payload["body"] = text
+    if label is not None:
+        payload["labels"] = [x for x in label if x]
+    if assignee is not None:
+        payload["assignees"] = [x for x in assignee if x]
+    if not payload:
+        _fail("Nothing to change. Pass [bold]--title[/bold], [bold]--body[/bold], [bold]--label[/bold] or [bold]--assignee[/bold].")
+
+    with _pointing_to("harumi issues list"):
+        issue = client.update_issue(project_id, n, payload)
+    if as_json:
+        _emit_json(json_out.issue(issue, detail=True))
+        return
+    console.print(f"[bold green]Updated[/bold green] [bold]{escape(_issue_header(issue))}[/bold].")
+
+
+def _set_issue_status(number: str, status: str, project, as_json, api_url, org, verb: str) -> None:
+    n = _issue_number(number)
+    project_id = _resolve_project(project, api_url, org)
+    client = _get_client(api_url=api_url, org=org)
+    with _pointing_to("harumi issues list"):
+        issue = client.update_issue(project_id, n, {"status": status})
+    if as_json:
+        _emit_json(json_out.issue(issue))
+        return
+    console.print(f"[bold green]{verb}[/bold green] [bold]{escape(_issue_header(issue))}[/bold] ({_ISSUE_STATUS_LABEL.get(issue.status, issue.status)}).")
+
+
+@issues_app.command("move")
+@_handle_errors
+def issues_move(
+    number: str = typer.Argument(..., help="Issue number, for example 12 or #12."),
+    status: str = typer.Option(..., "--status", "-s", help="todo, in-progress or done."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Move an issue to another column of the board."""
+    _set_issue_status(number, _issue_status(status), project, as_json, api_url, org, "Moved")
+
+
+@issues_app.command("close")
+@_handle_errors
+def issues_close(
+    number: str = typer.Argument(..., help="Issue number, for example 12 or #12."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Close an issue: it moves to done."""
+    _set_issue_status(number, "done", project, as_json, api_url, org, "Closed")
+
+
+@issues_app.command("reopen")
+@_handle_errors
+def issues_reopen(
+    number: str = typer.Argument(..., help="Issue number, for example 12 or #12."),
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Reopen a closed issue: it goes back to to do."""
+    _set_issue_status(number, "todo", project, as_json, api_url, org, "Reopened")
+
+
+@issues_app.command("comment")
+@_handle_errors
+def issues_comment(
+    number: str = typer.Argument(..., help="Issue number, for example 12 or #12."),
+    body: Optional[str] = _ISSUE_BODY,
+    body_file: Optional[str] = _ISSUE_BODY_FILE,
+    edit: bool = _ISSUE_EDIT,
+    project: Optional[str] = _ISSUE_PROJECT,
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Add a comment to an issue."""
+    n = _issue_number(number)
+    text = _issue_text(body, body_file, edit, noun="comment")
+    if text is None or not text.strip():
+        _fail("Say what to comment: [bold]--body \"...\"[/bold], [bold]--body-file FILE[/bold] or [bold]--edit[/bold].")
+    project_id = _resolve_project(project, api_url, org)
+    client = _get_client(api_url=api_url, org=org)
+
+    with _pointing_to("harumi issues list"):
+        comment = client.create_issue_comment(project_id, n, text)
+    if as_json:
+        _emit_json({"id": comment.id, "issue": n, "body": comment.body, "created_at": comment.created_at.isoformat() if comment.created_at else None})
+        return
+    console.print(f"[bold green]Commented[/bold green] on [bold]#{n}[/bold].")
+
+
+# ---------------------------------------------------------------------------
 # harumi compare
 # ---------------------------------------------------------------------------
 
@@ -4207,7 +4595,7 @@ def compare(
 @app.command("check")
 @_handle_errors
 def check(
-    ref: Optional[str] = typer.Option(None, "--ref", help="Branch/commit to check (defaults to the default branch)."),
+    ref: Optional[str] = typer.Option(None, "--ref", help="Branch, tag or commit to check (defaults to the default branch)."),
     project: Optional[str] = typer.Option(None, "--project", "-p", help="Project id. Uses the .harumi binding if omitted; at a terminal with neither, you pick from a list."),
     api_url: Optional[str] = _API_URL,
     org: Optional[str] = _ORG,
@@ -4562,11 +4950,23 @@ def dashboard_widgets(
         console.print(table)
 
 
+def _dashboard_repo_root(spec: Path) -> Optional[Path]:
+    """The repo root a local dashboard spec sits in: the parent of its `dashboard/` folder,
+    or the folder holding a root `dashboard.toml`. None for any other path, where a
+    repo-relative `source` cannot be resolved."""
+    spec = spec.resolve()
+    if spec.parent.name == DASHBOARD_DIR:
+        return spec.parent.parent
+    if spec.name == ROOT_DASHBOARD_PATH:
+        return spec.parent
+    return None
+
+
 @dashboard_app.command("validate")
 @_handle_errors
 def dashboard_validate(
     path: Optional[Path] = typer.Argument(None, help="A single dashboard spec to validate (default: every ./dashboard/*.toml, else ./dashboard.toml)."),
-    ref: Optional[str] = typer.Option(None, "--ref", help="Validate the repo's specs on this branch/commit instead of local files."),
+    ref: Optional[str] = typer.Option(None, "--ref", help="Validate the repo's specs on this branch, tag or commit instead of local files."),
     against: Optional[Path] = typer.Option(None, "--against", help="Check widget dot-paths against this local output.json."),
     run_id: Optional[str] = typer.Option(None, "--run", help="Check widget dot-paths against this run's output.json."),
     latest: bool = typer.Option(False, "--latest", help="Check widget dot-paths against the most recent run's output.json."),
@@ -4594,13 +4994,18 @@ def dashboard_validate(
         project_id = _resolve_project(project, api_url, org)
         client = _get_client(api_url=api_url, org=org)
 
-    # name -> raw TOML, in picker order.
-    specs: list[tuple[str, str]] = []
+    # Whether a repo-sourced custom widget's file exists: in the repo at --ref, else on disk.
+    repo_paths: Optional[set[str]] = None
+    # name -> raw TOML, in picker order. `root` is the repo root a local spec belongs to
+    # (None when it can't be told, and for --ref specs, which use `repo_paths` instead).
+    specs: list[tuple[str, str, Optional[Path]]] = []
     if path is not None:
-        specs.append((str(path), path.read_text()))
+        specs.append((str(path), path.read_text(), _dashboard_repo_root(path)))
     elif ref:
         assert client is not None and project_id is not None
-        found = pick_dashboard_paths(f.path for f in client.list_repo_files(project_id, ref=ref))
+        repo_listing = [f.path for f in client.list_repo_files(project_id, ref=ref)]
+        repo_paths = set(repo_listing)
+        found = pick_dashboard_paths(repo_listing)
         if not found:
             _fail(f"No dashboard specs (dashboard/*.toml or dashboard.toml) on {ref!r}.")
         for repo_path in found:
@@ -4611,6 +5016,7 @@ def dashboard_validate(
                     base64.b64decode(file_content.content).decode("utf-8")
                     if file_content.content
                     else "",
+                    None,
                 )
             )
     else:
@@ -4620,7 +5026,7 @@ def dashboard_validate(
                 "No dashboard specs found. Add dashboard/<name>.toml (or dashboard.toml), "
                 "pass a path, or use --ref to check the repo's copies."
             )
-        specs.extend((local_path, Path(local_path).read_text()) for local_path in found)
+        specs.extend((local_path, Path(local_path).read_text(), Path(".")) for local_path in found)
 
     output: Optional[dict] = None
     if against:
@@ -4641,11 +5047,20 @@ def dashboard_validate(
             _fail(f"Run {run.id!r} has no output.json to check against.")
 
     failed = False
-    for name, raw in specs:
+    for name, raw, root in specs:
         if len(specs) > 1:
             console.print(f"[bold]{escape(name)}[/bold]")
+        # Whether a repo-sourced custom widget's file exists: in the repo listing at --ref,
+        # else under this spec's repo root. No root, no check: better silent than a false
+        # "missing" for a file we looked for in the wrong place.
+        file_exists: Optional[Callable[[str], bool]] = None
+        if repo_paths is not None:
+            file_exists = repo_paths.__contains__
+        elif root is not None:
+            file_exists = lambda p, _root=root: (_root / p).is_file()  # noqa: E731
         try:
-            widgets, issues = validate_dashboard_toml(raw, output)
+            widgets, issues = validate_dashboard_toml(raw, output, repo_file_exists=file_exists)
+            issues = [*issues, *deprecation_warnings(raw)]
         except DashboardTomlError as exc:
             console.print(f"[bold red]invalid[/bold red] {name} is not valid TOML: {exc}")
             failed = True
@@ -4670,7 +5085,9 @@ def dashboard_validate(
             style = "red" if issue.dropped else "yellow"
             prefix = "dropped" if issue.dropped else issue.label
             console.print(f"[bold {style}]{prefix}[/bold {style}] {issue.message}")
-        failed = True
+        # A deprecation is a heads-up, not a defect: the widget still renders.
+        if any(issue.label != DEPRECATED_LABEL or issue.dropped for issue in issues):
+            failed = True
 
     if failed:
         raise typer.Exit(code=1)
@@ -5124,6 +5541,97 @@ def share_rotate(
         raise
     console.print("[bold green]Rotated[/bold green] share link. Anyone using the old URL now needs the new one.")
     _print_share_link(link)
+
+
+# ---------------------------------------------------------------------------
+# harumi keys
+# ---------------------------------------------------------------------------
+
+keys_app = _typer(
+    help="List and revoke your API keys (pk_...); create and rotate them in the web app."
+)
+app.add_typer(keys_app, name="keys")
+
+_KEYS_WEB_HINT = "Create or rotate a key in the web app, under Settings > API keys: it asks for your authenticator code, which the CLI can't."
+
+
+def _key_state(key: ApiKeyInfo) -> str:
+    if key.revoked_at is not None:
+        return "revoked"
+    expires = key.expires_at
+    if expires is not None:
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if expires <= datetime.now(timezone.utc):
+            return "expired"
+    return "active"
+
+
+def _match_api_key(keys: list[ApiKeyInfo], typed: str) -> ApiKeyInfo:
+    """The one key `typed` names: its id, the start of its id, or its exact name."""
+    exact = [k for k in keys if k.id == typed or k.name == typed]
+    if len(exact) == 1:
+        return exact[0]
+    starts = exact or [k for k in keys if typed and k.id.startswith(typed)]
+    if len(starts) == 1:
+        return starts[0]
+    if starts:
+        _fail(f"'{escape(typed)}' matches more than one key. Give more of the id (see [bold]harumi keys list[/bold]).")
+    _fail(f"No key '{escape(typed)}'. See your keys with [bold]harumi keys list[/bold].")
+
+
+@keys_app.command("list")
+@_handle_errors
+def keys_list(
+    as_json: bool = _JSON,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """List your API keys: what each can do, how many projects it reaches, and when it was last used."""
+    client = _get_client(api_url=api_url, org=org)
+    keys = client.list_api_keys()
+    if as_json:
+        _emit_json([{**json_out.api_key(k), "state": _key_state(k)} for k in keys])
+        return
+    if not keys:
+        console.print(f"No API keys yet. {_KEYS_WEB_HINT}")
+        return
+    table = Table("id", "name", "scopes", "projects", "state", "last used", "expires")
+    table.columns[0].no_wrap = True
+    for key in keys:
+        state = _key_state(key)
+        table.add_row(
+            escape(key.id[:8]),
+            escape(_printable(key.name)),
+            escape(_printable(", ".join(key.scopes))),
+            str(len(key.project_ids)),
+            state if state == "active" else f"[dim]{state}[/dim]",
+            _ago(key.last_used_at) or "[dim]never[/dim]",
+            key.expires_at.strftime("%Y-%m-%d") if key.expires_at else "",
+        )
+    console.print(table)
+    console.print("[dim]Revoke one with harumi keys rm <id>.[/dim]")
+
+
+@keys_app.command("rm")
+@_handle_errors
+def keys_rm(
+    key: str = typer.Argument(..., help="Key id (or the start of it), or its exact name."),
+    yes: bool = _YES,
+    api_url: Optional[str] = _API_URL,
+    org: Optional[str] = _ORG,
+) -> None:
+    """Revoke an API key. Anything using it stops working immediately, and this can't be undone."""
+    client = _get_client(api_url=api_url, org=org)
+    target = _match_api_key(client.list_api_keys(), key)
+    if target.revoked_at is not None:
+        console.print(f"Key [bold]{escape(_printable(target.name))}[/bold] is already revoked.")
+        return
+    # Name the key, not just the id: a prefix that matched the wrong one is then easy to spot.
+    _confirm(f"Revoke key '{_printable(target.name)}' ({target.id})? Anything using it stops working immediately.", yes=yes)
+    with _pointing_to("harumi keys list"):
+        client.revoke_api_key(target.id)
+    console.print(f"[bold red]Revoked[/bold red] key [bold]{escape(_printable(target.name))}[/bold]. {_KEYS_WEB_HINT}")
 
 
 # ---------------------------------------------------------------------------
@@ -6565,8 +7073,8 @@ _PANELS: dict[str, list[str]] = {
     # `examples` and `specs` are lists you look things up in before `new` and `run`, so they sit with them.
     "Get started": ["login", "start", "new", "import", "clone", "link", "examples"],
     "Run and results": ["run", "runs", "compare", "check", "specs", "usage"],
-    "Project": ["projects", "files", "dashboard", "share", "datasources", "tags", "schedules", "secrets", "memories", "skills"],
-    "Account and team": ["whoami", "logout", "profile", "org", "agent-skills"],
+    "Project": ["projects", "issues", "files", "dashboard", "share", "datasources", "tags", "schedules", "secrets", "memories", "skills"],
+    "Account and team": ["whoami", "logout", "profile", "keys", "org", "agent-skills"],
     "Help and updates": ["status", "whats-new"],
 }
 
@@ -6618,6 +7126,22 @@ _EXAMPLES: dict[str, list[tuple[str, str]]] = {
         ("harumi tags set prod --to 3f2a9c1e", "label a commit"),
     ],
     "tags rm": [("harumi tags rm prod", "")],
+    "issues list": [
+        ("harumi issues list", "what is open"),
+        ("harumi issues list --state in-progress --label bug", ""),
+        ("harumi issues list --state all --json", "for scripts"),
+    ],
+    "issues view": [("harumi issues view 12", "with its comments")],
+    "issues create": [
+        ('harumi issues create --title "Costs ignore overtime" --label bug', ""),
+        ('harumi issues create --title "Night shift" -F notes.md', "text from a file"),
+        ('harumi issues create --title "Check it" --edit', "use your editor"),
+    ],
+    "issues edit": [('harumi issues edit 12 --title "Costs ignore overtime pay"', ""), ("harumi issues edit 12 --label bug --label urgent", "replaces labels")],
+    "issues move": [("harumi issues move 12 --status in-progress", "")],
+    "issues close": [("harumi issues close 12", "")],
+    "issues reopen": [("harumi issues reopen 12", "")],
+    "issues comment": [('harumi issues comment 12 --body "Fixed in the last push."', ""), ("harumi issues comment 12 --body-file notes.md", "")],
     "runs list": [("harumi runs list", ""), ("harumi runs list --all --limit 50", ""), ("harumi runs list --json", "for scripts")],
     "runs get": [("harumi runs get", "the latest run"), ("harumi runs get 3f2a9c1e", "the first 8 characters are enough")],
     "runs cancel": [("harumi runs cancel 3f2a9c1e", "")],

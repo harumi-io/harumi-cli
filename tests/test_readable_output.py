@@ -34,14 +34,8 @@ TAG = "[red]TAG[/red]"  # Rich shows this as "TAG", coloured, with the brackets 
 
 
 @pytest.fixture(autouse=True)
-def home(tmp_path, monkeypatch):
-    monkeypatch.setattr("harumi.config.HARUMI_HOME", tmp_path / "home")
-    monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "home" / "config.json")
-    monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "home" / "credentials.json")
-    monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
-    monkeypatch.setattr("harumi.config._RESOLVED_API_URL", None)
-    for var in ("HARUMI_ENV", "HARUMI_API_URL", "HARUMI_GIT_URL", "HARUMI_ORG"):
-        monkeypatch.delenv(var, raising=False)
+def home(tmp_path, monkeypatch, isolate_harumi_home):
+    isolate_harumi_home(tmp_path / "home")
     config.save_credentials(access_token="a", refresh_token="r", email="ana@example.com")
     at_width_value(monkeypatch, 80)
 

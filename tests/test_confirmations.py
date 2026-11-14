@@ -32,14 +32,8 @@ BO = "22222222-aaaa-4bbb-8ccc-000000000002"
 
 
 @pytest.fixture(autouse=True)
-def home(tmp_path, monkeypatch):
-    monkeypatch.setattr("harumi.config.HARUMI_HOME", tmp_path / "home")
-    monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "home" / "config.json")
-    monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "home" / "credentials.json")
-    monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
-    monkeypatch.setattr("harumi.config._RESOLVED_API_URL", None)
-    for var in ("HARUMI_ENV", "HARUMI_API_URL", "HARUMI_GIT_URL", "HARUMI_ORG", "CI"):
-        monkeypatch.delenv(var, raising=False)
+def home(tmp_path, monkeypatch, isolate_harumi_home):
+    isolate_harumi_home(tmp_path / "home", extra_env=("CI",))
     monkeypatch.setattr(cli.console, "_width", 100)
     config.save_credentials(access_token="a", refresh_token="r", email="ana@example.com")
 
@@ -418,6 +412,6 @@ def test_every_command_that_takes_yes_says_so_in_the_reference(command):
 
 
 def test_the_list_of_commands_that_confirm_is_the_one_the_reference_documents():
-    documented = {"projects rm", "files rm", "share rm", "share rotate", "share update", "datasources rm", "tags rm", "schedules rm", "secrets rm", "memories rm", "org rm", "org rm-member"}
+    documented = {"projects rm", "files rm", "share rm", "share rotate", "share update", "datasources rm", "tags rm", "schedules rm", "secrets rm", "memories rm", "org rm", "org rm-member", "keys rm"}
 
     assert documented <= set(_commands_with_yes())

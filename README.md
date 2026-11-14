@@ -66,6 +66,7 @@ harumi dashboard validate --latest
 - `harumi tags` — label a version with a movable tag such as `prod`, then `harumi run --tag prod` or `harumi schedules add --git-tag prod`.
 - `harumi schedules` — CRUD cron schedules that trigger git-ref runs.
 - `harumi secrets` — CRUD project-scoped environment variables.
+- `harumi issues` — the project's issues, shared with the web app and the assistant: `list`, `view N`, `create`, `edit N`, `move N --status todo|in-progress|done`, `close N`, `reopen N`, `comment N`.
 - `harumi memories` — list/add/edit/remove the project's memories. (Project skills are files in the repo under `skills/<slug>/SKILL.md`; run `harumi skills` for how to edit them.)
 - `harumi org` — manage organizations and their members, by name or email.
 - `harumi profile` — view/update your account profile.

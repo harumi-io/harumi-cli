@@ -136,6 +136,66 @@ class TagInfo(BaseModel):
     created_at: Optional[datetime] = None
 
 
+class IssueUser(BaseModel):
+    """A person on an issue <-> issues/schemas.py:IssueUser. `id` is None for a Gitea account that is not ours."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: Optional[str] = None
+    name: str = ""
+
+
+class IssueLabel(BaseModel):
+    """A label an issue carries <-> issues/schemas.py:IssueLabel. The status label is never listed."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str
+    color: str = ""
+
+
+class Issue(BaseModel):
+    """One issue <-> issues/schemas.py:Issue. `status` is todo | in_progress | done."""
+
+    model_config = ConfigDict(extra="allow")
+
+    number: int
+    title: str
+    body: str = ""
+    status: str = "todo"
+    labels: list[IssueLabel] = Field(default_factory=list)
+    assignees: list[IssueUser] = Field(default_factory=list)
+    author: Optional[IssueUser] = None
+    comment_count: int = 0
+    by_assistant: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+
+
+class IssueList(BaseModel):
+    """GET /projects/{id}/issues <-> issues/schemas.py:IssueList."""
+
+    model_config = ConfigDict(extra="allow")
+
+    items: list[Issue] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    per_page: int = 30
+
+
+class IssueComment(BaseModel):
+    """One comment <-> issues/schemas.py:IssueComment."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: int
+    body: str = ""
+    author: Optional[IssueUser] = None
+    by_assistant: bool = False
+    created_at: Optional[datetime] = None
+
+
 class PromoteResult(BaseModel):
     """Response from POST /projects/{id}/repo/promote."""
 
@@ -601,6 +661,23 @@ class ProjectShareLinkList(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     links: list[ProjectShareLink] = Field(default_factory=list)
+
+
+class ApiKeyInfo(BaseModel):
+    """One of the user's `pk_` API keys (`GET /keys`, `DELETE /keys/{id}`). `api_key` is masked: the
+    full secret is only ever returned when a key is created or rotated, and the CLI does neither."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    name: str
+    api_key: str = ""
+    scopes: list[str] = Field(default_factory=list)
+    project_ids: list[str] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
 
 
 class ProjectFile(BaseModel):
