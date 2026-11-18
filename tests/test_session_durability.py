@@ -219,7 +219,7 @@ def test_after_lock_contention_the_next_command_can_renew(monkeypatch):
 
 
 @pytest.mark.parametrize("expiry", [3600, None])
-@pytest.mark.parametrize("failure", ["open", "unsupported", "busy"])
+@pytest.mark.parametrize("failure", ["open", "unsupported", "filesystem", "busy"])
 def test_valid_session_can_make_requests_when_lock_is_unavailable(monkeypatch, expiry, failure):
     log_in(expires_in=3600)
     if expiry is None:
@@ -230,6 +230,12 @@ def test_valid_session_can_make_requests_when_lock_is_unavailable(monkeypatch, e
     elif failure == "unsupported":
         monkeypatch.setattr(config, "fcntl", None)
         monkeypatch.setattr(config, "msvcrt", None)
+    elif failure == "filesystem":
+        if config.fcntl is None:
+            pytest.skip("POSIX locking test")
+        def unsupported(*args):
+            raise OSError(errno.ENOSYS, "file locking unavailable")
+        monkeypatch.setattr(config.fcntl, "flock", unsupported)
     else:
         def busy(handle, timeout):
             assert timeout == 0, "valid tokens must not wait for a busy lock"

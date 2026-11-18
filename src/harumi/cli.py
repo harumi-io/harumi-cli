@@ -1320,7 +1320,7 @@ def _session_still_works(config: Config, email: str) -> bool:
     Each environment keeps its own session, so with this a person who switches
     between production and staging is not sent a new code each time. Any doubt
     (different email, expired session, API unreachable) falls back to the normal
-    code flow, which reports the real problem.
+    code flow. A credentials lock error is not a failed session and must be reported.
     """
     creds = load_credentials()
     if not creds or not creds.get("access_token"):
