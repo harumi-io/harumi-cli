@@ -266,6 +266,49 @@ def test_whoami_reports_lock_contention_without_claiming_the_login_expired(monke
     assert on_disk() == before
 
 
+def test_slow_refresh_cannot_be_duplicated_after_the_lock_timeout(monkeypatch):
+    log_in()
+    started, release = threading.Event(), threading.Event()
+    refreshes, result = [], []
+
+    def handler(request):
+        if request.url.path.endswith("/users/refresh"):
+            refreshes.append(request)
+            started.set()
+            assert release.wait(5)
+            return httpx.Response(200, json={
+                "id": "u1", "access_token": "fresh", "refresh_token": "r2", "expires_at": int(time.time()) + 3600,
+            })
+        return httpx.Response(200, json={"ok": True})
+
+    transport = httpx.MockTransport(handler)
+    api = ApiClient(Config.load(), transport=transport)
+
+    def first_command():
+        try:
+            result.append(api.request("GET", "/users/profile").status_code)
+        except Exception as exc:
+            result.append(exc)
+
+    thread = threading.Thread(target=first_command)
+    thread.start()
+    try:
+        assert started.wait(5)
+        real_try_lock = config._try_lock
+        monkeypatch.setattr(config, "_try_lock", lambda handle, timeout: real_try_lock(handle, 0.1))
+        with pytest.raises(CredentialsLockError):
+            api.request("GET", "/users/profile")
+        assert len(refreshes) == 1
+    finally:
+        release.set()
+        thread.join(5)
+
+    assert result == [200]
+    assert on_disk()["refresh_token"] == "r2"
+    assert api.request("GET", "/users/profile").status_code == 200
+    assert len(refreshes) == 1
+
+
 # -- #115: adopting someone else's refresh -------------------------------------------------------
 
 
