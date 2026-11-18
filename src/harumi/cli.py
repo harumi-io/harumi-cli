@@ -210,6 +210,7 @@ from harumi.execution import WatchLostError
 from harumi.errors import (
     ApiError,
     ApiUnreachableError,
+    CredentialsLockError,
     HarumiError,
     NotAuthenticatedError,
     SessionRefreshError,
@@ -1319,7 +1320,7 @@ def _session_still_works(config: Config, email: str) -> bool:
     Each environment keeps its own session, so with this a person who switches
     between production and staging is not sent a new code each time. Any doubt
     (different email, expired session, API unreachable) falls back to the normal
-    code flow, which reports the real problem.
+    code flow. A credentials lock error is not a failed session and must be reported.
     """
     creds = load_credentials()
     if not creds or not creds.get("access_token"):
@@ -1328,6 +1329,8 @@ def _session_still_works(config: Config, email: str) -> bool:
         return False
     try:
         _get_client(api_url=config.api_url, git_url=config.git_url).get_profile()
+    except CredentialsLockError:
+        raise
     except HarumiError:
         return False
     return True
@@ -1370,6 +1373,8 @@ def _resolve_and_store_org(config: Config) -> None:
     try:
         client = _get_client(api_url=config.api_url)
         orgs = client.list_organizations()
+    except CredentialsLockError:
+        raise
     except HarumiError:
         return
 
@@ -1425,6 +1430,8 @@ def _provision_git_token(config: Config) -> None:
         client = _get_client(api_url=config.api_url)
         creds = client.get_git_token()
         save_git_token(creds.token, creds.git_url, creds.username)
+    except CredentialsLockError:
+        raise
     except HarumiError as exc:
         console.print(f"[yellow]Could not provision a Gitea token: {exc}[/yellow]")
         return
@@ -1744,6 +1751,8 @@ def _workspace_names(client: Client) -> dict[str, str]:
     """
     try:
         return {o.id: o.business_name for o in client.list_organizations()}
+    except CredentialsLockError:
+        raise
     except HarumiError:
         return {}
 
@@ -2893,6 +2902,8 @@ def _checked_example(client, slug: Optional[str]) -> Optional[str]:
         return slug
     try:
         known = [b.slug for b in client.list_blueprints()]
+    except CredentialsLockError:
+        raise
     except (ApiError, HarumiError):
         return slug
     by_lower = {k.lower(): k for k in known}
@@ -5043,6 +5054,8 @@ def dashboard_validate(
             _fail("Project has no runs yet.")
         try:
             output = client.get_run_output(project_id, run.id)
+        except CredentialsLockError:
+            raise
         except HarumiError:
             _fail(f"Run {run.id!r} has no output.json to check against.")
 

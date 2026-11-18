@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import errno
 import json
 import os
 import shutil
@@ -23,6 +24,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
+
+from harumi.errors import CredentialsLockError
 
 try:  # POSIX
     import fcntl
@@ -192,7 +195,11 @@ def _try_lock(handle, timeout: float) -> bool:
             else:
                 return False
             return True
-        except OSError:
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK, errno.EINTR):
+                raise CredentialsLockError(
+                    "Could not lock your Harumi login. Check that the credentials filesystem supports file locking."
+                ) from exc
             if time.monotonic() >= deadline:
                 return False
             time.sleep(0.02)
@@ -211,9 +218,8 @@ def _unlock(handle) -> None:
 def credentials_lock(timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[None]:
     """Hold the credentials lock. Re-entrant within a thread.
 
-    If the lock cannot be taken (read-only home, an unsupported platform, or a wait
-    longer than `timeout`) this carries on without it rather than hanging: the
-    lock removes a race, it is not worth refusing to work for.
+    Never enter without the lock: another process could spend the same refresh
+    token or overwrite the replacement. Fail instead of silently risking a logout.
     """
     depth = getattr(_lock_state, "depth", 0)
     if depth:
@@ -225,16 +231,25 @@ def credentials_lock(timeout: float = LOCK_TIMEOUT_SECONDS) -> Iterator[None]:
         return
 
     handle = _lock_file(credentials_path().with_name("credentials.json.lock"))
-    acquired = handle is not None and _try_lock(handle, timeout)
-    _lock_state.depth = 1
+    if handle is None:
+        raise CredentialsLockError(
+            "Could not lock your Harumi login. Check that the Harumi credentials directory is writable, then retry."
+        )
     try:
-        yield
+        if fcntl is None and msvcrt is None:
+            raise CredentialsLockError("Could not lock your Harumi login: file locking is not supported on this platform.")
+        if not _try_lock(handle, timeout):
+            raise CredentialsLockError(
+                "Could not lock your Harumi login; another command may be using it. Wait a moment and retry."
+            )
+        _lock_state.depth = 1
+        try:
+            yield
+        finally:
+            _lock_state.depth = 0
+            _unlock(handle)
     finally:
-        _lock_state.depth = 0
-        if handle is not None:
-            if acquired:
-                _unlock(handle)
-            handle.close()
+        handle.close()
 
 
 def _find_project_config(start: Optional[Path] = None) -> Optional[Path]:
