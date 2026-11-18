@@ -8,6 +8,7 @@ is between processes.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
@@ -214,6 +215,55 @@ def test_after_lock_contention_the_next_command_can_renew(monkeypatch):
     }))
     assert auth.get_valid_access_token(Config.load(), transport=transport) == "fresh"
     assert on_disk()["refresh_token"] == "r2"
+
+
+def test_a_filesystem_lock_error_is_reported_without_waiting_or_refreshing(monkeypatch):
+    if config.fcntl is None:
+        pytest.skip("POSIX locking test")
+    log_in()
+    before = on_disk()
+
+    def unsupported(*args):
+        raise OSError(errno.ENOSYS, "file locking unavailable")
+
+    monkeypatch.setattr(config.fcntl, "flock", unsupported)
+    started = time.monotonic()
+    with pytest.raises(CredentialsLockError, match="filesystem supports file locking"):
+        auth.get_valid_access_token(Config.load())
+    assert time.monotonic() - started < 2
+    assert on_disk() == before
+
+
+def test_whoami_reports_lock_contention_without_claiming_the_login_expired(monkeypatch):
+    from typer.testing import CliRunner
+    from harumi.cli import app
+
+    log_in()
+    before = on_disk()
+    monkeypatch.setenv("HARUMI_NO_UPDATE_CHECK", "1")
+    held, release = threading.Event(), threading.Event()
+
+    def hold():
+        with config.credentials_lock():
+            held.set()
+            release.wait(5)
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    try:
+        assert held.wait(5)
+        real_try_lock = config._try_lock
+        monkeypatch.setattr(config, "_try_lock", lambda handle, timeout: real_try_lock(handle, 0.1))
+        result = CliRunner().invoke(app, ["whoami"])
+    finally:
+        release.set()
+        thread.join()
+
+    assert result.exit_code != 0
+    assert "Could not lock your Harumi login" in result.output
+    assert "retry" in result.output
+    assert "expired" not in result.output and "harumi login" not in result.output
+    assert on_disk() == before
 
 
 # -- #115: adopting someone else's refresh -------------------------------------------------------

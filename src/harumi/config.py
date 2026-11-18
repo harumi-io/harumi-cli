@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import errno
 import json
 import os
 import shutil
@@ -194,7 +195,11 @@ def _try_lock(handle, timeout: float) -> bool:
             else:
                 return False
             return True
-        except OSError:
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK, errno.EINTR):
+                raise CredentialsLockError(
+                    "Could not lock your Harumi login. Check that the credentials filesystem supports file locking."
+                ) from exc
             if time.monotonic() >= deadline:
                 return False
             time.sleep(0.02)

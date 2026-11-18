@@ -233,6 +233,7 @@ Tell the user which of these you're doing rather than silently working around it
 | `git not found` on `harumi run` / `harumi import`/`new`/`clone` | git missing from PATH | Install git |
 | `You're not logged in.` / `Your Harumi session has expired.` (both say to run harumi login; on staging they say "on staging") | No session, or it ended, for the **active** environment | `harumi login` (check `harumi whoami` — you may be logged in on the other env) |
 | `Could not renew your login: harumi-api returned HTTP 403 ...` | The token refresh was blocked or the API failed; the session itself may be fine | Check the network, VPN or proxy and retry; do not loop on `harumi login` |
+| `Could not lock your Harumi login` | Another command is using the credentials, or the directory/filesystem cannot be locked | Wait and retry; if it persists, check that the credentials directory is writable and supports file locking. This does not mean the session expired |
 | `harumi-api returned HTTP 422: ... Signups not allowed for otp` | First login for this email | `harumi login --signup` |
 | `Could not provision a Gitea token: ...` (yellow, non-fatal) | Harumi Git unreachable or not configured on that backend | Non-git commands still work; re-run `harumi login` once reachable |
 | `No Gitea token found. Run harumi login` | `git_token` missing from credentials | `harumi login` again |
