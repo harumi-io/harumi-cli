@@ -22,7 +22,7 @@ import pytest
 from harumi import auth, config
 from harumi.client import ApiClient
 from harumi.config import Config
-from harumi.errors import NotAuthenticatedError
+from harumi.errors import CredentialsLockError, NotAuthenticatedError
 from harumi.models import LoggedUser
 
 
@@ -168,12 +168,52 @@ def test_a_lock_that_cannot_be_taken_does_not_hang_the_command():
     assert holder_has_it.wait(5)
 
     started = time.monotonic()
-    with config.credentials_lock(timeout=0.3):  # a different thread: it has to wait, then give up
+    try:
+        with pytest.raises(CredentialsLockError, match="retry"):
+            with config.credentials_lock(timeout=0.3):
+                pytest.fail("entered the critical section without the lock")
         waited = time.monotonic() - started
-    release.set()
-    t.join()
+    finally:
+        release.set()
+        t.join()
 
     assert 0.25 <= waited < 2, f"gave up after {waited:.2f}s"
+
+
+@pytest.mark.parametrize("failure", ["open", "unsupported", "busy"])
+def test_lock_failure_never_spends_a_refresh_token_or_changes_credentials(monkeypatch, failure):
+    log_in()
+    before = on_disk()
+    if failure == "open":
+        monkeypatch.setattr(config, "_lock_file", lambda path: None)
+    elif failure == "unsupported":
+        monkeypatch.setattr(config, "fcntl", None)
+        monkeypatch.setattr(config, "msvcrt", None)
+    else:
+        monkeypatch.setattr(config, "_try_lock", lambda handle, timeout: False)
+    calls = []
+    transport = httpx.MockTransport(lambda request: calls.append(request) or httpx.Response(500))
+
+    with pytest.raises(CredentialsLockError):
+        ApiClient(Config.load(), transport=transport).request("GET", "/users/profile")
+
+    assert calls == []
+    assert on_disk() == before
+
+
+def test_after_lock_contention_the_next_command_can_renew(monkeypatch):
+    log_in()
+    real_try_lock = config._try_lock
+    monkeypatch.setattr(config, "_try_lock", lambda handle, timeout: False)
+    with pytest.raises(CredentialsLockError):
+        auth.get_valid_access_token(Config.load())
+
+    monkeypatch.setattr(config, "_try_lock", real_try_lock)
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={
+        "id": "u1", "access_token": "fresh", "refresh_token": "r2", "expires_at": int(time.time()) + 3600,
+    }))
+    assert auth.get_valid_access_token(Config.load(), transport=transport) == "fresh"
+    assert on_disk()["refresh_token"] == "r2"
 
 
 # -- #115: adopting someone else's refresh -------------------------------------------------------

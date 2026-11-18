@@ -13,6 +13,10 @@ class HarumiError(Exception):
     """Base class for all harumi SDK/CLI errors."""
 
 
+class CredentialsLockError(HarumiError):
+    """The stored login cannot be safely accessed without its cross-process lock."""
+
+
 class NotAuthenticatedError(HarumiError):
     """There is no usable login: none on file, or the one on file has expired.
 

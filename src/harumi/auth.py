@@ -187,9 +187,8 @@ def signing_session(
     the two reads. The lock is re-entrant within a thread, so the renewal `get_valid_access_token` may itself do for
     a token near expiry does not deadlock.
 
-    The guarantee is only as good as the lock: `credentials_lock` carries on without it after its timeout (30
-    seconds), when the home folder is read-only, or on a platform with no file locking. There the pairing is best
-    effort again, which is no worse than before; it is not a promise.
+    If the credentials cannot be locked, the command fails without spending a refresh token; it never proceeds
+    with an unprotected pairing.
     """
     with credentials_lock():
         token = get_valid_access_token(config, allow_refresh=True, transport=transport)
