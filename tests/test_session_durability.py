@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -217,6 +218,112 @@ def test_after_lock_contention_the_next_command_can_renew(monkeypatch):
     assert on_disk()["refresh_token"] == "r2"
 
 
+@pytest.mark.parametrize("expiry", [3600, None])
+@pytest.mark.parametrize("failure", ["open", "unsupported", "busy"])
+def test_valid_session_can_make_requests_when_lock_is_unavailable(monkeypatch, expiry, failure):
+    log_in(expires_in=3600)
+    if expiry is None:
+        config.save_credentials(access_token="old", refresh_token="r1", expires_at=None)
+    before = on_disk()
+    if failure == "open":
+        monkeypatch.setattr(config, "_lock_file", lambda path: None)
+    elif failure == "unsupported":
+        monkeypatch.setattr(config, "fcntl", None)
+        monkeypatch.setattr(config, "msvcrt", None)
+    else:
+        def busy(handle, timeout):
+            assert timeout == 0, "valid tokens must not wait for a busy lock"
+            return False
+        monkeypatch.setattr(config, "_try_lock", busy)
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={"ok": True})
+
+    api = ApiClient(Config.load(), transport=httpx.MockTransport(handler))
+    assert api.request("GET", "/users/profile").status_code == 200
+    assert [(r.url.path, r.headers.get("authorization")) for r in calls] == [("/api/users/profile", "Bearer old")]
+    assert on_disk() == before
+
+
+@pytest.mark.parametrize("expires_in", [-100, 0, 59])
+def test_a_session_due_for_refresh_cannot_sign_without_a_lock(monkeypatch, expires_in):
+    log_in(expires_in=expires_in)
+    monkeypatch.setattr(config, "_lock_file", lambda path: None)
+    calls = []
+    transport = httpx.MockTransport(lambda request: calls.append(request) or httpx.Response(200))
+    with pytest.raises(CredentialsLockError):
+        ApiClient(Config.load(), transport=transport).request("GET", "/users/profile")
+    assert calls == []
+    assert on_disk()["refresh_token"] == "r1"
+
+
+def test_a_valid_near_expiry_token_without_a_refresh_token_needs_no_lock(monkeypatch):
+    log_in(expires_in=30)
+    config.save_credentials(access_token="old", refresh_token="", expires_at=int(time.time()) + 30)
+    monkeypatch.setattr(config, "_lock_file", lambda path: None)
+    calls = []
+    transport = httpx.MockTransport(lambda request: calls.append(request.url.path) or httpx.Response(200))
+
+    assert ApiClient(Config.load(), transport=transport).request("GET", "/users/profile").status_code == 200
+    assert calls == ["/api/users/profile"]
+
+
+def test_a_snapshot_that_becomes_near_expiry_while_locking_does_not_bypass_renewal(monkeypatch):
+    log_in(expires_in=3600)
+    config.save_credentials(access_token="old", refresh_token="r1", expires_at=1061)
+    monkeypatch.setattr(config, "_lock_file", lambda path: None)
+    now = iter([1000, 1002])
+    monkeypatch.setattr(auth, "time", SimpleNamespace(time=lambda: next(now)))
+    with pytest.raises(CredentialsLockError):
+        auth.signing_session(Config.load())
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_an_unlocked_valid_token_that_gets_401_cannot_refresh_without_the_lock(monkeypatch, stream):
+    log_in(expires_in=3600)
+    monkeypatch.setattr(config, "_lock_file", lambda path: None)
+    calls = []
+    transport = httpx.MockTransport(lambda request: calls.append(request.url.path) or httpx.Response(401))
+
+    api = ApiClient(Config.load(), transport=transport)
+    with pytest.raises(CredentialsLockError):
+        if stream:
+            with api.stream("GET", "/users/profile"):
+                pytest.fail("a refused stream must not be entered")
+        else:
+            api.request("GET", "/users/profile")
+
+    assert calls == ["/api/users/profile"]
+    assert on_disk()["refresh_token"] == "r1"
+
+
+def test_unlocked_snapshot_keeps_the_matching_refresh_token_if_a_rival_renews(monkeypatch):
+    log_in(expires_in=3600)
+    real_lock_file = config._lock_file
+    sent = []
+
+    def unavailable_after_rival(path):
+        current = on_disk()
+        current.update(access_token="rival", refresh_token="r2", expires_at=int(time.time()) + 3600)
+        config._write_json(config.credentials_path(), current)
+        return None
+
+    def handler(request):
+        sent.append((request.url.path, request.headers.get("authorization")))
+        if len(sent) == 1:
+            monkeypatch.setattr(config, "_lock_file", real_lock_file)
+            return httpx.Response(401)
+        return httpx.Response(200, json={"ok": True})
+
+    monkeypatch.setattr(config, "_lock_file", unavailable_after_rival)
+    api = ApiClient(Config.load(), transport=httpx.MockTransport(handler))
+    assert api.request("GET", "/users/profile").status_code == 200
+    assert sent == [("/api/users/profile", "Bearer old"), ("/api/users/profile", "Bearer rival")]
+    assert on_disk()["refresh_token"] == "r2"
+
+
 def test_a_filesystem_lock_error_is_reported_without_waiting_or_refreshing(monkeypatch):
     if config.fcntl is None:
         pytest.skip("POSIX locking test")
@@ -307,6 +414,86 @@ def test_slow_refresh_cannot_be_duplicated_after_the_lock_timeout(monkeypatch):
     assert on_disk()["refresh_token"] == "r2"
     assert api.request("GET", "/users/profile").status_code == 200
     assert len(refreshes) == 1
+
+
+@pytest.mark.parametrize("helper", ["session", "workspace", "git", "names", "example"])
+def test_cli_helpers_do_not_swallow_credentials_lock_errors(monkeypatch, helper):
+    from harumi import cli
+
+    log_in(expires_in=3600)
+    cfg = Config.load()
+    error = CredentialsLockError("lock unavailable")
+
+    class BrokenClient:
+        def __getattr__(self, name):
+            def fail(*args, **kwargs):
+                raise error
+            return fail
+
+    client = BrokenClient()
+    monkeypatch.setattr(cli, "_get_client", lambda **kwargs: client)
+    monkeypatch.delenv("HARUMI_ORG", raising=False)
+    calls = {
+        "session": lambda: cli._session_still_works(cfg, "ana@example.com"),
+        "workspace": lambda: cli._resolve_and_store_org(cfg),
+        "git": lambda: cli._provision_git_token(cfg),
+        "names": lambda: cli._workspace_names(client),
+        "example": lambda: cli._checked_example(client, "example"),
+    }
+    with pytest.raises(CredentialsLockError, match="lock unavailable"):
+        calls[helper]()
+
+
+def test_login_does_not_send_an_otp_when_session_check_hits_a_lock_error(monkeypatch):
+    from typer.testing import CliRunner
+    from harumi import cli
+
+    log_in()
+    monkeypatch.setenv("HARUMI_NO_UPDATE_CHECK", "1")
+    client = SimpleNamespace(get_profile=lambda: (_ for _ in ()).throw(CredentialsLockError("lock unavailable")))
+    monkeypatch.setattr(cli, "_get_client", lambda **kwargs: client)
+    sent = []
+    monkeypatch.setattr(auth, "request_otp", lambda *args, **kwargs: sent.append(True))
+
+    result = CliRunner().invoke(cli.app, ["login", "--email", "ana@example.com"])
+
+    assert result.exit_code != 0
+    assert "lock unavailable" in result.output
+    assert sent == []
+
+
+def test_provisioning_does_not_misreport_a_lock_error_when_saving_the_git_token(monkeypatch):
+    from harumi import cli
+
+    log_in(expires_in=3600)
+    cfg = Config.load()
+    creds = SimpleNamespace(token="git-token", git_url="https://git.example", username="user")
+    monkeypatch.setattr(cli, "_get_client", lambda **kwargs: SimpleNamespace(get_git_token=lambda: creds))
+    monkeypatch.setattr(config, "_lock_file", lambda path: None)
+
+    with pytest.raises(CredentialsLockError):
+        cli._provision_git_token(cfg)
+
+
+def test_dashboard_validation_reports_lock_error_instead_of_missing_output(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+    from harumi import cli
+
+    spec = tmp_path / "dashboard.toml"
+    spec.write_text("")
+    client = SimpleNamespace(
+        get_run=lambda *args: SimpleNamespace(id="run-1"),
+        get_run_output=lambda *args: (_ for _ in ()).throw(CredentialsLockError("lock unavailable")),
+    )
+    monkeypatch.setenv("HARUMI_NO_UPDATE_CHECK", "1")
+    monkeypatch.setattr(cli, "_resolve_project", lambda *args: "proj-1")
+    monkeypatch.setattr(cli, "_get_client", lambda **kwargs: client)
+
+    result = CliRunner().invoke(cli.app, ["dashboard", "validate", str(spec), "--run", "run-1"])
+
+    assert result.exit_code != 0
+    assert "lock unavailable" in result.output
+    assert "no output.json" not in result.output
 
 
 # -- #115: adopting someone else's refresh -------------------------------------------------------
