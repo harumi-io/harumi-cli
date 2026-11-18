@@ -6,10 +6,14 @@
 # shared workflow lived in a private repo (GitHub forbids a public repo calling a private one). The
 # shared workflow is public now, so this calls it like every other repo and cannot drift from it.
 #
-# Pinned to a commit (the `# v1` comment names the tag it was resolved from), never @main or a
-# moving tag: this job holds `id-token: write`, and a bad or hostile edit upstream would otherwise
-# reach every repo's review pipeline at once. Bump the pin deliberately, like a dependency upgrade:
-#   gh api repos/harumi-io/workflows/git/ref/tags/v1 --jq .object.sha
+# Pinned to a commit, never @main or a moving tag: this job holds `id-token: write`, and a bad or
+# hostile edit upstream would otherwise reach every repo's review pipeline at once. Tags can move,
+# so the SHA is the pin; the trailing comment names the release tag it matched when it was bumped
+# (`v1.1` is the first to carry the review-done markers the local watcher reads).
+# Bump the pin deliberately, like a dependency upgrade: resolve the SHA first, then read exactly
+# that diff, so a push upstream in between cannot slip in unreviewed:
+#   NEW=$(gh api repos/harumi-io/workflows/commits/<tag> --jq .sha)
+#   gh api repos/harumi-io/workflows/compare/<current-sha>...$NEW --jq '.files[] | .filename, .patch'
 name: Claude Code Review
 
 on:
@@ -29,7 +33,7 @@ jobs:
       # The shared workflow reads the PR's CI results, so it needs these two.
       actions: read
       checks: read
-    uses: harumi-io/workflows/.github/workflows/claude-code-review.yml@d4e27a8e305cf3da7b7dcdd8be971d95fe992c82 # v1
+    uses: harumi-io/workflows/.github/workflows/claude-code-review.yml@f2f902eac04681266544ade9e540d52c3c9c1ea5 # v1.1
     with:
       # harumi-cli is public: the shared workflow skips fork PRs, which run with a read-only token and
       # no access to the AWS role, rather than failing on every outside contribution.
