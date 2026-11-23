@@ -15,27 +15,42 @@ This installs the `harumi` CLI and the `harumi` Python package (`import harumi`)
 ### Staging builds (opt-in)
 
 Once the staging publisher is configured, CI publishes a public PyPI development
-release for each successfully tested `dev` build. It is separate from the stable
-release: ordinary `pip install harumi` and `pipx upgrade harumi` do not opt in.
+release after successful CI on `dev`. It is separate from the stable release:
+ordinary `pip install harumi` and `pipx upgrade harumi` do not opt in.
+
+If pipx already manages `harumi`, first run `pipx uninstall harumi` to replace
+its environment (this also removes any packages injected into that environment,
+but not your Harumi credentials). Then, with a recent pipx that supports `--backend`:
 
 ```bash
-pipx install --pip-args="--pre" harumi       # first install
-pipx upgrade --pip-args="--pre" harumi       # pick up a newer staging build
-harumi --version                            # e.g. 1.1.1.dev123001
+pipx install --backend pip 'harumi>=0.0.0.dev0'          # first install
+pipx install --force --backend pip 'harumi>=0.0.0.dev0'  # update staging
+harumi --version                                         # e.g. 1.1.1.dev123001
 ```
 
-If `harumi` is already installed, use the upgrade command; to return to stable,
-run `pipx uninstall harumi` followed by `pipx install harumi`. A staging **build** does not select a backend:
+The explicit prerelease requirement applies to Harumi, not its dependencies. The
+pip backend is required: uv can prefer a stable release for this requirement.
+Staging builds do not show update notices; repeat the update command above.
+To return to stable, run `pipx uninstall harumi` followed by `pipx install harumi`.
+A staging **build** does not select a backend:
 use `harumi --env staging login` (VPN and a staging account required), or select
 staging during login. Production remains the default.
 
 Maintainers: configure a PyPI trusted publisher for repository `harumi-io/harumi-cli`,
-workflow `ci.yml`, environment `pypi-staging`, and configure that GitHub environment.
-Then set the repository Actions variable `HARUMI_STAGING_PUBLISH` to `true` and run
-CI on `dev`. Publishing is skipped until enabled; stable `release.yml` continues to
+workflow `ci.yml`, environment `pypi-staging`. Create the GitHub environment and set
+**Deployment branches and tags** to allow only the `dev` branch, not all branches
+or tags. This restriction is the security boundary preventing PR and feature-branch
+workflows from publishing stable packages. Restrict who can push to `dev` too: a
+person who can change that branch can change the publishing workflow. Do not enable
+publishing without these protections. Then set the repository Actions variable
+`HARUMI_STAGING_PUBLISH` to `true` and run CI on `dev`. Publishing is skipped until
+enabled; stable `release.yml` continues to
 use its own `pypi` environment. CI builds and smoke-tests the actual stamped wheel.
-The version uses the next patch's `.dev` plus the CI run number and attempt; CI logs
-identify the source commit. PyPI versions cannot be reused; after a partial upload,
+The version uses the next patch after the greater of the source version and latest
+stable PyPI release, plus the CI run number and attempt; CI logs identify the source
+commit. After a stable hotfix, a new `dev` CI run is needed to publish a newer
+prerelease. The version does not imply `dev` includes that hotfix; merge it back.
+PyPI versions cannot be reused; after a partial upload,
 rerun **all** jobs, not only the failed publishing job, to generate a new version.
 
 Installing from source instead (for contributing, or an unreleased fix):
