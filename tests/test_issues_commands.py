@@ -234,6 +234,15 @@ def test_reopen_does_not_move_an_open_issue(api, number, status, as_json):
         assert "Reopened" not in result.stdout
 
 
+def test_reopen_closed_issue_says_reopened(api):
+    result = run("reopen", "3")
+    assert result.exit_code == 0, result.output
+    assert "Reopened" in result.stdout and "to do" in result.stdout
+    assert "not closed" not in result.stdout and "nothing changed" not in result.stdout
+    assert [call[0] for call in api.calls] == ["GET", "PATCH"]
+    assert api.calls[-1][3] == {"status": "todo"}
+
+
 def test_reopen_closed_issue_json_has_the_new_status(api):
     result = run("reopen", "3", "--json")
     assert result.exit_code == 0, result.output
