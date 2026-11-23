@@ -16,7 +16,9 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A dev run can publish to PyPI. Do not interrupt an upload when dev moves;
+  # PRs and main can still cancel obsolete runs.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/dev' }}
 
 jobs:
   test:
@@ -114,6 +116,78 @@ jobs:
       - name: Test (full suite)
         if: github.event_name != 'pull_request'
         run: pytest -q
+
+  staging-build:
+    name: Build staging distribution
+    needs: [test, wheel, compat]
+    if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Stamp the checkout (never commit this version)
+        id: version
+        run: |
+          version=$(python scripts/staging_version.py "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Staging version $version from $GITHUB_SHA"
+      - name: Build and validate
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staging-dist-${{ github.run_attempt }}
+          path: dist/
+
+  staging-smoke:
+    name: Smoke staging wheel (${{ matrix.python-version }})
+    needs: staging-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-dist-${{ github.run_attempt }}
+          path: dist/
+      - name: Install the exact wheel and check its version
+        env:
+          VERSION: ${{ needs.staging-build.outputs.version }}
+        run: python scripts/check_wheel_installs.py dist/*.whl --expect-version "$VERSION"
+
+  staging-publish:
+    name: Publish staging prerelease to PyPI
+    needs: [staging-build, staging-smoke]
+    # Opt in only after registering this workflow as a PyPI trusted publisher.
+    if: vars.HARUMI_STAGING_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi-staging
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-dist-${{ github.run_attempt }}
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
 
   # Marks a draft PR ready once the jobs above pass, but only if it carries the `ready-when-green`
   # label (read from the live PR, so add it later and re-run this job if CI already finished). That

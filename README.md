@@ -12,6 +12,32 @@ pip install harumi
 
 This installs the `harumi` CLI and the `harumi` Python package (`import harumi`).
 
+### Staging builds (opt-in)
+
+Once the staging publisher is configured, CI publishes a public PyPI development
+release for each successfully tested `dev` build. It is separate from the stable
+release: ordinary `pip install harumi` and `pipx upgrade harumi` do not opt in.
+
+```bash
+pipx install --pip-args="--pre" harumi       # first install
+pipx upgrade --pip-args="--pre" harumi       # pick up a newer staging build
+harumi --version                            # e.g. 1.1.1.dev123001
+```
+
+If `harumi` is already installed, use the upgrade command; to return to stable,
+run `pipx uninstall harumi` followed by `pipx install harumi`. A staging **build** does not select a backend:
+use `harumi --env staging login` (VPN and a staging account required), or select
+staging during login. Production remains the default.
+
+Maintainers: configure a PyPI trusted publisher for repository `harumi-io/harumi-cli`,
+workflow `ci.yml`, environment `pypi-staging`, and configure that GitHub environment.
+Then set the repository Actions variable `HARUMI_STAGING_PUBLISH` to `true` and run
+CI on `dev`. Publishing is skipped until enabled; stable `release.yml` continues to
+use its own `pypi` environment. CI builds and smoke-tests the actual stamped wheel.
+The version uses the next patch's `.dev` plus the CI run number and attempt; CI logs
+identify the source commit. PyPI versions cannot be reused; after a partial upload,
+rerun **all** jobs, not only the failed publishing job, to generate a new version.
+
 Installing from source instead (for contributing, or an unreleased fix):
 
 ```bash
