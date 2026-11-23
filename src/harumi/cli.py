@@ -4369,7 +4369,24 @@ def issues_reopen(
     org: Optional[str] = _ORG,
 ) -> None:
     """Reopen a closed issue: it goes back to to do."""
-    _set_issue_status(number, "todo", project, as_json, api_url, org, "Reopened")
+    n = _issue_number(number)
+    project_id = _resolve_project(project, api_url, org)
+    client = _get_client(api_url=api_url, org=org)
+    with _pointing_to("harumi issues list"):
+        issue = client.get_issue(project_id, n)
+        if issue.status == "done":
+            issue = client.update_issue(project_id, n, {"status": "todo"})
+            reopened = True
+        else:
+            reopened = False
+    if as_json:
+        _emit_json(json_out.issue(issue))
+        return
+    status = escape(_ISSUE_STATUS_LABEL.get(issue.status, issue.status))
+    if reopened:
+        console.print(f"[bold green]Reopened[/bold green] [bold]{escape(_issue_header(issue))}[/bold] ({status}).")
+    else:
+        console.print(f"[bold]{escape(_issue_header(issue))}[/bold] is not closed ({status}); nothing changed.")
 
 
 @issues_app.command("comment")
