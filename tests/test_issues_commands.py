@@ -221,6 +221,41 @@ def test_moves_send_a_status_not_a_label(api, args, status):
     assert method == "PATCH" and body == {"status": status}
 
 
+@pytest.mark.parametrize(("number", "status"), [("1", "todo"), ("2", "in_progress")])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_reopen_does_not_move_an_open_issue(api, number, status, as_json):
+    result = run("reopen", number, *(["--json"] if as_json else []))
+    assert result.exit_code == 0, result.output
+    assert [call[0] for call in api.calls] == ["GET"]
+    if as_json:
+        assert json.loads(result.stdout)["status"] == status
+    else:
+        assert "not closed" in result.stdout and "nothing changed" in result.stdout
+        assert "Reopened" not in result.stdout
+
+
+def test_reopen_closed_issue_says_reopened(api):
+    result = run("reopen", "3")
+    assert result.exit_code == 0, result.output
+    assert "Reopened" in result.stdout and "to do" in result.stdout
+    assert "not closed" not in result.stdout and "nothing changed" not in result.stdout
+    assert [call[0] for call in api.calls] == ["GET", "PATCH"]
+    assert api.calls[-1][3] == {"status": "todo"}
+
+
+def test_reopen_closed_issue_json_has_the_new_status(api):
+    result = run("reopen", "3", "--json")
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["status"] == "todo"
+    assert [call[0] for call in api.calls] == ["GET", "PATCH"]
+
+
+def test_reopen_missing_issue_does_not_patch(api):
+    result = run("reopen", "99")
+    assert result.exit_code == 1 and "harumi issues list" in result.stderr
+    assert [call[0] for call in api.calls] == ["GET"]
+
+
 def test_move_rejects_an_unknown_status(api):
     result = run("move", "1", "--status", "blocked")
     assert result.exit_code == 1 and "not a status" in result.output
