@@ -145,7 +145,7 @@ def test_list_json_is_one_document(api):
 
 def test_list_rejects_an_unknown_state(api):
     result = run("list", "--state", "blocked")
-    assert result.exit_code == 1 and "not a state" in result.output
+    assert result.exit_code == 1 and "not a state" in result.stderr
 
 
 def test_view_shows_the_description_and_comments(api):
@@ -163,12 +163,12 @@ def test_view_json_includes_body_and_comments(api):
 
 def test_view_unknown_issue_points_at_the_list(api):
     result = run("view", "99")
-    assert result.exit_code == 1 and "harumi issues list" in result.output
+    assert result.exit_code == 1 and "harumi issues list" in result.stderr
 
 
 def test_issue_number_must_be_a_number(api):
     result = run("view", "abc")
-    assert result.exit_code == 1 and "not an issue number" in result.output
+    assert result.exit_code == 1 and "not an issue number" in result.stderr
 
 
 def test_create_sends_title_body_labels_and_status(api):
@@ -187,12 +187,12 @@ def test_create_reads_the_body_from_stdin(api):
 
 def test_create_refuses_two_ways_to_give_the_body(api):
     result = run("create", "--title", "x", "--body", "a", "--body-file", "-", input="b")
-    assert result.exit_code == 1 and "one way only" in result.output
+    assert result.exit_code == 1 and "one way only" in result.stderr
 
 
 def test_edit_needs_a_terminal_for_the_editor(api):
     result = run("edit", "1", "--edit")
-    assert result.exit_code == 1 and "needs a terminal" in result.output
+    assert result.exit_code == 1 and "needs a terminal" in result.stderr
 
 
 def test_edit_sends_only_what_changed(api):
@@ -202,7 +202,7 @@ def test_edit_sends_only_what_changed(api):
 
 def test_edit_with_nothing_to_change_fails(api):
     result = run("edit", "1")
-    assert result.exit_code == 1 and "Nothing to change" in result.output
+    assert result.exit_code == 1 and "Nothing to change" in result.stderr
 
 
 def test_edit_empty_label_clears_them(api):
@@ -258,7 +258,7 @@ def test_reopen_missing_issue_does_not_patch(api):
 
 def test_move_rejects_an_unknown_status(api):
     result = run("move", "1", "--status", "blocked")
-    assert result.exit_code == 1 and "not a status" in result.output
+    assert result.exit_code == 1 and "not a status" in result.stderr
 
 
 def test_comment_posts_the_text(api):
@@ -269,4 +269,4 @@ def test_comment_posts_the_text(api):
 
 def test_comment_without_text_fails(api):
     result = run("comment", "1")
-    assert result.exit_code == 1 and "Say what to comment" in result.output
+    assert result.exit_code == 1 and "Say what to comment" in result.stderr
