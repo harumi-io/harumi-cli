@@ -229,6 +229,7 @@ def test_start_without_a_login_fails_before_asking_anything(monkeypatch):
 
     assert result.exit_code == 1
     assert "harumi login" in result.output
+    assert "--env" not in result.output
     assert asked == [], "asked a question before checking that the answers could be used"
     assert "What do you have" not in result.output
 

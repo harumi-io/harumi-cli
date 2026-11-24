@@ -185,6 +185,7 @@ from harumi.config import (
     active_environment,
     active_platform_url,
     active_status_url,
+    environment_scope,
     is_internal_email,
     load_credentials,
     load_git_token,
@@ -1074,6 +1075,28 @@ _API_MODELS = {
 }
 
 
+def _production_login_is_staff() -> bool:
+    """Use saved email only as a UX hint; never infer staff from a customer login."""
+    with environment_scope("production"):
+        production = load_credentials() or {}
+    email = production.get("email")
+    if isinstance(email, str) and email.strip():
+        return is_internal_email(email)
+    # A staff user may have no production login yet, but an existing staging login.
+    with environment_scope("staging"):
+        staging = load_credentials() or {}
+    email = staging.get("email")
+    return isinstance(email, str) and is_internal_email(email)
+
+
+def _auth_error_message(exc: NotAuthenticatedError) -> str:
+    # Leave custom messages (e.g. for an explicitly supplied Client token) alone.
+    standard = NotAuthenticatedError.default_message(expired=exc.expired, environment=exc.environment)
+    if exc.environment == "production" and str(exc) == standard and _production_login_is_staff():
+        return NotAuthenticatedError.default_message(expired=exc.expired, environment="production", show_production=True)
+    return str(exc)
+
+
 def _handle_errors(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
@@ -1084,7 +1107,7 @@ def _handle_errors(fn):
         except GitError as exc:
             _fail(str(exc))
         except NotAuthenticatedError as exc:
-            _fail(str(exc))
+            _fail(_auth_error_message(exc))
         except interactive.NonInteractiveError as exc:
             # Lists project names and other server text; keep Rich from reading
             # a `[x]` in one as markup.
@@ -3078,7 +3101,7 @@ def start() -> None:
     """
     if not auth.has_session():
         # Before the questions: answering three of them only to be told to log in is a waste.
-        _fail(str(NotAuthenticatedError(environment=active_environment())))
+        raise NotAuthenticatedError(environment=active_environment())
     if interactive.is_interactive():
         choice = interactive.select(
             "What do you have?",
