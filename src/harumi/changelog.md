@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Missing or expired login errors name the affected environment and give a login command targeting that same environment, so an expired production session is not confused with a valid staging login.
+- Missing or expired login errors name the affected environment for known staff logins and give a login command targeting it, so an expired production session is not confused with a valid staging login. Customer-facing production errors still suggest the simple `harumi login` command.
 
 ## 1.1.0 - 2026-11-02
 

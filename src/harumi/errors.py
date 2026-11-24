@@ -37,12 +37,13 @@ class NotAuthenticatedError(HarumiError):
         super().__init__(message or self.default_message(expired=expired, environment=environment))
 
     @staticmethod
-    def default_message(*, expired: bool, environment: Optional[str]) -> str:
+    def default_message(*, expired: bool, environment: Optional[str], show_production: bool = False) -> str:
         # A saved login belongs to one environment, and `--env` only applies to
         # one command. Naming it and targeting the same login avoids silently
         # checking a different session when the shell default differs.
-        where = f" on {environment}" if environment else ""
-        login = f"harumi --env {environment} login" if environment else "harumi login"
+        qualified = bool(environment) and (environment != "production" or show_production)
+        where = f" on {environment}" if qualified else ""
+        login = f"harumi --env {environment} login" if qualified else "harumi login"
         if expired:
             return f"Your Harumi session{where} has expired. Run `{login}` to sign in again."
         return (
