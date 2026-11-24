@@ -663,7 +663,7 @@ Within the active environment, URL/org overrides (highest first): **CLI flags > 
 
 | Symptom / error | Cause | Fix |
 |---|---|---|
-| `Error: You're not logged in.` or `Error: Your Harumi session has expired.` (both go on to say to run harumi login) | No session, or it ended | Ask user to run `harumi login` (an agent must never automate the emailed code) |
+| `Error: You're not logged in.` or `Error: Your Harumi session has expired.` (or the message naming `on production` / `on staging`) | No session, or it ended for that environment | Ask the user to run the login command printed in the error (an agent must never automate the emailed code) |
 | `Error: Could not renew your login: harumi-api returned HTTP 403 ...` | A firewall, proxy or outage blocked the token refresh; the session may be fine | Check network/VPN and retry; logging in again will not help |
 | `Error: Could not lock your Harumi login` | Renewal or a credential write needs the lock, but another command is using it or the directory/filesystem cannot be locked | Wait and retry; if it persists, check directory permissions and filesystem locking. This is not a logout; an unexpired token can still be used for requests |
 | `Couldn't connect to Harumi: the connection was refused.` / `Harumi didn't answer in time.` / `The connection to Harumi was cut off.` | Harumi is down or unreachable. Each is followed by a link to the status page | `harumi status`; retry in a minute. On `staging` it also asks whether the VPN is connected |

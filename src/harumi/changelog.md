@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1
+
+### Fixed
+
+- Missing or expired login errors name the affected environment and give a login command targeting that same environment, so an expired production session is not confused with a valid staging login.
+
 ## 1.1.0 - 2026-11-02
 
 ### New

@@ -65,11 +65,14 @@ def test_expired_says_so_and_how_to_sign_in_again():
     assert "`harumi login`" in message
 
 
-def test_the_environment_is_named_only_when_it_is_not_production():
-    assert "staging" in str(NotAuthenticatedError(environment="staging"))
-    assert "staging" in str(NotAuthenticatedError(expired=True, environment="staging"))
-    assert "production" not in str(NotAuthenticatedError(environment="production"))
-    assert " on " not in str(NotAuthenticatedError(expired=True, environment="production"))
+@pytest.mark.parametrize("environment", ["production", "staging"])
+@pytest.mark.parametrize("expired", [False, True])
+def test_auth_error_names_and_targets_the_affected_environment(environment, expired):
+    message = str(NotAuthenticatedError(environment=environment, expired=expired))
+    assert f"on {environment}" in message
+    assert f"`harumi --env {environment} login`" in message
+    if not expired:
+        assert f"`harumi --env {environment} login --signup`" in message
 
 
 def test_a_custom_message_is_kept():
@@ -115,7 +118,7 @@ def test_request_with_a_dead_session_raises_the_friendly_error():
         api.request("GET", "/users/profile")
 
     assert exc.value.expired is True
-    assert "`harumi login`" in str(exc.value)
+    assert "`harumi --env production login`" in str(exc.value)
 
 
 def test_a_401_that_survives_a_successful_refresh_is_still_an_expired_login():
@@ -223,7 +226,7 @@ def test_a_command_without_a_login_fails_before_printing_anything_else(monkeypat
     assert result.exit_code == 1
     assert "Creating project" not in result.output
     assert "not logged in" in result.output
-    assert "harumi login" in result.output
+    assert "harumi --env production login" in result.output
 
 
 @pytest.mark.parametrize("argv", [["whoami"], ["specs"], ["examples"], ["projects", "list"], ["usage"]])
@@ -231,7 +234,7 @@ def test_every_kind_of_command_says_how_to_log_in_when_there_is_no_login(argv):
     result = runner.invoke(cli.app, argv)
 
     assert result.exit_code == 1
-    assert "harumi login" in result.output
+    assert "harumi --env production login" in result.output
     assert "HTTP" not in result.output
 
 
@@ -241,10 +244,24 @@ def test_a_dead_session_at_the_command_line_is_not_an_http_422(api):
     result = runner.invoke(cli.app, ["whoami"])
 
     assert result.exit_code == 1
-    assert "expired" in result.output
-    assert "harumi login" in result.output
+    assert "session on production has expired" in result.output
+    assert "harumi --env production login" in result.output
     assert "422" not in result.output
     assert "HTTP" not in result.output
+
+
+def test_expired_production_is_clear_even_with_a_separate_staging_login(api):
+    with config.environment_scope("staging"):
+        _store(expires_in=3600, refresh="staging-refresh")
+    _store()  # production is expired; the staging session is independent
+
+    result = runner.invoke(cli.app, ["whoami"])
+
+    assert result.exit_code == 1
+    assert "session on production has expired" in result.output
+    assert "harumi --env production login" in result.output
+    with config.environment_scope("staging"):
+        assert config.load_credentials()["refresh_token"] == "staging-refresh"
 
 
 def test_the_message_names_staging_when_staging_is_the_environment(monkeypatch):
@@ -253,7 +270,7 @@ def test_the_message_names_staging_when_staging_is_the_environment(monkeypatch):
     result = runner.invoke(cli.app, ["whoami"])
 
     assert "not logged in on staging" in result.output
-    assert "harumi login" in result.output
+    assert "harumi --env staging login" in result.output
 
 
 def test_an_expired_staging_session_names_staging_too(api, monkeypatch):
@@ -263,6 +280,7 @@ def test_an_expired_staging_session_names_staging_too(api, monkeypatch):
     result = runner.invoke(cli.app, ["whoami"])
 
     assert "session on staging has expired" in result.output
+    assert "harumi --env staging login" in result.output
 
 
 def test_a_server_outage_is_still_reported_as_an_outage_not_as_a_login_problem(api):
@@ -308,7 +326,7 @@ def test_run_without_a_login_does_not_push_your_code_first(tmp_path, monkeypatch
 
     assert result.exit_code == 1
     assert "not logged in" in result.output
-    assert "harumi login" in result.output
+    assert "harumi --env production login" in result.output
 
 
 # -- a failed refresh is labelled as one ----------------------------------------------------------------
