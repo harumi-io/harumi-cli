@@ -109,7 +109,7 @@ def test_rm_declined_changes_nothing(api, monkeypatch):
 def test_rm_without_yes_and_without_a_terminal_is_refused(api):
     result = run("rm", "moldagem")
     assert result.exit_code == 1
-    assert "Cannot ask here" in result.output
+    assert "Cannot ask here" in result.stderr
     assert not [c for c in api.calls if c[0] == "DELETE"]
 
 
@@ -122,7 +122,7 @@ def test_rm_an_ambiguous_prefix_is_refused(api):
 def test_rm_an_unknown_key_says_where_to_look(api):
     result = run("rm", "nope", "--yes")
     assert result.exit_code == 1
-    assert "harumi keys list" in result.output
+    assert "harumi keys list" in result.stderr
 
 
 def test_rm_an_already_revoked_key_is_a_no_op(api):
