@@ -25,11 +25,13 @@ FILE = ("name", "size", "last_modified")
 SHARE = (
     "id", "label", "enabled", "password_set", "app_enabled", "chat_enabled", "run_history_enabled", "run_control_enabled",
 )
+API_KEY = ("id", "name", "scopes", "project_ids", "created_at", "expires_at", "last_used_at", "revoked_at")
 DATASOURCE = ("id", "name", "type", "host", "port", "database", "username", "use_proxy", "proxy_host")
 SCHEDULE = (
     "id", "cron", "start_at", "git_branch", "git_tag", "git_commit", "command", "kernel_spec", "output_format", "email_to", "status",
     "last_executed_at",
 )
+ISSUE = ("number", "title", "status", "labels", "assignees", "author", "comment_count", "by_assistant", "created_at", "updated_at", "closed_at")
 TAG = ("name", "commit_sha", "message", "created_at")
 MEMORY = ("id", "scope", "content", "retrieval_mode", "source", "updated_at")
 MEMBER = ("user_id", "email", "first_name", "last_name", "role", "pending")
@@ -88,12 +90,38 @@ def share(link: Any) -> dict:
     return _pick(link, SHARE)
 
 
+def api_key(k: Any) -> dict:
+    """No `api_key` field: the masked prefix is not a secret, but a script has no use for it."""
+    return _pick(k, API_KEY)
+
+
 def datasource(d: Any) -> dict:
     return _pick(d, DATASOURCE)
 
 
 def schedule(s: Any) -> dict:
     return _pick(s, SCHEDULE)
+
+
+def issue(i: Any, *, detail: bool = False, comments: Iterable[Any] = ()) -> dict:
+    """An issue with its labels as names and people as `{id, name}`. `detail` adds the body and the comments."""
+    record = _pick(i, ISSUE)
+    record["labels"] = [label.name for label in i.labels]
+    record["assignees"] = [{"id": u.id, "name": u.name} for u in i.assignees]
+    record["author"] = {"id": i.author.id, "name": i.author.name} if i.author else None
+    if detail:
+        record["body"] = i.body
+        record["comments"] = [
+            {
+                "id": c.id,
+                "author": {"id": c.author.id, "name": c.author.name} if c.author else None,
+                "by_assistant": c.by_assistant,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "body": c.body,
+            }
+            for c in comments
+        ]
+    return record
 
 
 def tag(t: Any) -> dict:

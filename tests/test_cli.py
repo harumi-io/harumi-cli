@@ -1170,6 +1170,75 @@ def test_link_binds_an_already_checked_out_directory(api, git_ops, tmp_path, mon
     assert git_ops["ensure_remote"][0]["cwd"] == tmp_path
     # `link` never fetches code — only `new`/`push`/`clone` do.
     assert git_ops["clone"] == []
+    # The project lookup was not answered (no route), so the owner is left for later, not guessed.
+    assert "customer_id" not in json.loads((tmp_path / ".harumi" / "config.json").read_text())
+
+
+_ORG_ID = "0b9c2f3e-1111-4222-8333-444455556666"
+
+
+def _binding_file(folder: Path) -> dict:
+    return json.loads((folder / ".harumi" / "config.json").read_text())
+
+
+def test_link_records_the_projects_environment_and_owner(api, git_ops, tmp_path, monkeypatch):
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    api.route("GET", "/api/projects/proj-1", {"id": "proj-1", "name": "Solver", "customer_id": _ORG_ID})
+    _route_project_repo(api, "proj-1", "solver")
+
+    result = runner.invoke(cli.app, ["link", "--project", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    data = _binding_file(tmp_path)
+    assert (data["environment"], data["customer_id"]) == ("production", _ORG_ID)
+
+
+def test_clone_records_a_personal_project_as_null(api, git_ops, tmp_path, monkeypatch):
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    api.route("GET", "/api/projects/proj-1", {"id": "proj-1", "name": "Solver", "customer_id": None})
+    _route_project_repo(api, "proj-1", "solver")
+
+    result = runner.invoke(cli.app, ["clone", "proj-1"])
+
+    assert result.exit_code == 0, result.output
+    data = _binding_file(tmp_path / "solver")
+    assert data["environment"] == "production"
+    assert "customer_id" in data and data["customer_id"] is None
+
+
+def test_new_records_the_organization_the_server_put_the_project_in(api, git_ops, tmp_path, monkeypatch):
+    """What the server answered, not what was asked: the owner is the project's, not the CLI's default."""
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    api.route("POST", "/api/projects", {"id": "proj-new", "name": "Widget", "customer_id": _ORG_ID})
+    _route_project_repo(api, "proj-new", "widget")
+
+    result = runner.invoke(cli.app, ["new", "Widget", "--personal"])
+
+    assert result.exit_code == 0, result.output
+    assert _binding_file(tmp_path / "widget")["customer_id"] == _ORG_ID
+
+
+def test_a_response_without_an_owner_is_not_written_down_as_personal(api, git_ops, tmp_path, monkeypatch):
+    from harumi.config import save_git_token
+
+    monkeypatch.chdir(tmp_path)
+    save_git_token("gitea-token", username="dev@harumi.test")
+    api.route("POST", "/api/projects", {"id": "proj-new", "name": "Widget"})  # no customer_id at all
+    _route_project_repo(api, "proj-new", "widget")
+
+    result = runner.invoke(cli.app, ["new", "Widget"])
+
+    assert result.exit_code == 0, result.output
+    assert "customer_id" not in _binding_file(tmp_path / "widget")
 
 
 def test_new_without_a_gitea_token_warns_but_does_not_fail(api, git_ops, tmp_path, monkeypatch):
@@ -2453,6 +2522,21 @@ def test_dashboard_validate_fails_when_any_spec_drops_a_widget(api, tmp_path, mo
     assert "dashboard/ok.toml" in result.output
 
 
+def test_dashboard_validate_lists_a_deprecation_without_failing(api, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "dashboard").mkdir()
+    (tmp_path / "dashboard" / "old.toml").write_text(
+        "[[widgets]]\ntype = 'gantt-chart'\nid = 'g'\ntitle = 'G'\ntasks_key = 'schedule'\n"
+    )
+
+    result = runner.invoke(cli.app, ["dashboard", "validate"])
+
+    # The widget still renders, so a CI check must not turn red over a deprecation.
+    assert result.exit_code == 0, result.output
+    assert "deprecated" in result.output
+    assert "timeline" in result.output
+
+
 def test_dashboard_validate_still_finds_the_legacy_root_file(api, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "dashboard.toml").write_text(VALID_SPEC)
@@ -3458,3 +3542,52 @@ def test_memories_add_reads_standard_input_when_given_a_dash(api):
 
     assert result.exit_code == 0, result.output
     assert api.body_for("POST", "/api/projects/proj-1/memories")["content"] == "From a pipe"
+
+
+CUSTOM_SPEC = """
+[[widgets]]
+type = "custom"
+id = "board"
+title = "Board"
+source = "widgets/board.html"
+"""
+
+
+def test_dashboard_validate_finds_a_widget_file_from_another_directory(api, tmp_path, monkeypatch):
+    """The file check resolves against the repo, not the directory the command runs in."""
+    repo = tmp_path / "repo"
+    (repo / "dashboard").mkdir(parents=True)
+    (repo / "widgets").mkdir()
+    (repo / "dashboard" / "main.toml").write_text(CUSTOM_SPEC)
+    (repo / "widgets" / "board.html").write_text("<html></html>")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate", str(repo / "dashboard" / "main.toml")])
+
+    assert result.exit_code == 0, result.output
+    assert "missing" not in result.output
+
+
+def test_dashboard_validate_reports_a_widget_file_missing_from_its_repo(api, tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "dashboard").mkdir(parents=True)
+    (repo / "dashboard" / "main.toml").write_text(CUSTOM_SPEC)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate", str(repo / "dashboard" / "main.toml")])
+
+    assert result.exit_code == 1
+    assert "missing" in result.output
+
+
+def test_dashboard_validate_skips_the_file_check_when_the_repo_root_is_unknown(api, tmp_path, monkeypatch):
+    spec = tmp_path / "scratch.toml"
+    spec.write_text(CUSTOM_SPEC)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(cli.app, ["dashboard", "validate", str(spec)])
+
+    assert result.exit_code == 0, result.output
+    assert "missing" not in result.output

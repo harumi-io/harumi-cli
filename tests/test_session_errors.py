@@ -22,14 +22,8 @@ runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def home(tmp_path, monkeypatch):
-    monkeypatch.setattr("harumi.config.HARUMI_HOME", tmp_path)
-    monkeypatch.setattr("harumi.config.CONFIG_PATH", tmp_path / "config.json")
-    monkeypatch.setattr("harumi.config.CREDENTIALS_PATH", tmp_path / "credentials.json")
-    monkeypatch.setattr("harumi.config._ACTIVE_ENV", None)
-    monkeypatch.setattr("harumi.config._RESOLVED_API_URL", None)
-    for var in ("HARUMI_ENV", "HARUMI_API_URL", "HARUMI_GIT_URL", "HARUMI_ORG"):
-        monkeypatch.delenv(var, raising=False)
+def home(tmp_path, monkeypatch, isolate_harumi_home):
+    isolate_harumi_home(tmp_path)
     return tmp_path
 
 
@@ -71,11 +65,22 @@ def test_expired_says_so_and_how_to_sign_in_again():
     assert "`harumi login`" in message
 
 
-def test_the_environment_is_named_only_when_it_is_not_production():
-    assert "staging" in str(NotAuthenticatedError(environment="staging"))
-    assert "staging" in str(NotAuthenticatedError(expired=True, environment="staging"))
-    assert "production" not in str(NotAuthenticatedError(environment="production"))
-    assert " on " not in str(NotAuthenticatedError(expired=True, environment="production"))
+@pytest.mark.parametrize("expired", [False, True])
+def test_staging_auth_error_names_and_targets_staging(expired):
+    message = str(NotAuthenticatedError(environment="staging", expired=expired))
+    assert "on staging" in message
+    assert "`harumi --env staging login`" in message
+    if not expired:
+        assert "`harumi --env staging login --signup`" in message
+
+
+@pytest.mark.parametrize("expired", [False, True])
+def test_production_auth_error_is_simple_for_customers(expired):
+    message = str(NotAuthenticatedError(environment="production", expired=expired))
+    assert "production" not in message and "--env" not in message
+    assert "`harumi login`" in message
+    if not expired:
+        assert "`harumi login --signup`" in message
 
 
 def test_a_custom_message_is_kept():
@@ -247,10 +252,65 @@ def test_a_dead_session_at_the_command_line_is_not_an_http_422(api):
     result = runner.invoke(cli.app, ["whoami"])
 
     assert result.exit_code == 1
-    assert "expired" in result.output
+    assert "session has expired" in result.output
     assert "harumi login" in result.output
+    assert "--env" not in result.output
     assert "422" not in result.output
     assert "HTTP" not in result.output
+
+
+def test_expired_production_is_clear_even_with_a_separate_staging_login(api):
+    with config.environment_scope("staging"):
+        _store(expires_in=3600, refresh="staging-refresh", email="andre@harumi.io")
+    _store(email="andre@harumi.io")  # production is expired; staging is independent
+
+    result = runner.invoke(cli.app, ["whoami"])
+
+    assert result.exit_code == 1
+    assert "session on production has expired" in result.output
+    assert "harumi --env production login" in result.output
+    with config.environment_scope("staging"):
+        assert config.load_credentials()["refresh_token"] == "staging-refresh"
+
+
+def test_missing_production_with_a_saved_staff_staging_login_is_qualified():
+    with config.environment_scope("staging"):
+        _store(expires_in=3600, email="andre@harumi.io")
+    result = runner.invoke(cli.app, ["whoami"])
+    assert result.exit_code == 1
+    assert "not logged in on production" in result.output
+    assert "harumi --env production login" in result.output
+
+
+def test_production_override_with_staging_default_names_the_failed_session(api, monkeypatch):
+    config.save_environment("staging")
+    with config.environment_scope("staging"):
+        _store(expires_in=3600, email="andre@harumi.io")
+    with config.environment_scope("production"):
+        _store(email="andre@harumi.io")
+    monkeypatch.delenv("HARUMI_ENV", raising=False)
+
+    result = runner.invoke(cli.app, ["--env", "production", "whoami"])
+
+    assert result.exit_code == 1
+    assert "session on production has expired" in result.output
+    assert "harumi --env production login" in result.output
+
+
+def test_customer_production_login_is_not_mistaken_for_a_saved_staff_staging_login(api):
+    with config.environment_scope("staging"):
+        _store(expires_in=3600, email="andre@harumi.io")
+    _store(email="customer@example.com")
+    result = runner.invoke(cli.app, ["whoami"])
+    assert "session has expired" in result.output
+    assert "harumi login" in result.output
+    assert "--env" not in result.output
+
+
+def test_custom_auth_error_is_not_reworded_even_for_staff():
+    _store(email="andre@harumi.io")
+    exc = NotAuthenticatedError("custom token refusal", expired=True, environment="production")
+    assert cli._auth_error_message(exc) == "custom token refusal"
 
 
 def test_the_message_names_staging_when_staging_is_the_environment(monkeypatch):
@@ -259,7 +319,7 @@ def test_the_message_names_staging_when_staging_is_the_environment(monkeypatch):
     result = runner.invoke(cli.app, ["whoami"])
 
     assert "not logged in on staging" in result.output
-    assert "harumi login" in result.output
+    assert "harumi --env staging login" in result.output
 
 
 def test_an_expired_staging_session_names_staging_too(api, monkeypatch):
@@ -269,6 +329,7 @@ def test_an_expired_staging_session_names_staging_too(api, monkeypatch):
     result = runner.invoke(cli.app, ["whoami"])
 
     assert "session on staging has expired" in result.output
+    assert "harumi --env staging login" in result.output
 
 
 def test_a_server_outage_is_still_reported_as_an_outage_not_as_a_login_problem(api):

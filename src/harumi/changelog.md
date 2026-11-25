@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1
+
+### New
+
+- Experimental `harumi canvas validate-manifest PATH` checks a local canvas declaration offline (up to 64,000 bytes). It does not read source files, compile, render or publish them.
+
+### Fixed
+
+- Missing or expired login errors name the affected environment for known staff logins and give a login command targeting it, so an expired production session is not confused with a valid staging login. Customer-facing production errors still suggest the simple `harumi login` command.
+
 ## 1.1.0 - 2026-11-02
 
 ### New

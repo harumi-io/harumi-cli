@@ -12,6 +12,47 @@ pip install harumi
 
 This installs the `harumi` CLI and the `harumi` Python package (`import harumi`).
 
+### Staging builds (opt-in)
+
+Once the staging publisher is configured, CI publishes a public PyPI development
+release after successful CI on `dev`. It is separate from the stable release:
+ordinary `pip install harumi` and `pipx upgrade harumi` do not opt in.
+
+If pipx already manages `harumi`, first run `pipx uninstall harumi` to replace
+its environment (this also removes any packages injected into that environment,
+but not your Harumi credentials). Then, with a recent pipx that supports `--backend`:
+
+```bash
+pipx install --backend pip 'harumi>=0.0.0.dev0'          # first install
+pipx install --force --backend pip 'harumi>=0.0.0.dev0'  # update staging
+harumi --version                                         # e.g. 1.1.1.dev123001
+```
+
+The explicit prerelease requirement applies to Harumi, not its dependencies. The
+pip backend is required: uv can prefer a stable release for this requirement.
+Staging builds do not show update notices; repeat the update command above.
+To return to stable, run `pipx uninstall harumi` followed by `pipx install harumi`.
+A staging **build** does not select a backend:
+use `harumi --env staging login` (VPN and a staging account required), or select
+staging during login. Production remains the default.
+
+Maintainers: configure a PyPI trusted publisher for repository `harumi-io/harumi-cli`,
+workflow `ci.yml`, environment `pypi-staging`. Create the GitHub environment and set
+**Deployment branches and tags** to allow only the `dev` branch, not all branches
+or tags. This restriction is the security boundary preventing PR and feature-branch
+workflows from publishing stable packages. Restrict who can push to `dev` too: a
+person who can change that branch can change the publishing workflow. Do not enable
+publishing without these protections. Then set the repository Actions variable
+`HARUMI_STAGING_PUBLISH` to `true` and run CI on `dev`. Publishing is skipped until
+enabled; stable `release.yml` continues to
+use its own `pypi` environment. CI builds and smoke-tests the actual stamped wheel.
+The version uses the next patch after the greater of the source version and latest
+stable PyPI release, plus the CI run number and attempt; CI logs identify the source
+commit. After a stable hotfix, a new `dev` CI run is needed to publish a newer
+prerelease. The version does not imply `dev` includes that hotfix; merge it back.
+PyPI versions cannot be reused; after a partial upload,
+rerun **all** jobs, not only the failed publishing job, to generate a new version.
+
 Installing from source instead (for contributing, or an unreleased fix):
 
 ```bash
@@ -59,6 +100,7 @@ harumi dashboard validate --latest
 - `harumi new` / `harumi import` / `harumi clone` / `harumi link` / `harumi start` — the onboarding verbs; see Quick start above.
 - Editing the project's repo is plain git in your clone (`harumi clone` sets up a `harumi` remote with no token in its URL: git gets the password from `harumi git-credential` when it needs it, so `git remote -v` and `.git/config` are safe to share): `git push harumi <branch>`. `harumi check` reports what blocks the project from running; `harumi skills library|add` installs preset skills; `harumi agent-skills install` teaches Cursor/Claude Code/Codex this CLI.
 - `harumi dashboard` — look up the `dashboard.toml` widget reference (`widgets`) and validate a project's dashboard, including its `output.json` dot-paths, before pushing (`validate`).
+- `harumi canvas validate-manifest <path>` — experimental, offline check of one portable canvas source declaration (up to 64,000 bytes). It does **not** read the declared source files, compile or render them, publish an artifact, or establish that a canvas product surface is available.
 - `harumi share` — manage the project's public, unauthenticated dashboard links (several per project): add, enable/disable, rotate, and password-protect them.
 - `harumi whats-new` — release notes for the installed version (`--all` for the history). harumi also tells you, at most once a day and only in an interactive terminal, when a newer version is on PyPI.
 - `harumi examples` — list example projects to pass as `harumi new --example`.
@@ -66,6 +108,7 @@ harumi dashboard validate --latest
 - `harumi tags` — label a version with a movable tag such as `prod`, then `harumi run --tag prod` or `harumi schedules add --git-tag prod`.
 - `harumi schedules` — CRUD cron schedules that trigger git-ref runs.
 - `harumi secrets` — CRUD project-scoped environment variables.
+- `harumi issues` — the project's issues, shared with the web app and the assistant: `list`, `view N`, `create`, `edit N`, `move N --status todo|in-progress|done`, `close N`, `reopen N`, `comment N`.
 - `harumi memories` — list/add/edit/remove the project's memories. (Project skills are files in the repo under `skills/<slug>/SKILL.md`; run `harumi skills` for how to edit them.)
 - `harumi org` — manage organizations and their members, by name or email.
 - `harumi profile` — view/update your account profile.

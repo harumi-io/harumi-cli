@@ -16,6 +16,7 @@ to create the account first.
 from __future__ import annotations
 
 import time
+from contextlib import ExitStack
 from typing import Optional
 
 import httpx
@@ -23,6 +24,7 @@ import httpx
 from harumi.config import Config, clear_credentials, credentials_lock, load_credentials, save_credentials
 from harumi.errors import (
     ApiError,
+    CredentialsLockError,
     NotAuthenticatedError,
     SessionRefreshError,
     guard_json,
@@ -172,6 +174,16 @@ def current_credentials() -> Optional[dict]:
     return load_credentials()
 
 
+def _can_sign_without_refresh(creds: dict) -> bool:
+    if not creds.get("access_token"):
+        return False
+    expires_at = creds.get("expires_at")
+    if expires_at is None:
+        return True
+    now = time.time()
+    return expires_at > now and (not creds.get("refresh_token") or expires_at > now + _EXPIRY_SKEW_SECONDS)
+
+
 def signing_session(
     config: Config, *, transport: Optional[httpx.BaseTransport] = None
 ) -> tuple[str, Optional[str]]:
@@ -183,15 +195,21 @@ def signing_session(
     stale and throws away the pair the other thread had just obtained. (Four threads sharing a login could make
     three refreshes where one was needed, and one of them could end with the user told to log in again.)
 
-    So both are read while holding the credentials lock, which `renew_session` also takes: nobody can renew between
-    the two reads. The lock is re-entrant within a thread, so the renewal `get_valid_access_token` may itself do for
-    a token near expiry does not deadlock.
-
-    The guarantee is only as good as the lock: `credentials_lock` carries on without it after its timeout (30
-    seconds), when the home folder is read-only, or on a platform with no file locking. There the pairing is best
-    effort again, which is no worse than before; it is not a promise.
+    Normally both are read under the credentials lock. If the lock is unavailable and the access token does not
+    need a refresh, sign with both values from one atomic credentials-file read instead. A 401 still goes through
+    `renew_session`, which adopts a rival's newer pair or refuses to refresh without the lock.
     """
-    with credentials_lock():
+    snapshot = load_credentials() or {}
+    can_sign = _can_sign_without_refresh(snapshot)
+    with ExitStack() as stack:
+        try:
+            # A valid snapshot needs no lock, so do not wait 30 seconds for a busy one.
+            stack.enter_context(credentials_lock(timeout=0) if can_sign else credentials_lock())
+        except CredentialsLockError:
+            # Recheck after attempting the lock: a near-expiry snapshot must never bypass renewal.
+            if can_sign and _can_sign_without_refresh(snapshot):
+                return snapshot["access_token"], snapshot.get("refresh_token") or None
+            raise
         token = get_valid_access_token(config, allow_refresh=True, transport=transport)
         refresh = (load_credentials() or {}).get("refresh_token") or None
         return token, refresh

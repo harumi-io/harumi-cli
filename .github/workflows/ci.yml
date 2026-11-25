@@ -16,7 +16,9 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A dev run can publish to PyPI. Do not interrupt an upload when dev moves;
+  # PRs and main can still cancel obsolete runs.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/dev' }}
 
 jobs:
   test:
@@ -74,6 +76,13 @@ jobs:
   # Validates the `requires-python = ">=3.9"` floor advertised in
   # pyproject.toml against both ends of the supported range. Not wired into
   # branch protection as required (only `test` is) — see the note above.
+  #
+  # The full suite already runs once, on 3.12, in `test`. Running it again on 3.9 and 3.13 for
+  # every PR tripled the cost for a failure that is almost always a syntax or import problem, so
+  # a pull request runs a smoke subset here (the command tree, the client, JSON output, issue/key
+  # commands and the library surface). The full suite runs on push to
+  # main and dev and on a manual dispatch, so a version-specific failure still shows up, just
+  # after the merge instead of before it.
   compat:
     name: compat (${{ matrix.python-version }})
     # 3.9 has no build on ubuntu-latest (Ubuntu 26.04), and is the lowest Python we support.
@@ -100,5 +109,100 @@ jobs:
       - name: Compile check
         run: python -m compileall -q src
 
-      - name: Test
+      - name: Test (smoke subset on pull requests)
+        if: github.event_name == 'pull_request'
+        run: pytest -q tests/test_cli.py tests/test_command_grammar.py tests/test_client.py tests/test_json_output.py tests/test_library_surface.py tests/test_issues_commands.py tests/test_keys_commands.py
+
+      - name: Test (full suite)
+        if: github.event_name != 'pull_request'
         run: pytest -q
+
+  staging-build:
+    name: Build staging distribution
+    needs: [test, wheel, compat]
+    if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Stamp the checkout (never commit this version)
+        id: version
+        run: |
+          # Fail closed if PyPI is unavailable or does not return a stable X.Y.Z.
+          latest=$(python -c 'import json, urllib.request; print(json.load(urllib.request.urlopen("https://pypi.org/pypi/harumi/json", timeout=15))["info"]["version"])')
+          version=$(python scripts/staging_version.py "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT" --floor "$latest")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Staging version $version from $GITHUB_SHA"
+      - name: Build and validate
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staging-dist-${{ steps.version.outputs.version }}
+          path: dist/
+
+  staging-smoke:
+    name: Smoke staging wheel (${{ matrix.python-version }})
+    needs: staging-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-dist-${{ needs.staging-build.outputs.version }}
+          path: dist/
+      - name: Install the exact wheel and check its version
+        env:
+          VERSION: ${{ needs.staging-build.outputs.version }}
+        run: python scripts/check_wheel_installs.py dist/*.whl --expect-version "$VERSION"
+
+  staging-publish:
+    name: Publish staging prerelease to PyPI
+    needs: [staging-build, staging-smoke]
+    # The environment's dev-only deployment rule is the security boundary; this is defense in depth.
+    if: github.ref == 'refs/heads/dev' && vars.HARUMI_STAGING_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi-staging
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-dist-${{ needs.staging-build.outputs.version }}
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Marks a draft PR ready once the jobs above pass, but only if it carries the `ready-when-green`
+  # label (read from the live PR, so add it later and re-run this job if CI already finished). That
+  # starts the Claude review and the board sync. Needs a PAT (UNDRAFT_TOKEN), not GITHUB_TOKEN: a
+  # ready event made with GITHUB_TOKEN starts no other workflow. Add PR jobs to this job's needs;
+  # the staging jobs above are dev-only and deliberately excluded.
+  # Skipped jobs count as passing (docs-only changes skip the heavy ones). Pinned to a commit like the
+  # review workflow: bump it like a dependency.
+  undraft:
+    name: Mark ready for review
+    needs: [test, wheel, compat]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && github.event_name == 'pull_request' && github.event.pull_request.draft }}
+    permissions: {}
+    uses: harumi-io/workflows/.github/workflows/undraft-when-green.yml@65fe724ecdcd0bb5a2936e7669550f03511caf0f
+    secrets:
+      token: ${{ secrets.UNDRAFT_TOKEN }}

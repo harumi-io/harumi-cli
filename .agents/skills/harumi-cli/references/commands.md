@@ -24,8 +24,10 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [Editing the repo (git)](#editing-the-repo-git)
 - [check](#check)
 - [files](#files)
+- [canvas](#canvas)
 - [dashboard](#dashboard)
 - [share](#share)
+- [keys](#keys)
 - [datasources](#datasources)
 - [schedules](#schedules)
 - [secrets](#secrets)
@@ -358,6 +360,14 @@ The project's non-git file storage. A run finds these files under `inputs/` in i
 - **`rm`** is a hard delete (no trash): it prompts unless `--yes`, and the question and the result name the file and its size. harumi-api answers `deleted: 1` for **any** path, so the CLI reads the project's file listing first (one request, up to 500 files) and refuses a name that is not there, or is a folder, with exit 1 and a reason. **This changed `files rm <missing> --yes` from exit 0 to exit 1.** A cleanup script that may run twice should pass **`--missing-ok`**: it exits 0 with "was not there" for a missing file, and does not excuse a folder name.
 - **`ls`** lists every file (`name`, `size` as `1.4 MB`, `modified` as `3 days ago`; names are never cut) and ends with the total against the limits (`3 files, 87.3 MB (of 500 files and 500.0 MB every run can use)`), with a warning at 90%. If the listing is truncated it says the figures are a minimum. File names are shown without terminal control characters.
 
+## `canvas`
+
+```
+harumi canvas validate-manifest PATH
+```
+
+Experimental, offline validation of a local canvas source declaration JSON, at most 64,000 bytes. It checks the declaration only: it does not read the named source files, compile, render or publish anything. Save the JSON as UTF-8 without a BOM. This command does not create a dashboard or establish deployed canvas support.
+
 ## `dashboard`
 
 ```
@@ -409,6 +419,19 @@ Manages `/projects/{id}/share-links*` — a project's public, unauthenticated da
 
 `--project` on every subcommand overrides the `.harumi` binding.
 
+
+## `keys`
+
+```
+harumi keys list [--json]
+harumi keys rm KEY [--yes]
+```
+
+Manages the signed-in user's own `pk_` API keys (`/keys`). **There is no `create` or `rotate`**: the API asks for a fresh authenticator code for those, and the CLI signs in by an emailed code and cannot ask for one. Do them in the web app, under Settings > API keys; the CLI says so when there are no keys, and after a revoke. Revoking needs no second factor, so a leaked key can be killed from a terminal or a script.
+
+- **`list`**: `GET /keys`. A table of `id` (first 8), `name`, `scopes` (`outputs:read`, `runs:write`), `projects` (how many the key reaches), `state` (`active`, `expired`, `revoked`), `last used` and `expires`. `--json` has `id`, `name`, `scopes`, `project_ids`, `created_at`, `expires_at`, `last_used_at`, `revoked_at` and `state`. **The key itself is never printed**, not even masked: the API only returns the full secret when a key is created or rotated.
+- **`rm`**: `DELETE /keys/{id}`. `KEY` is the key's id, the start of its id (when it names one key), or its exact name. It lists first to resolve `KEY` and to name the key in the question, then asks (`--yes` skips it). Anything using the key stops working immediately; this cannot be undone. A key that is already revoked is reported and nothing is sent. With no terminal and no `--yes` it is refused, like every confirmation.
+- Keys are for **server-side** use only: anyone holding one acts as its creator on the listed projects. Never put one in browser code or a public repository.
 
 ## `datasources`
 
@@ -606,7 +629,7 @@ Every command that deletes or removes something follows one rule, from `projects
 | At a terminal, no `--yes` | Asks `[y/N]`. Enter is **No**. Declining prints `Aborted.` and **exits 1**, so `harumi org rm X && deploy` stops. |
 | No terminal (a script, CI, an agent, a pipe), no `--yes` | **Refuses at once**: `Cannot ask here: no interactive terminal. Run it again with --yes to go ahead.` and exits 1. It never prints a prompt into a log and waits, and a `y` piped to stdin is **not** consent (it was not given to this question). |
 
-The commands: `projects rm`, `files rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `tags rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`, `org leave`, `org invitations decline`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 1.0.0.
+The commands: `projects rm`, `files rm`, `keys rm`, `share rm`, `share rotate`, `share update --no-password`, `datasources rm`, `tags rm`, `schedules rm`, `secrets rm`, `memories rm`, `org rm`, `org rm-member`, `org leave`, `org invitations decline`. The deprecated `repo rm` / `repo branch-rm` keep their old y/N until they are removed in 1.0.0.
 
 - **The permanent ones that take other things with them ask you to type the name** instead of `y`: `projects rm` (the project name) and `org rm` (the organization name, exactly: case and spaces count; Enter is a no). An agent passes `--yes` and still must name the project or organization (`--yes` with no name is refused).
 - **The question says which one**, not a UUID: a schedule by its cron, branch and command, a memory by its text, a file by its name and size, a share link by its label.
@@ -649,8 +672,9 @@ Within the active environment, URL/org overrides (highest first): **CLI flags > 
 
 | Symptom / error | Cause | Fix |
 |---|---|---|
-| `Error: You're not logged in.` or `Error: Your Harumi session has expired.` (both go on to say to run harumi login) | No session, or it ended | Ask user to run `harumi login` (an agent must never automate the emailed code) |
+| `Error: You're not logged in.` or `Error: Your Harumi session has expired.` (or the message naming `on production` / `on staging`) | No session, or it ended for that environment | Ask the user to run the login command printed in the error (an agent must never automate the emailed code) |
 | `Error: Could not renew your login: harumi-api returned HTTP 403 ...` | A firewall, proxy or outage blocked the token refresh; the session may be fine | Check network/VPN and retry; logging in again will not help |
+| `Error: Could not lock your Harumi login` | Renewal or a credential write needs the lock, but another command is using it or the directory/filesystem cannot be locked | Wait and retry; if it persists, check directory permissions and filesystem locking. This is not a logout; an unexpired token can still be used for requests |
 | `Couldn't connect to Harumi: the connection was refused.` / `Harumi didn't answer in time.` / `The connection to Harumi was cut off.` | Harumi is down or unreachable. Each is followed by a link to the status page | `harumi status`; retry in a minute. On `staging` it also asks whether the VPN is connected |
 | `Couldn't find Harumi's address (the DNS lookup failed).` | Your network, not Harumi: no internet, or a DNS problem (on staging, the VPN) | Check the connection. The status page is not offered, as it would not help |
 | `Couldn't make a secure connection to Harumi: its certificate wasn't trusted.` | A company proxy that re-signs HTTPS traffic | Point `SSL_CERT_FILE` at the company's CA certificate file |
@@ -752,4 +776,3 @@ project = client.create_project("New Project")  # project.repo is None if unprov
 **`Client(token=...)`** takes a bearer token you already have, for a pipeline with no `harumi login`. It is sent as given. The stored login is not used and neither are the stored settings (a host or organization saved by `harumi login`/`org use` does not apply, so the token only goes where the `Client`'s arguments or the `HARUMI_API_URL`/`HARUMI_ORG` variables say); nothing is saved, and the token is hidden from `repr` and from errors. An empty string is refused, so an unset environment variable cannot fall back to a stored login without a word. There is no session behind it, so a 401 raises `NotAuthenticatedError` at once (no refresh, no retry), and `login`/`logout` raise `HarumiError`. **Harumi does not issue long-lived tokens yet** (harumi-cli#124): a session's access token lasts about an hour. **The library is not a stability promise**: methods, models and fields can change in any release; prefer the CLI's `--json` output for anything a script depends on.
 
 `Client(api_url=..., git_url=..., org_id=...)` accepts the same overrides as the CLI flags. Requires the user to have run `harumi login` at least once, unless you pass `token=` (above).
-

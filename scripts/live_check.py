@@ -159,6 +159,15 @@ TIERS: dict[str, tuple[str, str]] = {
     "memories add": (CANARY, ""),
     "memories edit": (CANARY, ""),
     "memories rm": (CANARY, ""),
+    # -- issues (the canary project's own Gitea repo) ---------------------------
+    "issues list": (READ, ""),
+    "issues view": (READ, ""),
+    "issues create": (CANARY, ""),
+    "issues edit": (CANARY, ""),
+    "issues move": (CANARY, ""),
+    "issues close": (CANARY, ""),
+    "issues reopen": (CANARY, ""),
+    "issues comment": (CANARY, ""),
     # -- skills ---------------------------------------------------------------
     "skills library": (READ, "lists the platform's preset skills"),
     "skills add": (LOCAL, "fetches a preset (read-only) and writes it only into the throwaway workdir; nothing is pushed"),
@@ -169,6 +178,9 @@ TIERS: dict[str, tuple[str, str]] = {
     "share update": (CANARY, ""),
     "share rotate": (CANARY, ""),
     "share rm": (CANARY, ""),
+    # -- api keys -------------------------------------------------------------
+    "keys list": (READ, ""),
+    "keys rm": (MANUAL, "a key can only be created or rotated in the web app (it needs an authenticator code), so there is nothing disposable to revoke"),
     # -- datasources ----------------------------------------------------------
     # The whole group needs a database the backend can actually reach. Creating
     # one against production would also mean putting real credentials in CI.
@@ -182,6 +194,7 @@ TIERS: dict[str, tuple[str, str]] = {
     # -- local tooling --------------------------------------------------------
     "dashboard widgets": (LOCAL, ""),
     "dashboard validate": (LOCAL, ""),
+    "canvas validate-manifest": (LOCAL, "validates only a local declaration; offline cases cover it"),
     "agent-skills install": (LOCAL, "run with --dry-run so it never writes real skill dirs"),
 }
 
@@ -234,6 +247,7 @@ PLAN: tuple[Step, ...] = (
     Step("projects trash"),
     Step("dashboard widgets"),
     Step("dashboard validate", ("{spec}",)),
+    Step("canvas validate-manifest", ("{canvas_manifest}",)),
     Step("agent-skills install", ("--dry-run",)),
     Step("skills library"),
     # -- create the canary ----------------------------------------------------
@@ -284,6 +298,15 @@ PLAN: tuple[Step, ...] = (
     Step("memories list", ("--project", "{project}")),
     Step("memories edit", ("{memory}", "--mode", "always", "--project", "{project}")),
     Step("memories rm", ("{memory}", "--yes", "--project", "{project}")),
+    # -- issues ---------------------------------------------------------------
+    Step("issues create", ("--title", "livecheck issue", "--project", "{project}"), capture="issue", capture_re=r"Filed #(\d+)"),
+    Step("issues list", ("--project", "{project}")),
+    Step("issues view", ("{issue}", "--project", "{project}")),
+    Step("issues edit", ("{issue}", "--title", "livecheck issue edited", "--project", "{project}")),
+    Step("issues comment", ("{issue}", "--body", "livecheck comment", "--project", "{project}")),
+    Step("issues move", ("{issue}", "--status", "in-progress", "--project", "{project}")),
+    Step("issues close", ("{issue}", "--project", "{project}")),
+    Step("issues reopen", ("{issue}", "--project", "{project}")),
     # -- share links ----------------------------------------------------------
     Step("share add", ("--label", "livecheck", "--project", "{project}"), capture="share"),
     Step("share list", ("--project", "{project}")),
@@ -293,6 +316,8 @@ PLAN: tuple[Step, ...] = (
     Step("share update", ("{share}", "--no-password", "--project", "{project}")),
     Step("share rotate", ("{share}", "--yes", "--project", "{project}")),
     Step("share rm", ("{share}", "--yes", "--project", "{project}")),
+    # -- api keys (listing only) ----------------------------------------------
+    Step("keys list", ()),
     # -- datasources (read-only half) -----------------------------------------
     Step("datasources list", ("--project", "{project}")),
     # -- runs -----------------------------------------------------------------
@@ -440,7 +465,7 @@ def _split_opts(param: dict) -> set[str]:
 
 
 # Placeholders filled from the environment rather than captured from output.
-_RUNTIME_PLACEHOLDERS = frozenset({"canary", "seed", "spec", "push_folder", "tmp", "org", "env"})
+_RUNTIME_PLACEHOLDERS = frozenset({"canary", "seed", "spec", "canvas_manifest", "push_folder", "tmp", "org", "env"})
 
 
 def ledger(exercised: Optional[set[str]] = None) -> dict[str, list[str]]:
@@ -572,6 +597,7 @@ class Runner:
                 "canary": _canary_name(),
                 "seed": str(self._seed_file()),
                 "spec": str(self._seed_dashboard()),
+                "canvas_manifest": str(self._seed_canvas_manifest()),
                 "push_folder": str(self._seed_push_folder()),
                 "tmp": str(self.tmpdir),
                 "org": self.org,
@@ -647,6 +673,12 @@ class Runner:
         path.write_text(
             '[[widgets]]\ntype = "metric"\nid = "objective"\ntitle = "Objective"\nvalue_key = "objective"\n'
         )
+        return path
+
+    def _seed_canvas_manifest(self) -> Path:
+        """A declaration-only fixture; validation does not read its named source."""
+        path = self.tmpdir / "canvas.json"
+        path.write_text(json.dumps({"version": 1, "entry": "main.tsx", "files": ["main.tsx"], "capabilities": []}))
         return path
 
 

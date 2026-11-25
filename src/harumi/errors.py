@@ -13,6 +13,10 @@ class HarumiError(Exception):
     """Base class for all harumi SDK/CLI errors."""
 
 
+class CredentialsLockError(HarumiError):
+    """The stored login cannot be safely accessed without its cross-process lock."""
+
+
 class NotAuthenticatedError(HarumiError):
     """There is no usable login: none on file, or the one on file has expired.
 
@@ -33,15 +37,18 @@ class NotAuthenticatedError(HarumiError):
         super().__init__(message or self.default_message(expired=expired, environment=environment))
 
     @staticmethod
-    def default_message(*, expired: bool, environment: Optional[str]) -> str:
-        # Production is what nearly everyone uses, so only name an environment
-        # when it is not that one.
-        where = f" on {environment}" if environment and environment != "production" else ""
+    def default_message(*, expired: bool, environment: Optional[str], show_production: bool = False) -> str:
+        # A saved login belongs to one environment, and `--env` only applies to
+        # one command. Naming it and targeting the same login avoids silently
+        # checking a different session when the shell default differs.
+        qualified = bool(environment) and (environment != "production" or show_production)
+        where = f" on {environment}" if qualified else ""
+        login = f"harumi --env {environment} login" if qualified else "harumi login"
         if expired:
-            return f"Your Harumi session{where} has expired. Run `harumi login` to sign in again."
+            return f"Your Harumi session{where} has expired. Run `{login}` to sign in again."
         return (
-            f"You're not logged in{where}. Run `harumi login` to sign in "
-            "(new to Harumi? `harumi login --signup` creates your account)."
+            f"You're not logged in{where}. Run `{login}` to sign in "
+            f"(new to Harumi? `{login} --signup` creates your account)."
         )
 
 
