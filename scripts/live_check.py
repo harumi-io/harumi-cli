@@ -194,6 +194,7 @@ TIERS: dict[str, tuple[str, str]] = {
     # -- local tooling --------------------------------------------------------
     "dashboard widgets": (LOCAL, ""),
     "dashboard validate": (LOCAL, ""),
+    "canvas validate-manifest": (LOCAL, "validates only a local declaration; offline cases cover it"),
     "agent-skills install": (LOCAL, "run with --dry-run so it never writes real skill dirs"),
 }
 
@@ -246,6 +247,7 @@ PLAN: tuple[Step, ...] = (
     Step("projects trash"),
     Step("dashboard widgets"),
     Step("dashboard validate", ("{spec}",)),
+    Step("canvas validate-manifest", ("{canvas_manifest}",)),
     Step("agent-skills install", ("--dry-run",)),
     Step("skills library"),
     # -- create the canary ----------------------------------------------------
@@ -463,7 +465,7 @@ def _split_opts(param: dict) -> set[str]:
 
 
 # Placeholders filled from the environment rather than captured from output.
-_RUNTIME_PLACEHOLDERS = frozenset({"canary", "seed", "spec", "push_folder", "tmp", "org", "env"})
+_RUNTIME_PLACEHOLDERS = frozenset({"canary", "seed", "spec", "canvas_manifest", "push_folder", "tmp", "org", "env"})
 
 
 def ledger(exercised: Optional[set[str]] = None) -> dict[str, list[str]]:
@@ -595,6 +597,7 @@ class Runner:
                 "canary": _canary_name(),
                 "seed": str(self._seed_file()),
                 "spec": str(self._seed_dashboard()),
+                "canvas_manifest": str(self._seed_canvas_manifest()),
                 "push_folder": str(self._seed_push_folder()),
                 "tmp": str(self.tmpdir),
                 "org": self.org,
@@ -670,6 +673,12 @@ class Runner:
         path.write_text(
             '[[widgets]]\ntype = "metric"\nid = "objective"\ntitle = "Objective"\nvalue_key = "objective"\n'
         )
+        return path
+
+    def _seed_canvas_manifest(self) -> Path:
+        """A declaration-only fixture; validation does not read its named source."""
+        path = self.tmpdir / "canvas.json"
+        path.write_text(json.dumps({"version": 1, "entry": "main.tsx", "files": ["main.tsx"], "capabilities": []}))
         return path
 
 
