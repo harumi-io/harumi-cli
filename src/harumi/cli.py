@@ -4970,6 +4970,29 @@ def files_rm(
 
 
 # ---------------------------------------------------------------------------
+# harumi canvas
+# ---------------------------------------------------------------------------
+
+canvas_app = _typer(help="Experimental local canvas source declaration checks.")
+app.add_typer(canvas_app, name="canvas")
+
+
+@canvas_app.command("validate-manifest")
+@_handle_errors
+def canvas_validate_manifest(
+    path: Path = typer.Argument(..., help="Path to the local canvas source manifest JSON."),
+) -> None:
+    """Check a canvas declaration, without reading source files or compiling."""
+    from harumi.canvas_manifest import CanvasManifestError, read_manifest
+
+    try:
+        read_manifest(path)
+    except CanvasManifestError as exc:
+        _fail(escape(str(exc)))
+    console.print("Canvas declaration is valid. Source files were not checked, compiled, rendered or published.")
+
+
+# ---------------------------------------------------------------------------
 # harumi dashboard
 # ---------------------------------------------------------------------------
 
@@ -7126,7 +7149,7 @@ _PANELS: dict[str, list[str]] = {
     # `examples` and `specs` are lists you look things up in before `new` and `run`, so they sit with them.
     "Get started": ["login", "start", "new", "import", "clone", "link", "examples"],
     "Run and results": ["run", "runs", "compare", "check", "specs", "usage"],
-    "Project": ["projects", "issues", "files", "dashboard", "share", "datasources", "tags", "schedules", "secrets", "memories", "skills"],
+    "Project": ["projects", "issues", "files", "dashboard", "canvas", "share", "datasources", "tags", "schedules", "secrets", "memories", "skills"],
     "Account and team": ["whoami", "logout", "profile", "keys", "org", "agent-skills"],
     "Help and updates": ["status", "whats-new"],
 }

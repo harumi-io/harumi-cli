@@ -100,6 +100,7 @@ harumi dashboard validate --latest
 - `harumi new` / `harumi import` / `harumi clone` / `harumi link` / `harumi start` — the onboarding verbs; see Quick start above.
 - Editing the project's repo is plain git in your clone (`harumi clone` sets up a `harumi` remote with no token in its URL: git gets the password from `harumi git-credential` when it needs it, so `git remote -v` and `.git/config` are safe to share): `git push harumi <branch>`. `harumi check` reports what blocks the project from running; `harumi skills library|add` installs preset skills; `harumi agent-skills install` teaches Cursor/Claude Code/Codex this CLI.
 - `harumi dashboard` — look up the `dashboard.toml` widget reference (`widgets`) and validate a project's dashboard, including its `output.json` dot-paths, before pushing (`validate`).
+- `harumi canvas validate-manifest <path>` — experimental, offline check of one portable canvas source declaration (up to 64,000 bytes). It does **not** read the declared source files, compile or render them, publish an artifact, or establish that a canvas product surface is available.
 - `harumi share` — manage the project's public, unauthenticated dashboard links (several per project): add, enable/disable, rotate, and password-protect them.
 - `harumi whats-new` — release notes for the installed version (`--all` for the history). harumi also tells you, at most once a day and only in an interactive terminal, when a newer version is on PyPI.
 - `harumi examples` — list example projects to pass as `harumi new --example`.
