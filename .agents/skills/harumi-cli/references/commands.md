@@ -24,6 +24,7 @@ Detailed flag reference, config/credential storage, troubleshooting, and the Pyt
 - [Editing the repo (git)](#editing-the-repo-git)
 - [check](#check)
 - [files](#files)
+- [canvas](#canvas)
 - [dashboard](#dashboard)
 - [share](#share)
 - [keys](#keys)
@@ -358,6 +359,14 @@ The project's non-git file storage. A run finds these files under `inputs/` in i
 - **`get`** downloads through a presigned URL to `REMOTE_PATH`'s own name, or `-o`. A name that is not in the project, or is a folder, exits 1 saying so and pointing at `files ls`. The file is written to `<name>.part` and renamed only when complete, so a dropped connection leaves nothing half-written.
 - **`rm`** is a hard delete (no trash): it prompts unless `--yes`, and the question and the result name the file and its size. harumi-api answers `deleted: 1` for **any** path, so the CLI reads the project's file listing first (one request, up to 500 files) and refuses a name that is not there, or is a folder, with exit 1 and a reason. **This changed `files rm <missing> --yes` from exit 0 to exit 1.** A cleanup script that may run twice should pass **`--missing-ok`**: it exits 0 with "was not there" for a missing file, and does not excuse a folder name.
 - **`ls`** lists every file (`name`, `size` as `1.4 MB`, `modified` as `3 days ago`; names are never cut) and ends with the total against the limits (`3 files, 87.3 MB (of 500 files and 500.0 MB every run can use)`), with a warning at 90%. If the listing is truncated it says the figures are a minimum. File names are shown without terminal control characters.
+
+## `canvas`
+
+```
+harumi canvas validate-manifest PATH
+```
+
+Experimental, offline validation of a local canvas source declaration JSON, at most 64,000 bytes. It checks the declaration only: it does not read the named source files, compile, render or publish anything. Save the JSON as UTF-8 without a BOM. This command does not create a dashboard or establish deployed canvas support.
 
 ## `dashboard`
 

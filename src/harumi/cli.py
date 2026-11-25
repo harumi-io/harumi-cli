@@ -4970,7 +4970,7 @@ def files_rm(
 
 
 # ---------------------------------------------------------------------------
-# harumi dashboard
+# harumi canvas
 # ---------------------------------------------------------------------------
 
 canvas_app = _typer(help="Experimental local canvas source declaration checks.")
@@ -4991,6 +4991,10 @@ def canvas_validate_manifest(
         _fail(escape(str(exc)))
     console.print("Canvas declaration is valid. Source files were not checked, compiled, rendered or published.")
 
+
+# ---------------------------------------------------------------------------
+# harumi dashboard
+# ---------------------------------------------------------------------------
 
 dashboard_app = _typer(help="Reference and validate the project's dashboard spec widgets.")
 app.add_typer(dashboard_app, name="dashboard")

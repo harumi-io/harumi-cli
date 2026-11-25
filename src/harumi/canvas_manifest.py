@@ -14,6 +14,7 @@ from typing import Any
 MAX_MANIFEST_BYTES = 64_000
 MAX_FILES = 32
 _SEGMENT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*\Z")
+# Match canvas-core v1 and Microsoft's documented COM1–9 / LPT1–9 names.
 _WINDOWS_DEVICE = re.compile(r"(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)", re.IGNORECASE)
 
 
@@ -72,6 +73,8 @@ def read_manifest(path: Path) -> None:
         raw = file.read(MAX_MANIFEST_BYTES + 1)
     if len(raw) > MAX_MANIFEST_BYTES:
         raise CanvasManifestError("The manifest exceeds 64000 bytes.")
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raise CanvasManifestError("The manifest starts with a UTF-8 byte-order mark; save it as UTF-8 without BOM.")
     try:
         value = json.loads(raw.decode("utf-8"), parse_constant=_reject_constant)
     except (UnicodeDecodeError, ValueError, RecursionError):

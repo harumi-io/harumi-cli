@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 import harumi.cli as cli
-from harumi.canvas_manifest import CanvasManifestError, read_manifest, validate_manifest
+from harumi.canvas_manifest import MAX_FILES, MAX_MANIFEST_BYTES, CanvasManifestError, read_manifest, validate_manifest
 
 VALID = {
     "version": 1,
@@ -18,9 +18,13 @@ VALID = {
 
 
 def test_valid_contract_matches_the_portable_examples():
+    assert MAX_FILES == 32
     validate_manifest(VALID)
     validate_manifest({**VALID, "version": 1.0, "capabilities": []})
     validate_manifest({"version": 1, "entry": "__proto__", "files": ["__proto__"], "capabilities": []})
+    validate_manifest({**VALID, "files": ["main.tsx"] + [f"f{i}.ts" for i in range(MAX_FILES - 1)]})
+    # v1 matches canvas-core and Microsoft's documented COM1-9/LPT1-9 list.
+    validate_manifest({**VALID, "files": ["main.tsx", "COM0.ts", "lpt0.ts"]})
 
 
 @pytest.mark.parametrize("invalid", [
@@ -31,6 +35,8 @@ def test_valid_contract_matches_the_portable_examples():
     {**VALID, "files": ["main.tsx", "main.tsx/child"]},
     {**VALID, "files": ["main.tsx", "../secret"]},
     {**VALID, "files": ["main.tsx", "CON.txt"]},
+    {**VALID, "files": ["main.tsx", "com1.ts"]},
+    {**VALID, "files": ["main.tsx", "LPT9.ts"]},
     {**VALID, "files": ["main.tsx", "dir/name."]},
     {**VALID, "files": ["main.tsx", "a\\b"]},
     {**VALID, "files": ["main.tsx", "café.tsx"]},
@@ -52,6 +58,30 @@ def test_local_read_rejects_invalid_or_oversized_json(tmp_path, raw):
     path.write_bytes(raw)
     with pytest.raises(CanvasManifestError):
         read_manifest(path)
+
+
+def test_local_read_accepts_exact_byte_limit_and_rejects_one_more(tmp_path):
+    path = tmp_path / "manifest.json"
+    assert MAX_MANIFEST_BYTES == 64_000
+    raw = json.dumps(VALID).encode("utf-8")
+    raw += b" " * (MAX_MANIFEST_BYTES - len(raw))
+    assert len(raw) == MAX_MANIFEST_BYTES
+    path.write_bytes(raw)
+    read_manifest(path)
+    path.write_bytes(raw + b" ")
+    with pytest.raises(CanvasManifestError, match="exceeds 64000 bytes"):
+        read_manifest(path)
+
+
+def test_utf8_bom_error_explains_how_to_fix_it(tmp_path):
+    path = tmp_path / "manifest.json"
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps(VALID).encode("utf-8"))
+    with pytest.raises(CanvasManifestError, match="byte-order mark.*without BOM"):
+        read_manifest(path)
+    result = CliRunner().invoke(cli.app, ["canvas", "validate-manifest", str(path)])
+    assert result.exit_code == 1
+    assert "byte-order mark" in result.output and "without BOM" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_named_pipe_is_rejected_without_waiting_for_a_writer(tmp_path):
