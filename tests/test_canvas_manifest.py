@@ -21,6 +21,8 @@ def test_valid_contract_matches_the_portable_examples():
     assert MAX_FILES == 32
     validate_manifest(VALID)
     validate_manifest({**VALID, "version": 1.0, "capabilities": []})
+    validate_manifest({**VALID, "capabilities": ["data.read", "inputs.write", "run.execute"]})
+    validate_manifest({**VALID, "capabilities": ["run.execute", "inputs.write"]})
     validate_manifest({"version": 1, "entry": "__proto__", "files": ["__proto__"], "capabilities": []})
     validate_manifest({**VALID, "files": ["main.tsx"] + [f"f{i}.ts" for i in range(MAX_FILES - 1)]})
     # v1 matches canvas-core and Microsoft's documented COM1-9/LPT1-9 list.
@@ -46,6 +48,10 @@ def test_valid_contract_matches_the_portable_examples():
     {**VALID, "entry": "MAIN.tsx"},
     {**VALID, "capabilities": ["run"]},
     {**VALID, "capabilities": ["data.read", "data.read"]},
+    {**VALID, "capabilities": ["inputs.write", "inputs.write"]},
+    {**VALID, "capabilities": ["data.read", "inputs.write", "run.execute", "data.read"]},
+    {**VALID, "capabilities": ["run.execute", {}]},
+    {**VALID, "capabilities": [True]},
 ])
 def test_invalid_declarations_are_rejected(invalid):
     with pytest.raises(CanvasManifestError):
@@ -97,6 +103,15 @@ def test_command_is_explicit_about_what_it_did_not_check(tmp_path, monkeypatch):
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(VALID), encoding="utf-8")
     # Named source files deliberately do not exist: no source read is implied.
+    monkeypatch.setattr(cli, "_get_client", lambda **_: pytest.fail("network client must not be created"))
+    result = CliRunner().invoke(cli.app, ["canvas", "validate-manifest", str(path)])
+    assert result.exit_code == 0, result.output
+    assert "Source files were not checked, compiled, rendered or published" in result.output
+
+
+def test_command_accepts_action_requests_without_reading_source_or_connecting(tmp_path, monkeypatch):
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps({**VALID, "capabilities": ["inputs.write", "run.execute"]}), encoding="utf-8")
     monkeypatch.setattr(cli, "_get_client", lambda **_: pytest.fail("network client must not be created"))
     result = CliRunner().invoke(cli.app, ["canvas", "validate-manifest", str(path)])
     assert result.exit_code == 0, result.output

@@ -13,6 +13,7 @@ from typing import Any
 
 MAX_MANIFEST_BYTES = 64_000
 MAX_FILES = 32
+_CAPABILITIES = frozenset({"data.read", "inputs.write", "run.execute"})
 _SEGMENT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*\Z")
 # Match canvas-core v1 and Microsoft's documented COM1–9 / LPT1–9 names.
 _WINDOWS_DEVICE = re.compile(r"(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)", re.IGNORECASE)
@@ -59,8 +60,13 @@ def validate_manifest(value: Any) -> None:
             raise CanvasManifestError("A source path cannot be both a file and a directory.")
     if entry not in files:
         raise CanvasManifestError("The entry must be one of the declared files.")
-    if not isinstance(capabilities, list) or len(capabilities) > 1 or any(c != "data.read" for c in capabilities):
-        raise CanvasManifestError("Only the data.read capability is supported.")
+    if (
+        not isinstance(capabilities, list)
+        or len(capabilities) > len(_CAPABILITIES)
+        or any(not isinstance(c, str) or c not in _CAPABILITIES for c in capabilities)
+        or len(set(capabilities)) != len(capabilities)
+    ):
+        raise CanvasManifestError("Capabilities must be unique supported requests: data.read, inputs.write, run.execute.")
 
 
 def read_manifest(path: Path) -> None:
