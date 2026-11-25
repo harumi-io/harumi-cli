@@ -366,7 +366,7 @@ The project's non-git file storage. A run finds these files under `inputs/` in i
 harumi canvas validate-manifest PATH
 ```
 
-Experimental, offline validation of a local canvas source declaration JSON, at most 64,000 bytes. It checks the declaration only: it does not read the named source files, compile, render or publish anything. Save the JSON as UTF-8 without a BOM. This command does not create a dashboard or establish deployed canvas support.
+Experimental, offline validation of a local canvas source declaration JSON, at most 64,000 bytes. It checks the declaration only: it does not read the named source files, compile, render or publish anything. Supported capability requests are `data.read`, `inputs.write` and `run.execute`, at most once each. A request is not a permission grant; action support still requires a trusted host and server authorization. Save the JSON as UTF-8 without a BOM. This command does not create a dashboard or establish deployed canvas support.
 
 ## `dashboard`
 
